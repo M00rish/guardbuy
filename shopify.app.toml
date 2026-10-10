@@ -48,3 +48,7 @@ api_version = "2026-10"
 
 [auth]
 redirect_urls = [ ]
+
+[build]
+# Point the app URL and redirect URLs at the current dev tunnel on every `shopify app dev`
+automatically_update_urls_on_dev = true
