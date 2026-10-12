@@ -14,10 +14,10 @@ export type StockCheck = {
   needsRestock: boolean;
 };
 
-/** Backfills sales history the first time a shop is seen, so the first stock check has data. */
+/** Backfills sales history until one backfill has fully completed for this shop. */
 export async function ensureSalesHistory(admin: AdminApiContext, shop: string) {
-  const hasHistory = await db.dailySales.findFirst({ where: { shop }, select: { sku: true } });
-  if (!hasHistory) await backfillSales(admin, shop);
+  const done = await db.salesBackfill.findUnique({ where: { shop } });
+  if (!done) await backfillSales(admin, shop);
 }
 
 /** Looks up the SKU behind an inventory item (webhook payloads only carry the item id). */

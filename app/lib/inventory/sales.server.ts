@@ -24,6 +24,7 @@ export async function backfillSales(admin: AdminApiContext, shop: string, days =
   const since = new Date(Date.now() - days * DAY_MS);
   const totals = new Map<string, number>(); // "sku|YYYY-MM-DD" -> units
   let cursor: string | null = null;
+  let orderCount = 0;
 
   type Page = {
     orders: {
@@ -47,6 +48,7 @@ export async function backfillSales(admin: AdminApiContext, shop: string, days =
       { variables: { cursor, query: `processed_at:>=${since.toISOString()}` } },
     );
     const { data }: { data: Page } = await res.json();
+    orderCount += data.orders.nodes.length;
     for (const order of data.orders.nodes) {
       const day = order.processedAt.slice(0, 10);
       for (const li of order.lineItems.nodes) {
@@ -58,15 +60,25 @@ export async function backfillSales(admin: AdminApiContext, shop: string, days =
     cursor = data.orders.pageInfo.hasNextPage ? data.orders.pageInfo.endCursor : null;
   } while (cursor);
 
+  console.log(`[sales] backfill ${shop}: ${orderCount} orders since ${since.toISOString().slice(0, 10)}`);
+
   const rows = [...totals].map(([key, units]) => {
     const [sku, day] = key.split("|");
     return { shop, sku, day: new Date(`${day}T00:00:00Z`), units };
   });
 
-  await db.$transaction([
-    db.dailySales.deleteMany({ where: { shop, day: { gte: utcDay(since) } } }),
-    db.dailySales.createMany({ data: rows }),
-  ]);
+  // Webhooks can arrive twice or concurrently: a per-shop lock serializes backfills, and the
+  // completion marker is written with the rows so a half-finished backfill never counts.
+  await db.$transaction(async (tx) => {
+    await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${shop}))`;
+    await tx.dailySales.deleteMany({ where: { shop, day: { gte: utcDay(since) } } });
+    await tx.dailySales.createMany({ data: rows });
+    await tx.salesBackfill.upsert({
+      where: { shop },
+      create: { shop, completedAt: new Date() },
+      update: { completedAt: new Date() },
+    });
+  });
   await pruneOldSales(shop);
   return rows.length;
 }

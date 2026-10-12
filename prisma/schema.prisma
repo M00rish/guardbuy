@@ -44,3 +44,10 @@ model DailySales {
 
   @@id([shop, sku, day])
 }
+
+// Marks a shop's sales history as fully loaded. Written in the same transaction as the
+// DailySales rows, so an interrupted or duplicated backfill never counts as complete.
+model SalesBackfill {
+  shop        String   @id
+  completedAt DateTime
+}
