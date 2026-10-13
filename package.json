@@ -24,6 +24,7 @@
     "node": ">=22.12"
   },
   "dependencies": {
+    "@ai-sdk/google": "^4.0.94",
     "@prisma/client": "^6.16.3",
     "@react-router/dev": "7.18.2",
     "@react-router/fs-routes": "7.18.2",
@@ -33,6 +34,7 @@
     "@shopify/cli": "4.9.0",
     "@shopify/shopify-app-react-router": "^3.0.0",
     "@shopify/shopify-app-session-storage-prisma": "^11.0.0",
+    "ai": "^7.0.138",
     "isbot": "^5.1.31",
     "prisma": "^6.16.3",
     "react": "^18.3.1",
