@@ -1,6 +1,7 @@
 // End-to-end check of the payout step + hash-chained audit log against the PayPal SANDBOX.
 // Uses a throwaway shop name and deletes its audit rows at the end.
 //   npx tsx scripts/check-payout-chain.ts
+export {};
 process.loadEnvFile(".env");
 
 const { default: db } = await import("../app/db.server");
