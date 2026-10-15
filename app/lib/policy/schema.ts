@@ -89,6 +89,15 @@ export const AuditEventSchema = z.discriminatedUnion("type", [
     decisionSeq: z.number().int(),
     payoutBatchId: z.string(),
     status: z.string(), // PayPal batch status at time of logging
+    amountCents: cents,
+  }),
+  // Later status changes for a payout (reconciliation); never edits the original payout entry.
+  z.object({
+    type: z.literal("payout_status"),
+    payoutSeq: z.number().int(),
+    status: z.string(),
+    transactionId: z.string().optional(),
+    confirmedByTransactionSearch: z.boolean().default(false),
   }),
 ]);
 export type AuditEvent = z.infer<typeof AuditEventSchema>;

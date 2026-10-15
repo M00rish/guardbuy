@@ -51,3 +51,17 @@ model SalesBackfill {
   shop        String   @id
   completedAt DateTime
 }
+
+// Append-only, hash-chained audit log (one chain per shop). Each entry's hash covers the
+// previous entry's hash, so editing or deleting any past row breaks every later hash.
+model AuditEntry {
+  shop     String
+  seq      Int
+  at       DateTime
+  type     String
+  event    Json
+  prevHash String
+  hash     String   @unique
+
+  @@id([shop, seq])
+}
