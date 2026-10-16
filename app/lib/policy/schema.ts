@@ -91,6 +91,24 @@ export const AuditEventSchema = z.discriminatedUnion("type", [
     status: z.string(), // PayPal batch status at time of logging
     amountCents: cents,
   }),
+  // Approval through PayPal: an Orders API order paying the supplier, approved by the merchant in PayPal.
+  z.object({
+    type: z.literal("order_created"),
+    decisionSeq: z.number().int(),
+    orderId: z.string(),
+    approveUrl: z.string().url(),
+    amountCents: cents,
+  }),
+  z.object({
+    type: z.literal("order_captured"),
+    decisionSeq: z.number().int(),
+    orderId: z.string(),
+    captureId: z.string(),
+    status: z.string(), // capture status, e.g. COMPLETED or PENDING
+    amountCents: cents,
+    payerId: z.string().optional(), // the PayPal account that approved the order
+    confirmedByGetOrder: z.boolean().default(false), // re-read through the Agent Toolkit after capture
+  }),
   // Later status changes for a payout (reconciliation); never edits the original payout entry.
   z.object({
     type: z.literal("payout_status"),

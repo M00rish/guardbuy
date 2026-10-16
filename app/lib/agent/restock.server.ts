@@ -69,14 +69,17 @@ export function policyContext(
   now = new Date(),
 ): PolicyContext {
   const offer = offersFor(proposal.sku).find((o) => o.supplierId === proposal.supplierId);
-  const payouts = log.filter((e) => e.event.type === "payout");
-  const since = (ms: number) => payouts.filter((e) => now.getTime() - Date.parse(e.at) < ms);
+  // Money that left: payouts plus captured PayPal orders.
+  const spent = log.flatMap((e) =>
+    e.event.type === "payout" || e.event.type === "order_captured" ? [{ at: e.at, cents: e.event.amountCents }] : [],
+  );
+  const since = (ms: number) => spent.filter((s) => now.getTime() - Date.parse(s.at) < ms);
 
   return {
     // An offer outside the catalog has no history: 0 makes the price check block it.
     avgUnitPrice30dCents: offer ? averagePrice(offer, now) : 0,
     usualQuantity: offer?.usualQuantity ?? 0,
-    spentLast7dCents: since(7 * DAY_MS).reduce((sum, e) => sum + (e.event.type === "payout" ? e.event.amountCents : 0), 0),
+    spentLast7dCents: since(7 * DAY_MS).reduce((sum, s) => sum + s.cents, 0),
     purchasesLast24h: since(DAY_MS).length,
     paypalBalanceCents: balanceCents,
   };
