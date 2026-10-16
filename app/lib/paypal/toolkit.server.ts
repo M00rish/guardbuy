@@ -1,4 +1,4 @@
-import { ALL_TOOLS_ENABLED, PayPalAgentToolkit } from "@paypal/agent-toolkit/ai-sdk";
+import { PayPalAgentToolkit } from "@paypal/agent-toolkit/ai-sdk";
 
 import { merchantCredentials } from "./client.server";
 
@@ -15,7 +15,8 @@ function toolkit(): Record<string, ToolkitTool> {
     tools = new PayPalAgentToolkit({
       clientId,
       clientSecret,
-      configuration: { actions: ALL_TOOLS_ENABLED, context: { sandbox: true } },
+      // Least privilege: only the two read-only tools GuardBuy calls. No refunds, payments or invoices.
+      configuration: { actions: { orders: { get: true }, transactions: { list: true } }, context: { sandbox: true } },
     }).getTools() as unknown as Record<string, ToolkitTool>;
   }
   return tools;

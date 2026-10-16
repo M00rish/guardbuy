@@ -23,13 +23,15 @@ export class PayPalError extends Error {
 }
 
 const tokens = new Map<string, { value: string; expiresAt: number }>();
-let lastRequestAt = 0;
+// Per PayPal account (client id), so one busy account can't slow every other account's payments.
+const lastRequestAt = new Map<string, number>();
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-async function throttle() {
-  const wait = lastRequestAt + MIN_INTERVAL_MS - Date.now();
-  lastRequestAt = Math.max(Date.now(), lastRequestAt + MIN_INTERVAL_MS);
+async function throttle(clientId: string) {
+  const last = lastRequestAt.get(clientId) ?? 0;
+  const wait = last + MIN_INTERVAL_MS - Date.now();
+  lastRequestAt.set(clientId, Math.max(Date.now(), last + MIN_INTERVAL_MS));
   if (wait > 0) await sleep(wait);
 }
 
@@ -61,7 +63,7 @@ export async function paypal<T>(
 ): Promise<T> {
   const creds = init.creds ?? merchantCredentials();
   for (let attempt = 1; ; attempt++) {
-    await throttle();
+    await throttle(creds.clientId);
     try {
       const res = await fetch(`${BASE}${path}`, {
         method: init.method ?? "GET",
