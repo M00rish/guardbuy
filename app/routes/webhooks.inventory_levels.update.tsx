@@ -1,6 +1,7 @@
 import type { ActionFunctionArgs } from "react-router";
 
 import { authenticate } from "../shopify.server";
+import { runRestock } from "../lib/agent/restock.server";
 import { checkStock, ensureSalesHistory, skuForInventoryItem } from "../lib/inventory/trigger.server";
 
 // Fires whenever stock changes (sales, restocks, manual edits). This is the agent's trigger.
@@ -21,7 +22,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       `${Number.isFinite(check.daysOfCover) ? check.daysOfCover.toFixed(1) : "∞"} days of cover` +
       (check.needsRestock ? " -> needs restock" : ""),
   );
-  // Next: hand `check` to the LLM proposer when needsRestock is true.
+  if (check.needsRestock) {
+    // Shopify retries webhooks that take over 5s, and the LLM + PayPal calls can, so answer now
+    // and let the restock run in the background (runRestock skips SKUs that already have one).
+    void runRestock(shop, check)
+      .then((r) => console.log(`[restock] ${shop} ${sku}: ${JSON.stringify(r)}`))
+      .catch((e) => console.error(`[restock] ${shop} ${sku} failed:`, e));
+  }
 
   return new Response();
 };
