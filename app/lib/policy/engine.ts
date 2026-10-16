@@ -1,4 +1,4 @@
-import type { Decision, Proposal, RuleCheck, RuleSet, Verdict } from "./schema";
+import type { Decision, RecordedProposal, RuleCheck, RuleSet, Verdict } from "./schema";
 import { hashOf } from "./hash";
 
 // Deterministic: same proposal + rules + context always gives the same decision.
@@ -18,7 +18,7 @@ const strictest = (verdicts: Verdict[]): Verdict =>
 
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
-export function evaluate(proposal: Proposal, rules: RuleSet, ctx: PolicyContext): Decision {
+export function evaluate(proposal: RecordedProposal, rules: RuleSet, ctx: PolicyContext): Decision {
   const total = proposal.unitPriceCents * proposal.quantity;
   const checks: RuleCheck[] = [];
   const check = (rule: string, failed: boolean, onFail: Verdict, detail: string) =>
@@ -27,6 +27,9 @@ export function evaluate(proposal: Proposal, rules: RuleSet, ctx: PolicyContext)
   const allowed = rules.supplierAllowlist.includes(proposal.supplierId);
   check("supplierAllowlist", !allowed, "block",
     allowed ? `${proposal.supplierId} is an approved supplier` : `${proposal.supplierId} is not on the approved supplier list`);
+
+  check("payeeOnFile", !proposal.payeeEmail, "block",
+    proposal.payeeEmail ? `pays ${proposal.payeeEmail}` : `no PayPal email on file for ${proposal.supplierId}`);
 
   const cap = rules.maxUnitPriceCents[proposal.sku];
   if (cap !== undefined) {

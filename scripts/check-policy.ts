@@ -1,7 +1,7 @@
 // Lightweight scenario checks for the policy engine (no test framework needed).
 //   npx tsx scripts/check-policy.ts
 import { evaluate, type PolicyContext } from "../app/lib/policy/engine";
-import { RuleSetSchema, type Proposal } from "../app/lib/policy/schema";
+import { RuleSetSchema, type RecordedProposal as Proposal } from "../app/lib/policy/schema";
 
 const rules = RuleSetSchema.parse({
   version: 1,
@@ -32,6 +32,7 @@ const coffee = (p: Partial<Proposal>): Proposal => ({
   unitPriceCents: 1119,
   quantity: 40,
   reasoning: "test",
+  payeeEmail: "supplier@example.com",
   ...p,
 });
 
@@ -45,6 +46,7 @@ const cases: [string, Proposal, Partial<PolicyContext>, string, string?][] = [
   ["6th purchase in 24h", coffee({}), { purchasesLast24h: 5 }, "block", "maxPurchasesPer24h"],
   ["weekly cap exceeded", coffee({}), { spentLast7dCents: 190_000 }, "block", "weeklySpendCap"],
   ["cash floor breached", coffee({}), { paypalBalanceCents: 120_000 }, "block", "cashFloor"],
+  ["no PayPal email on file for supplier", coffee({ payeeEmail: undefined }), {}, "block", "payeeOnFile"],
   ["balance unknown -> human approves", coffee({}), { paypalBalanceCents: null }, "approval", "cashFloor"],
 ];
 

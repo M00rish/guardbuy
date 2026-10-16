@@ -57,6 +57,15 @@ export const ProposalSchema = z.object({
 });
 export type Proposal = z.infer<typeof ProposalSchema>;
 
+// A proposal as GuardBuy records it: the LLM's output plus who gets paid, looked up by GuardBuy
+// (never by the LLM). Recording the payee puts it under the hash chain, and the executor pays
+// exactly this address. Optional only so entries written before Oct 16 still parse; the policy
+// engine blocks a proposal without one.
+export const RecordedProposalSchema = ProposalSchema.extend({
+  payeeEmail: z.string().email().optional(),
+});
+export type RecordedProposal = z.infer<typeof RecordedProposalSchema>;
+
 // ---------- Decision (what the policy engine returns) ----------
 
 export const VerdictSchema = z.enum(["auto", "approval", "block"]);
@@ -81,9 +90,13 @@ export type Decision = z.infer<typeof DecisionSchema>;
 
 export const AuditEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("ruleset_signed"), ruleSet: SignedRuleSetSchema }),
-  z.object({ type: z.literal("proposal"), proposal: ProposalSchema }),
+  z.object({ type: z.literal("proposal"), proposal: RecordedProposalSchema }),
+  // The LLM failed or timed out, so no proposal was made (the next stock change retries).
+  z.object({ type: z.literal("proposal_failed"), sku, reason: z.string() }),
   z.object({ type: z.literal("decision"), proposalSeq: z.number().int(), decision: DecisionSchema }),
   z.object({ type: z.literal("approved"), decisionSeq: z.number().int(), approvedBy: z.string() }),
+  // An approved decision could not be paid (PayPal error, refused payee, ...). Frees the SKU to retry.
+  z.object({ type: z.literal("payment_failed"), decisionSeq: z.number().int(), reason: z.string() }),
   z.object({
     type: z.literal("payout"),
     decisionSeq: z.number().int(),

@@ -2,8 +2,9 @@ import db from "../../db.server";
 import { appendAudit, auditEntries } from "../audit/log.server";
 import { paypal } from "../paypal/client.server";
 import { runPayPalTool } from "../paypal/toolkit.server";
-import type { AuditEntry } from "../policy/schema";
+import type { AuditEntry, RecordedProposal } from "../policy/schema";
 import { supplierById } from "../suppliers/catalog";
+import { supplierPaymentEmail } from "../suppliers/payees.server";
 
 // The only code that moves money. It never takes amounts or suppliers from callers:
 // everything comes from the hash-chained audit log, so money only moves for a proposal the
@@ -29,13 +30,18 @@ type PayPalOrder = {
 
 export class ExecutionRefused extends Error {}
 
-function supplierPayoutEmail(supplierId: string): string {
-  const supplier = supplierById(supplierId);
-  if (!supplier?.honest) throw new ExecutionRefused(`Refusing to pay supplier ${supplierId}`);
-  const key = `SUPPLIER_EMAIL_${supplierId.toUpperCase().replace(/-/g, "_")}`;
-  const email = process.env[key] ?? process.env.SUPPLIER_EMAIL; // demo: one sandbox account plays every honest supplier
-  if (!email) throw new Error("SUPPLIER_EMAIL not set");
-  return email;
+/**
+ * The address to pay: the payee recorded with the proposal (under the hash chain), and only if it
+ * still matches the supplier's address on file. A changed address means re-proposing, not paying.
+ */
+function payeeFor(proposal: RecordedProposal): string {
+  if (!supplierById(proposal.supplierId)?.honest) throw new ExecutionRefused(`Refusing to pay supplier ${proposal.supplierId}`);
+  if (!proposal.payeeEmail) throw new ExecutionRefused("The proposal has no recorded payee");
+  const current = supplierPaymentEmail(proposal.supplierId);
+  if (current?.toLowerCase() !== proposal.payeeEmail.toLowerCase()) {
+    throw new ExecutionRefused(`${proposal.supplierId}'s PayPal email changed after this purchase was proposed`);
+  }
+  return proposal.payeeEmail;
 }
 
 const toCents = (value: string) => Math.round(Number(value) * 100);
@@ -88,7 +94,7 @@ export async function executePurchase(shop: string, decisionSeq: number): Promis
       items: [
         {
           recipient_type: "EMAIL",
-          receiver: supplierPayoutEmail(proposal.supplierId),
+          receiver: payeeFor(proposal),
           amount: { value: (decision.totalCents / 100).toFixed(2), currency: "USD" },
           note: `GuardBuy PO ${shop} #${decisionSeq}: ${proposal.quantity} x ${proposal.sku} (rules ${decision.ruleSetHash.slice(0, 12)})`,
           sender_item_id: `po-${decisionSeq}`,
@@ -133,7 +139,7 @@ export async function createApprovalOrder(shop: string, decisionSeq: number, ret
           custom_id: requestId,
           description: `GuardBuy PO #${decisionSeq}: ${proposal.quantity} x ${proposal.sku}`.slice(0, 127),
           amount: { currency_code: "USD", value: (decision.totalCents / 100).toFixed(2) },
-          payee: { email_address: supplierPayoutEmail(proposal.supplierId) },
+          payee: { email_address: payeeFor(proposal) },
         },
       ],
       payment_source: {
@@ -189,7 +195,7 @@ async function capture(shop: string, decisionSeq: number): Promise<AuditEntry> {
   // The order must still pay the right supplier the right amount.
   if (toCents(cap.amount.value) !== amountCents) throw new Error(`Captured ${cap.amount.value}, expected ${amountCents / 100}`);
   const payee = unit?.payee?.email_address;
-  if (payee && payee.toLowerCase() !== supplierPayoutEmail(proposal.supplierId).toLowerCase()) {
+  if (payee && payee.toLowerCase() !== proposal.payeeEmail?.toLowerCase()) {
     throw new Error(`PayPal order ${orderId} pays an unexpected payee`);
   }
 

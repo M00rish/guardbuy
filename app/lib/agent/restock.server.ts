@@ -3,20 +3,26 @@ import type { StockCheck } from "../inventory/trigger.server";
 import { paypal } from "../paypal/client.server";
 import { evaluate, type PolicyContext } from "../policy/engine";
 import { hashOf } from "../policy/hash";
-import { RuleSetSchema, type AuditEntry, type Proposal, type RuleSet } from "../policy/schema";
+import { RuleSetSchema, type AuditEntry, type RecordedProposal, type RuleSet } from "../policy/schema";
 import { averagePrice, offersFor } from "../suppliers/catalog";
+import { supplierPaymentEmail } from "../suppliers/payees.server";
 import { executePurchase } from "./execute.server";
 import { proposePurchase } from "./proposer.server";
 
 // The restock loop: low stock -> LLM proposal -> policy decision -> payout (only if "auto").
 // Each step is written to the audit log before the next one runs, so the log always shows
-// how far a restock got and why it stopped.
+// how far a restock got and why it stopped. Failures are logged too, never dropped silently.
 
 const DAY_MS = 86_400_000;
 const OPEN_RESTOCK_MS = 3 * DAY_MS; // a paid or pending restock covers the SKU for this long (until stock-in-transit tracking)
-const RETRY_AFTER_BLOCK_MS = 60 * 60_000; // after a blocked proposal, wait before asking the LLM again
+const RETRY_AFTER_BLOCK_MS = 60 * 60_000; // after a blocked proposal or failed payment, wait before trying again
+const RETRY_AFTER_LLM_FAILURE_MS = 15 * 60_000; // after the LLM failed or timed out
+const IN_FLIGHT_MS = 10 * 60_000; // an "auto" decision with no payment result yet is still being paid
 
-/** Demo rules until merchants sign their own (merchant UI task). */
+// PayPal payout statuses (batch or item) meaning the supplier did not get, or did not keep, the money.
+const PAYOUT_FAILED = new Set(["DENIED", "CANCELED", "FAILED", "RETURNED", "BLOCKED", "REFUNDED", "REVERSED", "UNCLAIMED"]);
+
+/** Demo rules, signed by a script until merchants sign their own in the app (Oct 18). */
 export function defaultRuleSet(shop: string): RuleSet {
   return RuleSetSchema.parse({
     version: 1,
@@ -34,17 +40,17 @@ export function defaultRuleSet(shop: string): RuleSet {
   });
 }
 
-/** The latest signed rule set in the log; signs the demo defaults the first time. */
-export async function activeRuleSet(shop: string, log: AuditEntry[]): Promise<RuleSet> {
+/** The latest rule set the merchant signed, or null: without one, the agent buys nothing. */
+export function currentRuleSet(log: AuditEntry[]): RuleSet | null {
   const signed = log.filter((e) => e.event.type === "ruleset_signed").at(-1);
-  if (signed?.event.type === "ruleset_signed") return signed.event.ruleSet.rules;
+  return signed?.event.type === "ruleset_signed" ? signed.event.ruleSet.rules : null;
+}
 
-  const rules = defaultRuleSet(shop);
-  await appendAudit(shop, {
+export function signRuleSet(shop: string, rules: RuleSet, signedBy: string) {
+  return appendAudit(shop, {
     type: "ruleset_signed",
-    ruleSet: { rules, hash: hashOf(rules), signedBy: "guardbuy-defaults", signedAt: new Date().toISOString() },
+    ruleSet: { rules, hash: hashOf(rules), signedBy, signedAt: new Date().toISOString() },
   });
-  return rules;
 }
 
 /** PayPal available balance in cents, or null if it can't be read (the policy then asks a person). */
@@ -61,17 +67,27 @@ export async function paypalBalanceCents(): Promise<number | null> {
   }
 }
 
+/** When a payout's latest known status shows the money didn't reach (or stay with) the supplier. */
+function payoutFailedAt(payout: AuditEntry, log: AuditEntry[]): string | null {
+  if (payout.event.type !== "payout") return null;
+  const latest = log.filter((e) => e.event.type === "payout_status" && e.event.payoutSeq === payout.seq).at(-1);
+  if (latest?.event.type === "payout_status") return PAYOUT_FAILED.has(latest.event.status) ? latest.at : null;
+  return PAYOUT_FAILED.has(payout.event.status) ? payout.at : null;
+}
+
 /** Everything the policy engine needs, built from the audit log and the catalog. */
 export function policyContext(
-  proposal: Proposal,
+  proposal: RecordedProposal,
   log: AuditEntry[],
   balanceCents: number | null,
   now = new Date(),
 ): PolicyContext {
   const offer = offersFor(proposal.sku).find((o) => o.supplierId === proposal.supplierId);
-  // Money that left: payouts plus captured PayPal orders.
+  // Money that left: payouts that didn't fail, plus captured PayPal orders.
   const spent = log.flatMap((e) =>
-    e.event.type === "payout" || e.event.type === "order_captured" ? [{ at: e.at, cents: e.event.amountCents }] : [],
+    (e.event.type === "payout" && !payoutFailedAt(e, log)) || e.event.type === "order_captured"
+      ? [{ at: e.at, cents: e.event.amountCents }]
+      : [],
   );
   const since = (ms: number) => spent.filter((s) => now.getTime() - Date.parse(s.at) < ms);
 
@@ -85,24 +101,46 @@ export function policyContext(
   };
 }
 
-/** Why this SKU should not get a new proposal right now, or null if it should. */
+/**
+ * Why this SKU should not get a new proposal right now, or null if it should.
+ * Only a restock that is paid or waiting for approval keeps the SKU covered; a blocked proposal,
+ * a failed LLM call or a failed payment frees it again after a short wait.
+ */
 export function skipReason(sku: string, log: AuditEntry[], now = new Date()): string | null {
-  for (const p of log.filter((e) => e.event.type === "proposal" && e.event.proposal.sku === sku).reverse()) {
-    const age = now.getTime() - Date.parse(p.at);
-    const decision = log.find((e) => e.event.type === "decision" && e.event.proposalSeq === p.seq);
-    const verdict = decision?.event.type === "decision" ? decision.event.decision.verdict : undefined;
+  const last = log
+    .filter((e) => (e.event.type === "proposal" && e.event.proposal.sku === sku) || (e.event.type === "proposal_failed" && e.event.sku === sku))
+    .at(-1);
+  if (!last) return null;
+  const since = (at: string) => now.getTime() - Date.parse(at);
+  const wait = (at: string, ms: number, what: string) =>
+    since(at) < ms ? `${what} ${Math.round(since(at) / 60_000)} min ago; retrying after ${ms / 60_000} min` : null;
 
-    if (verdict === "block" || !decision) {
-      if (age < RETRY_AFTER_BLOCK_MS) return `proposal #${p.seq} was ${verdict ? "blocked" : "left undecided"} less than an hour ago`;
-      continue;
-    }
-    if (age < OPEN_RESTOCK_MS) return `restock #${p.seq} (${verdict}) is already open`;
+  if (last.event.type === "proposal_failed") return wait(last.at, RETRY_AFTER_LLM_FAILURE_MS, "the AI proposal failed");
+
+  const decision = log.find((e) => e.event.type === "decision" && e.event.proposalSeq === last.seq);
+  if (decision?.event.type !== "decision") return wait(last.at, RETRY_AFTER_LLM_FAILURE_MS, `proposal #${last.seq} was left undecided`);
+  const { verdict } = decision.event.decision;
+  if (verdict === "block") return wait(last.at, RETRY_AFTER_BLOCK_MS, `proposal #${last.seq} was blocked`);
+
+  const ofDecision = (type: string) =>
+    log.filter((e) => e.event.type === type && "decisionSeq" in e.event && e.event.decisionSeq === decision.seq);
+  const open = () => (since(last.at) < OPEN_RESTOCK_MS ? `restock #${last.seq} is already open` : null);
+
+  const payout = ofDecision("payout").at(-1);
+  if (payout) {
+    const failedAt = payoutFailedAt(payout, log);
+    return failedAt ? wait(failedAt, RETRY_AFTER_BLOCK_MS, `payout for #${last.seq} failed`) : open();
   }
-  return null;
+  if (ofDecision("order_captured").length) return open();
+  const failed = ofDecision("payment_failed").at(-1);
+  if (failed) return wait(failed.at, RETRY_AFTER_BLOCK_MS, `payment for #${last.seq} failed`);
+  if (verdict === "approval") return open(); // waiting for a person
+  // "auto" with no payment result: still being paid, or the server stopped mid-payment.
+  return wait(decision.at, IN_FLIGHT_MS, `restock #${last.seq} started paying`);
 }
 
 export type RestockResult =
-  | { outcome: "skipped"; reason: string }
+  | { outcome: "skipped" | "failed"; reason: string }
   | { outcome: "auto" | "approval" | "block"; proposalSeq: number; decisionSeq: number; payoutSeq?: number; error?: string };
 
 // One restock at a time per shop + SKU in this process. Webhooks for the same SKU arrive in bursts
@@ -119,18 +157,29 @@ export function runRestock(shop: string, check: StockCheck): Promise<RestockResu
   return job;
 }
 
+const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 300);
+
 async function restock(shop: string, check: StockCheck): Promise<RestockResult> {
   let log = await auditEntries(shop);
+  const rules = currentRuleSet(log);
+  if (!rules) return { outcome: "skipped", reason: "no signed rules yet, so the agent is off" };
+
   const skip = skipReason(check.sku, log);
   if (skip) return { outcome: "skipped", reason: skip };
-
-  const rules = await activeRuleSet(shop, log);
   if (check.daysOfCover >= rules.reorderBelowDaysOfCover) {
     return { outcome: "skipped", reason: `${check.daysOfCover.toFixed(1)} days of cover is above the rule's ${rules.reorderBelowDaysOfCover}` };
   }
 
-  // 1. The LLM proposes (untrusted).
-  const proposal = await proposePurchase({ check, rules });
+  // 1. The LLM proposes (untrusted). GuardBuy adds who gets paid; the LLM never supplies it.
+  let proposal: RecordedProposal;
+  try {
+    const proposed = await proposePurchase({ check, rules });
+    proposal = { ...proposed, payeeEmail: supplierPaymentEmail(proposed.supplierId) ?? undefined };
+  } catch (e) {
+    const reason = errorText(e);
+    await appendAudit(shop, { type: "proposal_failed", sku: check.sku, reason });
+    return { outcome: "failed", reason };
+  }
   const p = await appendAudit(shop, { type: "proposal", proposal });
 
   // 2. The policy engine decides (deterministic).
@@ -144,8 +193,9 @@ async function restock(shop: string, check: StockCheck): Promise<RestockResult> 
     try {
       result.payoutSeq = (await executePurchase(shop, d.seq)).seq;
     } catch (e) {
-      // The decision stays in the log; the payout can be retried for the same decision without paying twice.
-      result.error = (e as Error).message;
+      // Logged so the SKU is retried later; paying the same decision again can never pay twice.
+      result.error = errorText(e);
+      await appendAudit(shop, { type: "payment_failed", decisionSeq: d.seq, reason: result.error });
     }
   }
   return result;

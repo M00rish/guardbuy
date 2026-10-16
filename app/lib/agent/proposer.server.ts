@@ -8,7 +8,13 @@ import type { StockCheck } from "../inventory/trigger.server";
 // The LLM only *proposes*. Everything it sees about suppliers is untrusted data, and
 // whatever it returns is still checked by the deterministic policy engine before any money moves.
 
-const MODEL = process.env.GUARDBUY_LLM_MODEL ?? "gemini-3.8-flash";
+// Free-tier models get overloaded ("high demand", 503), newest first, so the next model takes over
+// when one fails. Older models were the ones still answering during the Oct 16 overload.
+const MODELS = (process.env.GUARDBUY_LLM_MODELS ?? "gemini-3.8-flash,gemini-3.5-flash,gemini-3.5-flash-lite")
+  .split(",")
+  .map((m) => m.trim())
+  .filter(Boolean);
+const TIMEOUT_MS = 60_000; // per model, including the SDK's own retries
 
 const SYSTEM = `You are GuardBuy's purchasing assistant for a small Shopify store.
 Given one product that is running low and the supplier offers for it, propose ONE purchase.
@@ -54,13 +60,7 @@ export async function proposePurchase({ check, rules, today = new Date() }: Prop
     offers,
   };
 
-  const { output: object } = await generateText({
-    model: google(MODEL),
-    output: Output.object({ schema: ProposalSchema }),
-    system: SYSTEM,
-    prompt: `Product and offers (JSON):\n${JSON.stringify(context, null, 2)}`,
-    temperature: 0.2,
-  });
+  const object = await generateProposal(`Product and offers (JSON):\n${JSON.stringify(context, null, 2)}`);
 
   // Bind the proposal to a real offer: the price always comes from the catalog, never from the LLM.
   const chosen = offers.find((o) => o.supplierId === object.supplierId);
@@ -68,4 +68,26 @@ export async function proposePurchase({ check, rules, today = new Date() }: Prop
     throw new Error(`LLM proposed an offer that does not exist: ${object.supplierId} / ${object.sku}`);
   }
   return { ...object, unitPriceCents: chosen.unitPriceTodayCents };
+}
+
+async function generateProposal(prompt: string) {
+  let lastError: unknown;
+  for (const model of MODELS) {
+    try {
+      const { output } = await generateText({
+        model: google(model),
+        output: Output.object({ schema: ProposalSchema }),
+        system: SYSTEM,
+        prompt,
+        temperature: 0.2,
+        maxRetries: 2,
+        abortSignal: AbortSignal.timeout(TIMEOUT_MS),
+      });
+      return output;
+    } catch (e) {
+      lastError = e;
+      console.warn(`[proposer] ${model} failed: ${(e as Error).message.slice(0, 200)}`);
+    }
+  }
+  throw lastError;
 }

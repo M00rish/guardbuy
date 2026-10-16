@@ -1,44 +1,104 @@
-// End-to-end check of the restock loop: low stock -> Gemini proposal -> policy -> sandbox payout -> audit.
-// Uses a throwaway shop and deletes its audit rows at the end.
+// Checks for the restock loop.
+//  1. Offline: when a SKU counts as covered, and when failures free it again (no network).
+//  2. Live: rules gate, Gemini proposal with recorded payee, sandbox payout, duplicate webhooks,
+//     payee change refused, Gemini failure logged. Uses a throwaway shop, deleted at the end.
 //   npx tsx scripts/check-restock.ts
 export {};
 process.loadEnvFile(".env");
 
 const { default: db } = await import("../app/db.server");
-const { auditEntries, verifyChain } = await import("../app/lib/audit/log.server");
-const { runRestock } = await import("../app/lib/agent/restock.server");
+const { appendAudit, auditEntries, verifyChain } = await import("../app/lib/audit/log.server");
+const { defaultRuleSet, policyContext, runRestock, signRuleSet, skipReason } = await import("../app/lib/agent/restock.server");
+const { executePurchase, ExecutionRefused } = await import("../app/lib/agent/execute.server");
+const { evaluate } = await import("../app/lib/policy/engine");
+type AuditEntry = import("../app/lib/policy/schema").AuditEntry;
+type AuditEvent = import("../app/lib/policy/schema").AuditEvent;
 
-const SHOP = "restock-check.guardbuy.test";
 let failed = 0;
 const ok = (cond: boolean, msg: string) => { console.log(`${cond ? "PASS" : "FAIL"}  ${msg}`); if (!cond) failed++; };
 
-await db.auditEntry.deleteMany({ where: { shop: SHOP } });
+// ---------- 1. Offline: restock states ----------
+console.log("-- restock states (offline)");
+const NOW = new Date("2026-10-16T12:00:00Z");
+const SKU = "COFFEE-HOUSE-1KG";
+const proposal = { sku: SKU, supplierId: "atlas-roasters", unitPriceCents: 1195, quantity: 30, reasoning: "x", payeeEmail: "s@example.com" };
+const decision = (verdict: "auto" | "approval" | "block") => ({ verdict, totalCents: 35_850, checks: [], ruleSetHash: "h" });
 
-// Same numbers as the dev store after seeding: 16 bags left, ~4 sold per day.
-const check = { sku: "COFFEE-HOUSE-1KG", available: 16, perDay: 4.03, daysOfCover: 16 / 4.03, needsRestock: true };
+/** Builds a log from [minutes ago, event] pairs (seq = position). */
+const logOf = (...items: [number, AuditEvent][]): AuditEntry[] =>
+  items.map(([minAgo, event], seq) => ({ seq, shop: "x", at: new Date(NOW.getTime() - minAgo * 60_000).toISOString(), event, prevHash: "", hash: "" }));
+const restockWith = (minAgo: number, verdict: "auto" | "approval" | "block", ...after: [number, AuditEvent][]) =>
+  logOf([minAgo, { type: "proposal", proposal }], [minAgo, { type: "decision", proposalSeq: 0, decision: decision(verdict) }], ...after);
+const payout = (minAgo: number, status: string): [number, AuditEvent] => [minAgo, { type: "payout", decisionSeq: 1, payoutBatchId: "B", status, amountCents: 35_850 }];
+const payoutStatus = (minAgo: number, status: string): [number, AuditEvent] => [minAgo, { type: "payout_status", payoutSeq: 2, status, confirmedByTransactionSearch: false }];
+
+const states: [string, AuditEntry[], boolean][] = [
+  ["nothing yet -> propose", [], false],
+  ["AI failed 5 min ago -> wait", logOf([5, { type: "proposal_failed", sku: SKU, reason: "timeout" }]), true],
+  ["AI failed 20 min ago -> retry", logOf([20, { type: "proposal_failed", sku: SKU, reason: "timeout" }]), false],
+  ["blocked 30 min ago -> wait", restockWith(30, "block"), true],
+  ["blocked 2h ago -> retry", restockWith(120, "block"), false],
+  ["paid 1 day ago -> covered", restockWith(1440, "auto", payout(1440, "PENDING")), true],
+  ["paid 4 days ago -> propose again", restockWith(5760, "auto", payout(5760, "SUCCESS")), false],
+  ["payout RETURNED 2h ago -> retry", restockWith(1440, "auto", payout(1440, "PENDING"), payoutStatus(120, "RETURNED")), false],
+  ["payout UNCLAIMED 10 min ago -> wait", restockWith(1440, "auto", payout(1440, "PENDING"), payoutStatus(10, "UNCLAIMED")), true],
+  ["payout went PENDING -> SUCCESS -> covered", restockWith(1440, "auto", payout(1440, "PENDING"), payoutStatus(600, "SUCCESS")), true],
+  ["payment failed 10 min ago -> wait", restockWith(15, "auto", [10, { type: "payment_failed", decisionSeq: 1, reason: "PayPal 500" }]), true],
+  ["payment failed 2h ago -> retry", restockWith(130, "auto", [120, { type: "payment_failed", decisionSeq: 1, reason: "PayPal 500" }]), false],
+  ["waiting for approval 1 day -> covered", restockWith(1440, "approval"), true],
+  ["auto, still paying (2 min) -> wait", restockWith(2, "auto"), true],
+  ["auto, never paid (30 min) -> retry", restockWith(30, "auto"), false],
+];
+for (const [name, log, skip] of states) {
+  const reason = skipReason(SKU, log, NOW);
+  ok(!!reason === skip, `${name.padEnd(44)} ${reason ?? "(propose)"}`);
+}
+const ctx = policyContext(proposal, restockWith(1440, "auto", payout(1440, "PENDING"), payoutStatus(120, "RETURNED")), 500_000, NOW);
+ok(ctx.spentLast7dCents === 0 && ctx.purchasesLast24h === 0, "a returned payout doesn't count toward spend caps");
+
+// ---------- 2. Live ----------
+console.log("-- live (Gemini + PayPal sandbox)");
+const SHOP = "restock-check.guardbuy.test";
+await db.auditEntry.deleteMany({ where: { shop: SHOP } });
+const check = { sku: SKU, available: 16, perDay: 4.03, daysOfCover: 16 / 4.03, needsRestock: true };
+
+const off = await runRestock(SHOP, check);
+ok(off.outcome === "skipped" && off.reason.includes("agent is off"), `no signed rules -> ${off.outcome === "skipped" ? off.reason : off.outcome}`);
+await signRuleSet(SHOP, defaultRuleSet(SHOP), "restock-check");
 
 // Two webhooks at once: only one restock may run.
 const [first, second] = await Promise.all([runRestock(SHOP, check), runRestock(SHOP, check)]);
 console.log("first: ", JSON.stringify(first));
-console.log("second:", JSON.stringify(second));
-ok(first.outcome !== "skipped", `restock ran: ${first.outcome}`);
+ok(first.outcome === "auto" && first.payoutSeq !== undefined && !first.error, `restock ran and paid: ${first.outcome}${"error" in first && first.error ? ` (${first.error})` : ""}`);
 ok(second.outcome === "skipped", "concurrent webhook was skipped");
-if (first.outcome === "auto") ok(first.payoutSeq !== undefined && !first.error, `paid (payout entry #${first.payoutSeq})${first.error ? ` error: ${first.error}` : ""}`);
+const log = await auditEntries(SHOP);
+const recorded = log.find((e) => e.event.type === "proposal");
+ok(recorded?.event.type === "proposal" && recorded.event.proposal.payeeEmail === process.env.SUPPLIER_EMAIL, "payee recorded with the proposal");
 
 const later = await runRestock(SHOP, check);
-ok(later.outcome === "skipped", `next webhook skipped: ${later.outcome === "skipped" ? later.reason : later.outcome}`);
+ok(later.outcome === "skipped" && later.reason.includes("already open"), `next webhook skipped: ${later.outcome === "skipped" ? later.reason : later.outcome}`);
 
-for (const e of await auditEntries(SHOP)) {
-  const ev = e.event;
-  const line =
-    ev.type === "proposal" ? `${ev.proposal.quantity} x ${ev.proposal.sku} from ${ev.proposal.supplierId} @ $${(ev.proposal.unitPriceCents / 100).toFixed(2)} | ${ev.proposal.reasoning}` :
-    ev.type === "decision" ? `${ev.decision.verdict} $${(ev.decision.totalCents / 100).toFixed(2)} | ` + ev.decision.checks.filter((c) => c.outcome !== "auto").map((c) => `${c.rule}: ${c.detail}`).join("; ") :
-    ev.type === "payout" ? `batch ${ev.payoutBatchId} ${ev.status} $${(ev.amountCents / 100).toFixed(2)}` :
-    ev.type === "ruleset_signed" ? `rules ${ev.ruleSet.hash.slice(0, 12)} by ${ev.ruleSet.signedBy}` : "";
-  console.log(`  #${e.seq} ${ev.type.padEnd(14)} ${line}`);
-}
+// Supplier's PayPal email changes after a purchase was proposed: the executor refuses to pay.
+const p = await appendAudit(SHOP, { type: "proposal", proposal: { ...proposal, quantity: 1, payeeEmail: process.env.SUPPLIER_EMAIL } });
+const ruleSet = defaultRuleSet(SHOP);
+const d = await appendAudit(SHOP, { type: "decision", proposalSeq: p.seq, decision: evaluate({ ...proposal, quantity: 1, payeeEmail: process.env.SUPPLIER_EMAIL }, ruleSet, { avgUnitPrice30dCents: 1195, usualQuantity: 40, spentLast7dCents: 0, purchasesLast24h: 0, paypalBalanceCents: 500_000 }) });
+process.env.SUPPLIER_EMAIL_ATLAS_ROASTERS = "new-address@example.com";
+const refusal = await executePurchase(SHOP, d.seq).then(() => "paid", (e) => (e instanceof ExecutionRefused ? e.message : `other: ${e}`));
+delete process.env.SUPPLIER_EMAIL_ATLAS_ROASTERS;
+ok(refusal.includes("changed"), `payee changed -> refused: ${refusal}`);
+
+// Gemini fails: logged as proposal_failed, and the SKU waits before retrying.
+const realKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+process.env.GOOGLE_GENERATIVE_AI_API_KEY = "invalid-key-for-check";
+const mugs = { sku: "MUG-STONE", available: 3, perDay: 1.5, daysOfCover: 2, needsRestock: true };
+const broken = await runRestock(SHOP, mugs);
+process.env.GOOGLE_GENERATIVE_AI_API_KEY = realKey;
+ok(broken.outcome === "failed", `Gemini failure -> ${broken.outcome}`);
+ok((await auditEntries(SHOP)).some((e) => e.event.type === "proposal_failed" && e.event.sku === "MUG-STONE"), "failure written to the audit log");
+const retry = await runRestock(SHOP, mugs);
+ok(retry.outcome === "skipped" && retry.reason.includes("failed"), `right after a failure -> ${retry.outcome === "skipped" ? retry.reason : retry.outcome}`);
+
 ok((await verifyChain(SHOP)).valid, "audit chain valid");
-
 await db.auditEntry.deleteMany({ where: { shop: SHOP } });
 await db.$disconnect();
 process.exit(failed ? 1 : 0);

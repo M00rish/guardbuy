@@ -7,7 +7,7 @@ process.loadEnvFile(".env");
 
 const { default: db } = await import("../app/db.server");
 const { appendAudit, auditEntries, verifyChain } = await import("../app/lib/audit/log.server");
-const { activeRuleSet, paypalBalanceCents, policyContext } = await import("../app/lib/agent/restock.server");
+const { defaultRuleSet, paypalBalanceCents, policyContext, signRuleSet } = await import("../app/lib/agent/restock.server");
 const { captureApprovalOrder, createApprovalOrder, executePurchase, ExecutionRefused } = await import("../app/lib/agent/execute.server");
 const { evaluate } = await import("../app/lib/policy/engine");
 
@@ -20,10 +20,11 @@ const cmd = process.argv[2];
 if (cmd === "create") {
   if (!process.env.APP_URL) throw new Error("Set APP_URL to the dev tunnel URL");
   await db.auditEntry.deleteMany({ where: { shop: SHOP } });
-  const rules = await activeRuleSet(SHOP, []);
+  const rules = defaultRuleSet(SHOP);
+  await signRuleSet(SHOP, rules, "approval-check");
 
   // 46 bags at $11.95 = $549.70: over the $500 limit, so a person must approve.
-  const proposal = { sku: "COFFEE-HOUSE-1KG", supplierId: "atlas-roasters", unitPriceCents: 1195, quantity: 46, reasoning: "approval check" };
+  const proposal = { sku: "COFFEE-HOUSE-1KG", supplierId: "atlas-roasters", unitPriceCents: 1195, quantity: 46, reasoning: "approval check", payeeEmail: process.env.SUPPLIER_EMAIL };
   const p = await appendAudit(SHOP, { type: "proposal", proposal });
   const decision = evaluate(proposal, rules, policyContext(proposal, await auditEntries(SHOP), await paypalBalanceCents()));
   const d = await appendAudit(SHOP, { type: "decision", proposalSeq: p.seq, decision });

@@ -25,7 +25,7 @@ let failed = 0;
 const ok = (cond: boolean, msg: string) => { console.log(`${cond ? "PASS" : "FAIL"}  ${msg}`); if (!cond) failed++; };
 
 async function propose(supplierId: string, quantity: number, unitPriceCents: number) {
-  const proposal = { sku: "COFFEE-HOUSE-1KG", supplierId, unitPriceCents, quantity, reasoning: "chain check" };
+  const proposal = { sku: "COFFEE-HOUSE-1KG", supplierId, unitPriceCents, quantity, reasoning: "chain check", payeeEmail: process.env.SUPPLIER_EMAIL };
   const p = await appendAudit(SHOP, { type: "proposal", proposal });
   const decision = evaluate(proposal, rules, ctx);
   const d = await appendAudit(SHOP, { type: "decision", proposalSeq: p.seq, decision });
