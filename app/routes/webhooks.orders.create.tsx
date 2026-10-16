@@ -1,21 +1,23 @@
 import type { ActionFunctionArgs } from "react-router";
 
 import { authenticate } from "../shopify.server";
-import { recordSale } from "../lib/inventory/sales.server";
+import { recordSalesOnce } from "../lib/inventory/sales.server";
 
-// Keeps daily sales totals current. Only SKU, quantity and date are read from the order.
+// Keeps daily sales totals current. Only variant, quantity and date are read from the order.
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { shop, payload } = await authenticate.webhook(request);
+  const { shop, topic, payload, eventId, webhookId } = await authenticate.webhook(request);
   const order = payload as {
     processed_at?: string;
     created_at: string;
-    line_items: { sku: string | null; quantity: number }[];
+    line_items: { variant_id: number | null; quantity: number }[];
   };
 
-  const at = new Date(order.processed_at ?? order.created_at);
-  for (const li of order.line_items) {
-    if (li.sku) await recordSale(shop, li.sku, at, li.quantity);
-  }
-
+  await recordSalesOnce(
+    shop,
+    eventId ?? webhookId,
+    topic,
+    new Date(order.processed_at ?? order.created_at),
+    order.line_items.map((li) => ({ variantId: li.variant_id, units: li.quantity })),
+  );
   return new Response();
 };

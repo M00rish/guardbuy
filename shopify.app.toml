@@ -51,10 +51,15 @@ api_version = "2026-10"
   uri = "/webhooks/inventory_levels/update"
   topics = [ "inventory_levels/update" ]
 
-  # Keeps daily sales totals current (SKU, quantity and date only)
+  # Keeps daily sales totals current (variant, quantity and date only)
   [[webhooks.subscriptions]]
   uri = "/webhooks/orders/create"
   topics = [ "orders/create" ]
+
+  # Refunds and cancellations take units back out of the sales totals
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/refunds/create"
+  topics = [ "refunds/create" ]
 
 [auth]
 redirect_urls = [ ]

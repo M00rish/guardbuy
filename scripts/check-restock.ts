@@ -60,7 +60,7 @@ ok(ctx.spentLast7dCents === 0 && ctx.purchasesLast24h === 0, "a returned payout 
 console.log("-- live (Gemini + PayPal sandbox)");
 const SHOP = "restock-check.guardbuy.test";
 await db.auditEntry.deleteMany({ where: { shop: SHOP } });
-const check = { sku: SKU, available: 16, perDay: 4.03, daysOfCover: 16 / 4.03, needsRestock: true };
+const check = { variantId: "test-coffee", sku: SKU, available: 16, perDay: 4.03, daysOfCover: 16 / 4.03, needsRestock: true };
 
 const off = await runRestock(SHOP, check);
 ok(off.outcome === "skipped" && off.reason.includes("agent is off"), `no signed rules -> ${off.outcome === "skipped" ? off.reason : off.outcome}`);
@@ -90,7 +90,7 @@ ok(refusal.includes("changed"), `payee changed -> refused: ${refusal}`);
 // Gemini fails: logged as proposal_failed, and the SKU waits before retrying.
 const realKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
 process.env.GOOGLE_GENERATIVE_AI_API_KEY = "invalid-key-for-check";
-const mugs = { sku: "MUG-STONE", available: 3, perDay: 1.5, daysOfCover: 2, needsRestock: true };
+const mugs = { variantId: "test-mug", sku: "MUG-STONE", available: 3, perDay: 1.5, daysOfCover: 2, needsRestock: true };
 const broken = await runRestock(SHOP, mugs);
 process.env.GOOGLE_GENERATIVE_AI_API_KEY = realKey;
 ok(broken.outcome === "failed", `Gemini failure -> ${broken.outcome}`);

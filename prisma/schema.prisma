@@ -34,15 +34,27 @@ model Session {
   refreshTokenExpires DateTime?
 }
 
-// Units sold per SKU per UTC day. Only aggregates are stored (no order or customer data),
-// and rows older than 90 days are deleted (see app/lib/inventory/sales.server.ts).
+// Net units sold per product variant per UTC day (sales minus refunds). Only aggregates are stored
+// (no order or customer data), and rows older than 90 days are deleted (see app/lib/inventory/sales.server.ts).
+// Keyed by Shopify's numeric variant id: SKUs can be blank or shared by several variants.
 model DailySales {
-  shop  String
-  sku   String
-  day   DateTime @db.Date
-  units Int
+  shop      String
+  variantId String
+  day       DateTime @db.Date
+  units     Int
 
-  @@id([shop, sku, day])
+  @@id([shop, variantId, day])
+}
+
+// Webhooks Shopify already delivered (it can send the same event more than once). Recorded in the
+// same transaction as the sales change, so a duplicate is never counted twice. Pruned after 7 days.
+model ProcessedWebhook {
+  eventId    String
+  topic      String
+  shop       String
+  receivedAt DateTime @default(now())
+
+  @@id([eventId, topic])
 }
 
 // Marks a shop's sales history as fully loaded. Written in the same transaction as the
