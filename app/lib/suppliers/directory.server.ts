@@ -45,6 +45,11 @@ export async function offersForVariant(shop: string, variantId: string, today = 
   });
 }
 
+export async function supplierNames(shop: string) {
+  const rows = await db.supplier.findMany({ where: { shop }, select: { id: true, name: true } });
+  return new Map(rows.map((r) => [r.id, r.name]));
+}
+
 /** Where a supplier gets paid right now, or null if none is on file (or it isn't a valid email). */
 export async function supplierPaymentEmail(shop: string, supplierId: string) {
   const supplier = await db.supplier.findUnique({ where: { shop_id: { shop, id: supplierId } } });

@@ -1,6 +1,7 @@
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
 import db from "../../db.server";
+import { TX_OPTIONS } from "../audit/log.server";
 
 // Sales history is kept as net daily totals per variant only: no order IDs, prices or customer data.
 export const SALES_WINDOW_DAYS = 30;
@@ -35,7 +36,7 @@ export async function recordSalesOnce(shop: string, eventId: string, topic: stri
       });
     }
     return true;
-  });
+  }, TX_OPTIONS);
 }
 
 /** Forgets delivered webhook ids after a week (Shopify stops retrying long before that). */
@@ -106,7 +107,7 @@ export async function backfillSales(admin: AdminApiContext, shop: string, days =
       create: { shop, completedAt: new Date() },
       update: { completedAt: new Date() },
     });
-  });
+  }, TX_OPTIONS);
   await pruneOldSales(shop);
   await pruneProcessedWebhooks();
   return rows.length;

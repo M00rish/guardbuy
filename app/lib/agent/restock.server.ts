@@ -16,6 +16,7 @@ const DAY_MS = 86_400_000;
 const OPEN_RESTOCK_MS = 3 * DAY_MS; // a paid or pending restock covers the SKU for this long (until stock-in-transit tracking)
 const RETRY_AFTER_BLOCK_MS = 60 * 60_000; // after a blocked proposal or failed payment, wait before trying again
 const RETRY_AFTER_LLM_FAILURE_MS = 15 * 60_000; // after the LLM failed or timed out
+const RETRY_AFTER_REJECT_MS = DAY_MS; // the merchant said no: don't ask again the same day
 const IN_FLIGHT_MS = 10 * 60_000; // an "auto" decision with no payment result yet is still being paid
 
 // PayPal payout statuses (batch or item) meaning the supplier did not get, or did not keep, the money.
@@ -136,6 +137,8 @@ export function skipReason(item: { variantId: string; sku: string }, log: AuditE
     return failedAt ? wait(failedAt, RETRY_AFTER_BLOCK_MS, `payout for #${last.seq} failed`) : open();
   }
   if (ofDecision("order_captured").length) return open();
+  const rejected = ofDecision("rejected").at(-1);
+  if (rejected) return wait(rejected.at, RETRY_AFTER_REJECT_MS, `restock #${last.seq} was declined`);
   const failed = ofDecision("payment_failed").at(-1);
   if (failed) return wait(failed.at, RETRY_AFTER_BLOCK_MS, `payment for #${last.seq} failed`);
   if (verdict === "approval") return open(); // waiting for a person

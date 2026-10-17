@@ -4,6 +4,10 @@ import { AuditEventSchema, type AuditEntry, type AuditEvent } from "../policy/sc
 
 export const GENESIS_HASH = "0".repeat(64);
 
+// Prisma's default 5s limit is too tight when Neon's free tier is waking up; a timed-out write
+// rolls back cleanly (nothing half-written), but the caller then has to retry.
+export const TX_OPTIONS = { maxWait: 15_000, timeout: 20_000 };
+
 export function entryHash(prevHash: string, entry: { seq: number; shop: string; at: string; event: AuditEvent }) {
   return sha256Hex(prevHash + canonicalJson(entry));
 }
@@ -25,7 +29,7 @@ export async function appendAudit(shop: string, event: AuditEvent): Promise<Audi
       data: { shop, seq, at: new Date(at), type: parsed.type, event: parsed as object, prevHash, hash },
     });
     return { seq, shop, at, event: parsed, prevHash, hash };
-  });
+  }, TX_OPTIONS);
 }
 
 export async function auditEntries(shop: string): Promise<AuditEntry[]> {
