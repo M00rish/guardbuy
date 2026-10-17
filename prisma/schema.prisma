@@ -11,25 +11,25 @@ generator client {
 datasource db {
   provider  = "postgresql"
   url       = env("DATABASE_URL") // Neon pooled connection
-  directUrl = env("DIRECT_URL")   // Neon direct connection, used by migrations
+  directUrl = env("DIRECT_URL") // Neon direct connection, used by migrations
 }
 
 model Session {
-  id            String    @id
-  shop          String
-  state         String
-  isOnline      Boolean   @default(false)
-  scope         String?
-  expires       DateTime?
-  accessToken   String
-  userId        BigInt?
-  firstName     String?
-  lastName      String?
-  email         String?
-  accountOwner  Boolean   @default(false)
-  locale        String?
-  collaborator  Boolean?  @default(false)
-  emailVerified Boolean?  @default(false)
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
   refreshToken        String?
   refreshTokenExpires DateTime?
 }
@@ -76,4 +76,48 @@ model AuditEntry {
   hash     String   @unique
 
   @@id([shop, seq])
+}
+
+// Products the merchant lets GuardBuy restock. Nothing is ever bought for a variant that isn't managed.
+model ManagedProduct {
+  shop      String
+  variantId String // Shopify numeric variant id
+  sku       String?
+  title     String
+  managed   Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+
+  @@id([shop, variantId])
+}
+
+// The merchant's suppliers. GuardBuy pays them at paypalEmail; emailChangedAt records the last change
+// (a changed payment address is the classic supplier-fraud move, so the policy can react to it).
+model Supplier {
+  shop           String
+  id             String // slug, unique per shop
+  name           String
+  paypalEmail    String
+  emailChangedAt DateTime @default(now())
+  createdAt      DateTime @default(now())
+
+  products ProductSupplier[]
+
+  @@id([shop, id])
+}
+
+// Which supplier sells which product, on terms the merchant sets.
+model ProductSupplier {
+  shop            String
+  variantId       String
+  supplierId      String
+  unitPriceCents  Int
+  usualQuantity   Int
+  leadTimeDays    Int
+  preferred       Boolean @default(false)
+  note            String  @default("") // written by the supplier: untrusted, shown to the AI as data only
+  simulatedPrices Boolean @default(false) // demo only: price varies ±6% by day, standing in for a live price feed
+
+  supplier Supplier @relation(fields: [shop, supplierId], references: [shop, id], onDelete: Cascade)
+
+  @@id([shop, variantId, supplierId])
 }

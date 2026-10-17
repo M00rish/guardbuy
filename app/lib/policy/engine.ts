@@ -5,6 +5,8 @@ import { hashOf } from "./hash";
 // No network, no LLM, no clock reads. Everything the rules need is passed in.
 
 export type PolicyContext = {
+  productManaged: boolean; // the merchant switched this product on for GuardBuy
+  supplierLinked: boolean; // the supplier is one the merchant linked to this product
   avgUnitPrice30dCents: number; // this SKU at this supplier
   usualQuantity: number; // this SKU at this supplier
   spentLast7dCents: number; // auto + approved purchases, rolling 7 days
@@ -23,6 +25,11 @@ export function evaluate(proposal: RecordedProposal, rules: RuleSet, ctx: Policy
   const checks: RuleCheck[] = [];
   const check = (rule: string, failed: boolean, onFail: Verdict, detail: string) =>
     checks.push({ rule, outcome: failed ? onFail : "auto", detail });
+
+  check("productManaged", !ctx.productManaged, "block",
+    ctx.productManaged ? `${proposal.sku} is managed by GuardBuy` : `${proposal.sku} is not switched on for GuardBuy`);
+  check("supplierLinked", !ctx.supplierLinked, "block",
+    ctx.supplierLinked ? `${proposal.supplierId} supplies ${proposal.sku}` : `${proposal.supplierId} is not one of your suppliers for ${proposal.sku}`);
 
   const allowed = rules.supplierAllowlist.includes(proposal.supplierId);
   check("supplierAllowlist", !allowed, "block",

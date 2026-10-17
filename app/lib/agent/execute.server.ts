@@ -3,8 +3,7 @@ import { appendAudit, auditEntries } from "../audit/log.server";
 import { paypal } from "../paypal/client.server";
 import { runPayPalTool } from "../paypal/toolkit.server";
 import type { AuditEntry, RecordedProposal } from "../policy/schema";
-import { supplierById } from "../suppliers/catalog";
-import { supplierPaymentEmail } from "../suppliers/payees.server";
+import { supplierPaymentEmail } from "../suppliers/directory.server";
 
 // The only code that moves money. It never takes amounts or suppliers from callers:
 // everything comes from the hash-chained audit log, so money only moves for a proposal the
@@ -34,10 +33,9 @@ export class ExecutionRefused extends Error {}
  * The address to pay: the payee recorded with the proposal (under the hash chain), and only if it
  * still matches the supplier's address on file. A changed address means re-proposing, not paying.
  */
-function payeeFor(proposal: RecordedProposal): string {
-  if (!supplierById(proposal.supplierId)?.honest) throw new ExecutionRefused(`Refusing to pay supplier ${proposal.supplierId}`);
+async function payeeFor(shop: string, proposal: RecordedProposal): Promise<string> {
   if (!proposal.payeeEmail) throw new ExecutionRefused("The proposal has no recorded payee");
-  const current = supplierPaymentEmail(proposal.supplierId);
+  const current = await supplierPaymentEmail(shop, proposal.supplierId);
   if (current?.toLowerCase() !== proposal.payeeEmail.toLowerCase()) {
     throw new ExecutionRefused(`${proposal.supplierId}'s PayPal email changed after this purchase was proposed`);
   }
@@ -94,7 +92,7 @@ export async function executePurchase(shop: string, decisionSeq: number): Promis
       items: [
         {
           recipient_type: "EMAIL",
-          receiver: payeeFor(proposal),
+          receiver: await payeeFor(shop, proposal),
           amount: { value: (decision.totalCents / 100).toFixed(2), currency: "USD" },
           note: `GuardBuy PO ${shop} #${decisionSeq}: ${proposal.quantity} x ${proposal.sku} (rules ${decision.ruleSetHash.slice(0, 12)})`,
           sender_item_id: `po-${decisionSeq}`,
@@ -139,7 +137,7 @@ export async function createApprovalOrder(shop: string, decisionSeq: number, ret
           custom_id: requestId,
           description: `GuardBuy PO #${decisionSeq}: ${proposal.quantity} x ${proposal.sku}`.slice(0, 127),
           amount: { currency_code: "USD", value: (decision.totalCents / 100).toFixed(2) },
-          payee: { email_address: payeeFor(proposal) },
+          payee: { email_address: await payeeFor(shop, proposal) },
         },
       ],
       payment_source: {

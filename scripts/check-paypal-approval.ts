@@ -10,6 +10,7 @@ const { appendAudit, auditEntries, verifyChain } = await import("../app/lib/audi
 const { defaultRuleSet, paypalBalanceCents, policyContext, signRuleSet } = await import("../app/lib/agent/restock.server");
 const { captureApprovalOrder, createApprovalOrder, executePurchase, ExecutionRefused } = await import("../app/lib/agent/execute.server");
 const { evaluate } = await import("../app/lib/policy/engine");
+const { deleteDirectory, offersForVariant, seedDemoCatalog } = await import("../app/lib/suppliers/directory.server");
 
 const SHOP = "approval-check.guardbuy.test";
 let failed = 0;
@@ -20,13 +21,15 @@ const cmd = process.argv[2];
 if (cmd === "create") {
   if (!process.env.APP_URL) throw new Error("Set APP_URL to the dev tunnel URL");
   await db.auditEntry.deleteMany({ where: { shop: SHOP } });
+  await deleteDirectory(SHOP);
+  await seedDemoCatalog(SHOP, { "COFFEE-HOUSE-1KG": "test-coffee" }, process.env.SUPPLIER_EMAIL!);
   const rules = defaultRuleSet(SHOP);
   await signRuleSet(SHOP, rules, "approval-check");
 
   // 46 bags at $11.95 = $549.70: over the $500 limit, so a person must approve.
-  const proposal = { sku: "COFFEE-HOUSE-1KG", supplierId: "atlas-roasters", unitPriceCents: 1195, quantity: 46, reasoning: "approval check", payeeEmail: process.env.SUPPLIER_EMAIL };
+  const proposal = { sku: "COFFEE-HOUSE-1KG", supplierId: "atlas-roasters", unitPriceCents: 1195, quantity: 46, reasoning: "approval check", variantId: "test-coffee", payeeEmail: process.env.SUPPLIER_EMAIL };
   const p = await appendAudit(SHOP, { type: "proposal", proposal });
-  const decision = evaluate(proposal, rules, policyContext(proposal, await auditEntries(SHOP), await paypalBalanceCents()));
+  const decision = evaluate(proposal, rules, policyContext(proposal, await auditEntries(SHOP), await paypalBalanceCents(), { managed: true, offers: await offersForVariant(SHOP, "test-coffee") }));
   const d = await appendAudit(SHOP, { type: "decision", proposalSeq: p.seq, decision });
   ok(decision.verdict === "approval", `$${(decision.totalCents / 100).toFixed(2)} -> ${decision.verdict}`);
 
@@ -54,6 +57,7 @@ if (cmd === "create") {
   ok((await verifyChain(SHOP)).valid, "audit chain valid");
 } else if (cmd === "clean") {
   await db.auditEntry.deleteMany({ where: { shop: SHOP } });
+  await deleteDirectory(SHOP);
   console.log("cleaned");
 }
 

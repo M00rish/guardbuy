@@ -9,6 +9,7 @@ const { appendAudit, verifyChain } = await import("../app/lib/audit/log.server")
 const { executePurchase, ExecutionRefused } = await import("../app/lib/agent/execute.server");
 const { evaluate } = await import("../app/lib/policy/engine");
 const { RuleSetSchema } = await import("../app/lib/policy/schema");
+const { deleteDirectory, saveSupplier } = await import("../app/lib/suppliers/directory.server");
 
 const SHOP = "chain-check.guardbuy.test";
 const rules = RuleSetSchema.parse({
@@ -19,7 +20,7 @@ const rules = RuleSetSchema.parse({
   supplierAllowlist: ["atlas-roasters", "kiln-co", "paperworks"],
   maxQuantityMultiple: 3, maxPurchasesPer24h: 5,
 });
-const ctx = { avgUnitPrice30dCents: 1148, usualQuantity: 40, spentLast7dCents: 0, purchasesLast24h: 0, paypalBalanceCents: 496_742 };
+const ctx = { productManaged: true, supplierLinked: true, avgUnitPrice30dCents: 1148, usualQuantity: 40, spentLast7dCents: 0, purchasesLast24h: 0, paypalBalanceCents: 496_742 };
 
 let failed = 0;
 const ok = (cond: boolean, msg: string) => { console.log(`${cond ? "PASS" : "FAIL"}  ${msg}`); if (!cond) failed++; };
@@ -33,6 +34,8 @@ async function propose(supplierId: string, quantity: number, unitPriceCents: num
 }
 
 await db.auditEntry.deleteMany({ where: { shop: SHOP } });
+await deleteDirectory(SHOP);
+await saveSupplier(SHOP, { id: "atlas-roasters", name: "Atlas Roasters", paypalEmail: process.env.SUPPLIER_EMAIL! });
 await appendAudit(SHOP, { type: "ruleset_signed", ruleSet: { rules, hash: (await import("../app/lib/policy/hash")).hashOf(rules), signedBy: "chain-check", signedAt: new Date().toISOString() } });
 
 // 1. auto
@@ -70,5 +73,6 @@ await db.auditEntry.update({ where: { shop_seq: { shop: SHOP, seq: pay1.seq } },
 ok((await verifyChain(SHOP)).valid, "chain valid again after restoring the row");
 
 await db.auditEntry.deleteMany({ where: { shop: SHOP } });
+await deleteDirectory(SHOP);
 await db.$disconnect();
 process.exit(failed ? 1 : 0);

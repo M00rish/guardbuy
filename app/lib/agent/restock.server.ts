@@ -4,8 +4,7 @@ import { paypal } from "../paypal/client.server";
 import { evaluate, type PolicyContext } from "../policy/engine";
 import { hashOf } from "../policy/hash";
 import { RuleSetSchema, type AuditEntry, type RecordedProposal, type RuleSet } from "../policy/schema";
-import { averagePrice, offersFor } from "../suppliers/catalog";
-import { supplierPaymentEmail } from "../suppliers/payees.server";
+import { isManaged, offersForVariant, type Offer } from "../suppliers/directory.server";
 import { executePurchase } from "./execute.server";
 import { proposePurchase } from "./proposer.server";
 
@@ -75,14 +74,15 @@ function payoutFailedAt(payout: AuditEntry, log: AuditEntry[]): string | null {
   return PAYOUT_FAILED.has(payout.event.status) ? payout.at : null;
 }
 
-/** Everything the policy engine needs, built from the audit log and the catalog. */
+/** Everything the policy engine needs, built from the audit log and the merchant's own offers. */
 export function policyContext(
   proposal: RecordedProposal,
   log: AuditEntry[],
   balanceCents: number | null,
+  merchant: { managed: boolean; offers: Offer[] },
   now = new Date(),
 ): PolicyContext {
-  const offer = offersFor(proposal.sku).find((o) => o.supplierId === proposal.supplierId);
+  const offer = merchant.offers.find((o) => o.supplierId === proposal.supplierId);
   // Money that left: payouts that didn't fail, plus captured PayPal orders.
   const spent = log.flatMap((e) =>
     (e.event.type === "payout" && !payoutFailedAt(e, log)) || e.event.type === "order_captured"
@@ -92,8 +92,10 @@ export function policyContext(
   const since = (ms: number) => spent.filter((s) => now.getTime() - Date.parse(s.at) < ms);
 
   return {
-    // An offer outside the catalog has no history: 0 makes the price check block it.
-    avgUnitPrice30dCents: offer ? averagePrice(offer, now) : 0,
+    productManaged: merchant.managed,
+    supplierLinked: !!offer,
+    // An offer the merchant never linked has no history: 0 makes the price check block it too.
+    avgUnitPrice30dCents: offer?.avgUnitPrice30dCents ?? 0,
     usualQuantity: offer?.usualQuantity ?? 0,
     spentLast7dCents: since(7 * DAY_MS).reduce((sum, s) => sum + s.cents, 0),
     purchasesLast24h: since(DAY_MS).length,
@@ -106,9 +108,11 @@ export function policyContext(
  * Only a restock that is paid or waiting for approval keeps the SKU covered; a blocked proposal,
  * a failed LLM call or a failed payment frees it again after a short wait.
  */
-export function skipReason(sku: string, log: AuditEntry[], now = new Date()): string | null {
+export function skipReason(item: { variantId: string; sku: string }, log: AuditEntry[], now = new Date()): string | null {
+  // Matched by variant (SKUs can be shared); entries without a variant id fall back to the SKU.
+  const same = (r: { variantId?: string; sku: string }) => (r.variantId ? r.variantId === item.variantId : r.sku === item.sku);
   const last = log
-    .filter((e) => (e.event.type === "proposal" && e.event.proposal.sku === sku) || (e.event.type === "proposal_failed" && e.event.sku === sku))
+    .filter((e) => (e.event.type === "proposal" && same(e.event.proposal)) || (e.event.type === "proposal_failed" && same(e.event)))
     .at(-1);
   if (!last) return null;
   const since = (at: string) => now.getTime() - Date.parse(at);
@@ -143,14 +147,14 @@ export type RestockResult =
   | { outcome: "skipped" | "failed"; reason: string }
   | { outcome: "auto" | "approval" | "block"; proposalSeq: number; decisionSeq: number; payoutSeq?: number; error?: string };
 
-// One restock at a time per shop + SKU in this process. Webhooks for the same SKU arrive in bursts
+// One restock at a time per shop + variant in this process. Webhooks for the same SKU arrive in bursts
 // (each sale changes stock), and the LLM call is too slow to hold a database lock across.
 const running = new Map<string, Promise<RestockResult>>();
 
 export function runRestock(shop: string, check: StockCheck): Promise<RestockResult> {
-  const key = `${shop}|${check.sku}`;
+  const key = `${shop}|${check.variantId}`;
   const inFlight = running.get(key);
-  if (inFlight) return inFlight.then(() => ({ outcome: "skipped" as const, reason: "a restock for this SKU was already running" }));
+  if (inFlight) return inFlight.then(() => ({ outcome: "skipped" as const, reason: "a restock for this product was already running" }));
 
   const job = restock(shop, check).finally(() => running.delete(key));
   running.set(key, job);
@@ -163,8 +167,13 @@ async function restock(shop: string, check: StockCheck): Promise<RestockResult> 
   let log = await auditEntries(shop);
   const rules = currentRuleSet(log);
   if (!rules) return { outcome: "skipped", reason: "no signed rules yet, so the agent is off" };
+  // The merchant chooses what GuardBuy may buy, and from whom. Checked again by the policy engine.
+  const managed = await isManaged(shop, check.variantId);
+  if (!managed) return { outcome: "skipped", reason: `${check.sku} is not switched on for GuardBuy` };
+  const offers = await offersForVariant(shop, check.variantId);
+  if (!offers.length) return { outcome: "skipped", reason: `no suppliers linked to ${check.sku}` };
 
-  const skip = skipReason(check.sku, log);
+  const skip = skipReason(check, log);
   if (skip) return { outcome: "skipped", reason: skip };
   if (check.daysOfCover >= rules.reorderBelowDaysOfCover) {
     return { outcome: "skipped", reason: `${check.daysOfCover.toFixed(1)} days of cover is above the rule's ${rules.reorderBelowDaysOfCover}` };
@@ -173,18 +182,19 @@ async function restock(shop: string, check: StockCheck): Promise<RestockResult> 
   // 1. The LLM proposes (untrusted). GuardBuy adds who gets paid; the LLM never supplies it.
   let proposal: RecordedProposal;
   try {
-    const proposed = await proposePurchase({ check, rules });
-    proposal = { ...proposed, payeeEmail: supplierPaymentEmail(proposed.supplierId) ?? undefined };
+    const proposed = await proposePurchase({ check, rules, offers });
+    const payee = offers.find((o) => o.supplierId === proposed.supplierId)?.paypalEmail;
+    proposal = { ...proposed, variantId: check.variantId, payeeEmail: payee || undefined };
   } catch (e) {
     const reason = errorText(e);
-    await appendAudit(shop, { type: "proposal_failed", sku: check.sku, reason });
+    await appendAudit(shop, { type: "proposal_failed", sku: check.sku, variantId: check.variantId, reason });
     return { outcome: "failed", reason };
   }
   const p = await appendAudit(shop, { type: "proposal", proposal });
 
   // 2. The policy engine decides (deterministic).
   log = await auditEntries(shop);
-  const decision = evaluate(proposal, rules, policyContext(proposal, log, await paypalBalanceCents()));
+  const decision = evaluate(proposal, rules, policyContext(proposal, log, await paypalBalanceCents(), { managed, offers }));
   const d = await appendAudit(shop, { type: "decision", proposalSeq: p.seq, decision });
   const result: RestockResult = { outcome: decision.verdict, proposalSeq: p.seq, decisionSeq: d.seq };
 

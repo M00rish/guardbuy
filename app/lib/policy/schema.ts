@@ -63,6 +63,7 @@ export type Proposal = z.infer<typeof ProposalSchema>;
 // engine blocks a proposal without one.
 export const RecordedProposalSchema = ProposalSchema.extend({
   payeeEmail: z.string().email().optional(),
+  variantId: z.string().optional(), // the Shopify variant restocked (also added by GuardBuy, not the LLM)
 });
 export type RecordedProposal = z.infer<typeof RecordedProposalSchema>;
 
@@ -92,7 +93,7 @@ export const AuditEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("ruleset_signed"), ruleSet: SignedRuleSetSchema }),
   z.object({ type: z.literal("proposal"), proposal: RecordedProposalSchema }),
   // The LLM failed or timed out, so no proposal was made (the next stock change retries).
-  z.object({ type: z.literal("proposal_failed"), sku, reason: z.string() }),
+  z.object({ type: z.literal("proposal_failed"), sku, variantId: z.string().optional(), reason: z.string() }),
   z.object({ type: z.literal("decision"), proposalSeq: z.number().int(), decision: DecisionSchema }),
   z.object({ type: z.literal("approved"), decisionSeq: z.number().int(), approvedBy: z.string() }),
   // An approved decision could not be paid (PayPal error, refused payee, ...). Frees the SKU to retry.

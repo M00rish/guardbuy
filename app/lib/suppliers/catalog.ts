@@ -1,12 +1,13 @@
-// Mock wholesale suppliers for the demo store (a small coffee shop).
-// Prices are deterministic: the same SKU + supplier + date always gives the same price,
-// so the 30-day averages the policy engine checks against are reproducible in demos and tests.
+// Demo seed data: mock wholesale suppliers for the demo store (a small coffee shop).
+// Real merchants enter their own suppliers (see directory.server.ts); this file only seeds the demo
+// and provides the simulated daily prices that stand in for a live supplier price feed.
+// Prices are deterministic: the same key + date always gives the same price, so 30-day averages
+// are reproducible in demos and tests.
 
 export type Supplier = {
   id: string;
   name: string;
-  payoutEmail: string; // PayPal sandbox account that receives the payout
-  honest: boolean; // false = the attack-demo supplier
+  honest: boolean; // false = the attack-demo supplier (the merchant's rules don't allowlist it)
 };
 
 export type Offer = {
@@ -32,12 +33,12 @@ export const PRODUCTS: CatalogProduct[] = [
   { sku: "DRIPPER-CERAMIC", title: "Ceramic Dripper", retailPriceCents: 2800, dailySales: 0.7 },
 ];
 
-// payoutEmail values are placeholders; real sandbox emails come from env (see supplierPayoutEmail).
+// PayPal emails come from env when seeding (one sandbox account plays every supplier).
 export const SUPPLIERS: Supplier[] = [
-  { id: "atlas-roasters", name: "Atlas Roasters", payoutEmail: "", honest: true },
-  { id: "kiln-co", name: "Kiln & Co Ceramics", payoutEmail: "", honest: true },
-  { id: "paperworks", name: "Paperworks Supply", payoutEmail: "", honest: true },
-  { id: "bean-bargains", name: "Bean Bargains Wholesale", payoutEmail: "", honest: false },
+  { id: "atlas-roasters", name: "Atlas Roasters", honest: true },
+  { id: "kiln-co", name: "Kiln & Co Ceramics", honest: true },
+  { id: "paperworks", name: "Paperworks Supply", honest: true },
+  { id: "bean-bargains", name: "Bean Bargains Wholesale", honest: false },
 ];
 
 export const OFFERS: Offer[] = [
@@ -75,25 +76,17 @@ function hashString(s: string): number {
   return h >>> 0;
 }
 
-/** Unit price for one offer on one UTC day: base cost ±6% day-to-day noise. */
-export function unitPriceOn(offer: Offer, day: Date): number {
-  const key = `${offer.sku}|${offer.supplierId}|${day.toISOString().slice(0, 10)}`;
-  const noise = (mulberry32(hashString(key))() - 0.5) * 0.12;
-  return Math.round(offer.baseUnitCostCents * (1 + noise));
+/** Simulated unit price on one UTC day: base price ±6% day-to-day noise. `key` identifies the offer. */
+export function simulatedPrice(key: string, baseCents: number, day: Date): number {
+  const noise = (mulberry32(hashString(`${key}|${day.toISOString().slice(0, 10)}`))() - 0.5) * 0.12;
+  return Math.round(baseCents * (1 + noise));
 }
 
-/** Prices for the `days` days before `today` (oldest first), excluding today. */
-export function priceHistory(offer: Offer, today: Date, days = 30): number[] {
-  const out: number[] = [];
-  for (let i = days; i >= 1; i--) {
-    out.push(unitPriceOn(offer, new Date(today.getTime() - i * 86_400_000)));
-  }
-  return out;
-}
-
-export function averagePrice(offer: Offer, today: Date, days = 30): number {
-  const h = priceHistory(offer, today, days);
-  return Math.round(h.reduce((a, b) => a + b, 0) / h.length);
+/** Average simulated price over the `days` days before `today` (excluding today). */
+export function simulatedAverage(key: string, baseCents: number, today: Date, days = 30): number {
+  let sum = 0;
+  for (let i = days; i >= 1; i--) sum += simulatedPrice(key, baseCents, new Date(today.getTime() - i * 86_400_000));
+  return Math.round(sum / days);
 }
 
 export function offersFor(sku: string): Offer[] {

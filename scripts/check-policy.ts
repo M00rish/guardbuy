@@ -20,6 +20,8 @@ const rules = RuleSetSchema.parse({
 });
 
 const base: PolicyContext = {
+  productManaged: true,
+  supplierLinked: true,
   avgUnitPrice30dCents: 1148,
   usualQuantity: 40,
   spentLast7dCents: 0,
@@ -46,6 +48,8 @@ const cases: [string, Proposal, Partial<PolicyContext>, string, string?][] = [
   ["6th purchase in 24h", coffee({}), { purchasesLast24h: 5 }, "block", "maxPurchasesPer24h"],
   ["weekly cap exceeded", coffee({}), { spentLast7dCents: 190_000 }, "block", "weeklySpendCap"],
   ["cash floor breached", coffee({}), { paypalBalanceCents: 120_000 }, "block", "cashFloor"],
+  ["product not switched on for GuardBuy", coffee({}), { productManaged: false }, "block", "productManaged"],
+  ["supplier not linked to this product", coffee({}), { supplierLinked: false }, "block", "supplierLinked"],
   ["no PayPal email on file for supplier", coffee({ payeeEmail: undefined }), {}, "block", "payeeOnFile"],
   ["balance unknown -> human approves", coffee({}), { paypalBalanceCents: null }, "approval", "cashFloor"],
 ];
