@@ -91,7 +91,12 @@ export type Decision = z.infer<typeof DecisionSchema>;
 
 export const AuditEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("ruleset_signed"), ruleSet: SignedRuleSetSchema }),
-  z.object({ type: z.literal("proposal"), proposal: RecordedProposalSchema }),
+  z.object({
+    type: z.literal("proposal"),
+    proposal: RecordedProposalSchema,
+    // What triggered it: stock and sales rate when GuardBuy asked the AI (optional for older entries).
+    stock: z.object({ available: z.number(), perDay: z.number(), daysOfCover: z.number() }).optional(),
+  }),
   // The LLM failed or timed out, so no proposal was made (the next stock change retries).
   z.object({ type: z.literal("proposal_failed"), sku, variantId: z.string().optional(), reason: z.string() }),
   z.object({ type: z.literal("decision"), proposalSeq: z.number().int(), decision: DecisionSchema }),

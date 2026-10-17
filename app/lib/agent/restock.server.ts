@@ -193,7 +193,8 @@ async function restock(shop: string, check: StockCheck): Promise<RestockResult> 
     await appendAudit(shop, { type: "proposal_failed", sku: check.sku, variantId: check.variantId, reason });
     return { outcome: "failed", reason };
   }
-  const p = await appendAudit(shop, { type: "proposal", proposal });
+  const stock = { available: check.available, perDay: Number(check.perDay.toFixed(2)), daysOfCover: Number(check.daysOfCover.toFixed(1)) };
+  const p = await appendAudit(shop, { type: "proposal", proposal, stock });
 
   // 2. The policy engine decides (deterministic).
   log = await auditEntries(shop);
