@@ -30,9 +30,9 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<ActionRes
   try {
     switch (form.get("intent")) {
       case "approve":
-        return { ok: true, ...(await approvePurchase(session.shop, decisionSeq, staffId)) };
+        return { ok: true, ...(await approvePurchase(session.shop, decisionSeq, `shopify-staff:${staffId}`)) };
       case "reject":
-        return { ok: true, ...(await rejectPurchase(session.shop, decisionSeq, staffId, String(form.get("reason") ?? ""))) };
+        return { ok: true, ...(await rejectPurchase(session.shop, decisionSeq, `shopify-staff:${staffId}`, String(form.get("reason") ?? ""))) };
       case "paypal": {
         const { approveUrl } = await approveInPayPal(session.shop, decisionSeq, `${process.env.SHOPIFY_APP_URL}/paypal/return`);
         return { ok: true, message: "PayPal order ready: approve it in PayPal", approveUrl };

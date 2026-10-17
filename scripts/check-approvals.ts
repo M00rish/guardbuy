@@ -44,19 +44,19 @@ ok(card.supplierName === "Atlas Roasters" && card.payeeEmail === process.env.SUP
 ok(card.avgUnitPrice30dCents !== null && card.usualQuantity === 40, `facts: ${card.unitPriceCents}c vs avg ${card.avgUnitPrice30dCents}c, qty ${card.quantity} vs usual ${card.usualQuantity}`);
 
 // 2. Double click on Approve: paid once
-const [a, b] = await Promise.all([outcome(approvePurchase(SHOP, first, "staff-1")), outcome(approvePurchase(SHOP, first, "staff-1"))]);
+const [a, b] = await Promise.all([outcome(approvePurchase(SHOP, first, "shopify-staff:staff-1")), outcome(approvePurchase(SHOP, first, "shopify-staff:staff-1"))]);
 console.log("      first click: ", a);
 console.log("      second click:", b);
 ok(a.startsWith("Approved and paid") && b.startsWith("refused"), "double click pays once");
 const log = await auditEntries(SHOP);
 ok(log.filter((e) => e.event.type === "payout").length === 1 && log.filter((e) => e.event.type === "approved").length === 1, "one approval and one payout in the log");
 ok(log.some((e) => e.event.type === "approved" && e.event.approvedBy === "shopify-staff:staff-1"), "staff id recorded");
-ok((await outcome(approvePurchase(SHOP, first, "staff-1"))).includes("not waiting"), "approving again later is refused");
+ok((await outcome(approvePurchase(SHOP, first, "shopify-staff:staff-1"))).includes("not waiting"), "approving again later is refused");
 ok((await approvalQueue(SHOP)).length === 0, "queue is empty after paying");
 
 // 3. Decline
 const second = await overLimitPurchase("second");
-ok((await outcome(rejectPurchase(SHOP, second, "staff-2", "too much stock already"))).startsWith("Declined"), "decline recorded");
+ok((await outcome(rejectPurchase(SHOP, second, "shopify-staff:staff-2", "too much stock already"))).startsWith("Declined"), "decline recorded");
 ok((await approvalQueue(SHOP)).length === 0, "declined purchase leaves the queue");
 const skip = skipReason({ variantId: VARIANT, sku: "COFFEE-HOUSE-1KG" }, await auditEntries(SHOP));
 ok(!!skip?.includes("declined"), `no new proposal right after a decline: ${skip}`);
@@ -67,7 +67,7 @@ const { approveUrl } = await approveInPayPal(SHOP, third, "https://example.com/p
 ok(approveUrl.includes("paypal.com"), `PayPal order created: ${approveUrl.slice(0, 60)}...`);
 queue = await approvalQueue(SHOP);
 ok(queue[0]?.status === "paypal_pending" && queue[0].paypalApproveUrl === approveUrl, "card switches to 'waiting for PayPal'");
-ok((await outcome(approvePurchase(SHOP, third, "staff-1"))).includes("PayPal"), "in-app approval refused once a PayPal order exists");
+ok((await outcome(approvePurchase(SHOP, third, "shopify-staff:staff-1"))).includes("PayPal"), "in-app approval refused once a PayPal order exists");
 
 ok((await verifyChain(SHOP)).valid, "audit chain valid");
 await cleanup();

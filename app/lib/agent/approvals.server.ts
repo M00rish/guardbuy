@@ -97,14 +97,17 @@ async function assertPending(shop: string, decisionSeq: number) {
 
 export type ApprovalResult = { paid: boolean; message: string };
 
-/** A staff member approves inside GuardBuy: logged, then paid by payout. */
-export function approvePurchase(shop: string, decisionSeq: number, staffId: string): Promise<ApprovalResult> {
+/**
+ * A person approves inside GuardBuy: logged, then paid by payout. `actor` is recorded as-is,
+ * e.g. "shopify-staff:<id>" (admin) or "judge:<session>" (judge console sandbox).
+ */
+export function approvePurchase(shop: string, decisionSeq: number, actor: string): Promise<ApprovalResult> {
   return oncePerDecision(shop, decisionSeq, async () => {
     const log = await assertPending(shop, decisionSeq);
     if (ofDecision(log, "order_created", decisionSeq).length) {
       throw new ExecutionRefused("This purchase is already being approved in PayPal");
     }
-    await appendAudit(shop, { type: "approved", decisionSeq, approvedBy: `shopify-staff:${staffId}` });
+    await appendAudit(shop, { type: "approved", decisionSeq, approvedBy: actor });
     try {
       const payout = await executePurchase(shop, decisionSeq);
       return { paid: true, message: `Approved and paid (log entry #${payout.seq})` };
@@ -116,10 +119,10 @@ export function approvePurchase(shop: string, decisionSeq: number, staffId: stri
   });
 }
 
-export function rejectPurchase(shop: string, decisionSeq: number, staffId: string, reason?: string): Promise<ApprovalResult> {
+export function rejectPurchase(shop: string, decisionSeq: number, actor: string, reason?: string): Promise<ApprovalResult> {
   return oncePerDecision(shop, decisionSeq, async () => {
     await assertPending(shop, decisionSeq);
-    await appendAudit(shop, { type: "rejected", decisionSeq, rejectedBy: `shopify-staff:${staffId}`, reason: reason?.slice(0, 500) || undefined });
+    await appendAudit(shop, { type: "rejected", decisionSeq, rejectedBy: actor, reason: reason?.slice(0, 500) || undefined });
     return { paid: false, message: "Declined. Nothing was paid." };
   });
 }

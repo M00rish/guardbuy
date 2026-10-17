@@ -41,6 +41,7 @@ ok(!!blocked, `dishonest supplier blocked: ${blocked?.detail}`);
 console.log("      approve:", await judgeApprove(SHOP, ID, state.approvals[0].decisionSeq));
 state = await judgeState(SHOP, ID);
 ok(state.feed[0].kind === "paid" && state.approvals.length === 0, `paid: ${state.feed[0].detail}`);
+ok(state.feed.some((f) => f.title === "Approved by you"), "feed credits the judge as the approver");
 ok(state.chain.valid, `chain intact (${"entries" in state.chain ? state.chain.entries : 0} entries)`);
 ok((await db.auditEntry.count({ where: { shop: SHOP } })) === realLogBefore, "the merchant's real log was not touched");
 
