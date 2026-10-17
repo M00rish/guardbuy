@@ -1,12 +1,12 @@
 // Checks for the judge console's server side (the storefront page itself needs a browser).
-// Runs a real restock (Gemini), the dishonest-supplier attempt and an approval (sandbox payout)
+// Runs a real restock (Gemini), both attack buttons and a decline (CHECK_JUDGE_PAY=1: a real payout)
 // in a throwaway judge session, then deletes it.
 //   npx tsx scripts/check-judge.ts
 export {};
 process.loadEnvFile(".env");
 
 const { default: db } = await import("../app/db.server");
-const { judgeApprove, judgeAttack, judgeRestock, judgeShop, judgeState } = await import("../app/lib/judge/console.server");
+const { judgeApprove, judgeAttack, judgeDecline, judgeRestock, judgeShop, judgeState, judgeWhatIf } = await import("../app/lib/judge/console.server");
 const { deleteDirectory } = await import("../app/lib/suppliers/directory.server");
 
 const SHOP = "guardbuy-demo.myshopify.com";
@@ -33,15 +33,31 @@ ok(state.feed.some((f) => f.kind === "stock") && state.feed.some((f) => f.kind =
 ok(state.approvals.length === 1, `approval card: ${state.approvals[0]?.title} ${state.approvals[0]?.total}`);
 ok(!JSON.stringify(state).includes(process.env.SUPPLIER_EMAIL!), "no PayPal email in what the storefront receives");
 
-console.log("      attack: ", await judgeAttack(SHOP, ID));
+console.log("      what-if:", await judgeWhatIf(SHOP, ID));
 state = await judgeState(SHOP, ID);
 const blocked = state.feed.find((f) => f.kind === "block");
-ok(!!blocked, `dishonest supplier blocked: ${blocked?.detail}`);
+ok(!!blocked, `AI fooled (simulated) -> blocked: ${blocked?.detail}`);
+ok(state.approvals.length === 1, "the simulated attack didn't disturb the pending restock");
 
-console.log("      approve:", await judgeApprove(SHOP, ID, state.approvals[0].decisionSeq));
-state = await judgeState(SHOP, ID);
-ok(state.feed[0].kind === "paid" && state.approvals.length === 0, `paid: ${state.feed[0].detail}`);
-ok(state.feed.some((f) => f.title === "Approved by you"), "feed credits the judge as the approver");
+console.log("      attack: ", await judgeAttack(SHOP, ID));
+const attackUntil = Date.now() + 150_000;
+while (Date.now() < attackUntil && !(state = await judgeState(SHOP, ID)).feed.some((f) => f.kind === "resisted" || (f.kind === "block" && f.seq > blocked!.seq) || (f.kind === "failed" && f.title.includes("attack")))) {
+  await new Promise((r) => setTimeout(r, 3000));
+}
+const verdict = state.feed.find((f) => f.kind === "resisted" || f.kind === "block" || f.kind === "failed");
+ok(!!verdict && verdict.kind !== "failed", `real AI attack: ${verdict?.title}`);
+
+// Paying costs ~$450 of sandbox balance, so by default the check declines; CHECK_JUDGE_PAY=1 pays.
+if (process.env.CHECK_JUDGE_PAY === "1") {
+  console.log("      approve:", await judgeApprove(SHOP, ID, state.approvals[0].decisionSeq));
+  state = await judgeState(SHOP, ID);
+  ok(state.feed[0].kind === "paid" && state.approvals.length === 0, `paid: ${state.feed[0].detail}`);
+  ok(state.feed.some((f) => f.title === "Approved by you"), "feed credits the judge as the approver");
+} else {
+  console.log("      decline:", await judgeDecline(SHOP, ID, state.approvals[0].decisionSeq));
+  state = await judgeState(SHOP, ID);
+  ok(state.feed[0].kind === "declined" && state.approvals.length === 0, "declined: nothing paid, card gone");
+}
 ok(state.chain.valid, `chain intact (${"entries" in state.chain ? state.chain.entries : 0} entries)`);
 ok((await db.auditEntry.count({ where: { shop: SHOP } })) === realLogBefore, "the merchant's real log was not touched");
 

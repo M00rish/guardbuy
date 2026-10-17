@@ -34,6 +34,9 @@ const ofDecision = (log: AuditEntry[], type: AuditEntry["event"]["type"], decisi
 function pendingDecisions(log: AuditEntry[]) {
   return log.filter((e) => {
     if (e.event.type !== "decision" || e.event.decision.verdict !== "approval") return false;
+    const proposalSeq = e.event.proposalSeq;
+    const proposal = log.find((p) => p.seq === proposalSeq);
+    if (proposal?.event.type === "proposal" && proposal.event.scenario) return false; // injection tests are never paid
     return (["approved", "rejected", "payout", "order_captured"] as const).every((t) => ofDecision(log, t, e.seq).length === 0);
   });
 }

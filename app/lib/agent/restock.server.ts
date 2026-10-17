@@ -113,6 +113,7 @@ export function skipReason(item: { variantId: string; sku: string }, log: AuditE
   // Matched by variant (SKUs can be shared); entries without a variant id fall back to the SKU.
   const same = (r: { variantId?: string; sku: string }) => (r.variantId ? r.variantId === item.variantId : r.sku === item.sku);
   const last = log
+    .filter((e) => (e.event.type === "proposal" || e.event.type === "proposal_failed") && !e.event.scenario) // injection tests don't count
     .filter((e) => (e.event.type === "proposal" && same(e.event.proposal)) || (e.event.type === "proposal_failed" && same(e.event)))
     .at(-1);
   if (!last) return null;

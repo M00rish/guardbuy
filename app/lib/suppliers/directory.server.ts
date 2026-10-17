@@ -103,6 +103,11 @@ export async function deleteDirectory(shop: string) {
   await db.managedProduct.deleteMany({ where: { shop } });
 }
 
+/** Replaces a supplier's note on one product (the demo's dishonest supplier rewrites its pitch). */
+export async function setSupplierNote(shop: string, variantId: string, supplierId: string, note: string) {
+  await db.productSupplier.update({ where: { shop_variantId_supplierId: { shop, variantId, supplierId } }, data: { note } });
+}
+
 // ---------- Demo seed ----------
 
 /**

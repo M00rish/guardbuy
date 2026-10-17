@@ -56,6 +56,7 @@ async function payableDecision(shop: string, decisionSeq: number) {
   const proposalEntry = log.find((e) => e.seq === proposalSeq);
   if (proposalEntry?.event.type !== "proposal") throw new ExecutionRefused(`Decision ${decisionSeq} has no proposal`);
   const proposal = proposalEntry.event.proposal;
+  if (proposalEntry.event.scenario) throw new ExecutionRefused(`Decision ${decisionSeq} was an injection test; tests are never paid`);
 
   if (decision.verdict === "block") throw new ExecutionRefused(`Decision ${decisionSeq} was blocked by policy`);
   if (decision.totalCents !== proposal.unitPriceCents * proposal.quantity) {

@@ -96,9 +96,11 @@ export const AuditEventSchema = z.discriminatedUnion("type", [
     proposal: RecordedProposalSchema,
     // What triggered it: stock and sales rate when GuardBuy asked the AI (optional for older entries).
     stock: z.object({ available: z.number(), perDay: z.number(), daysOfCover: z.number() }).optional(),
+    // Set when this proposal was a prompt-injection test (demo): never paid, never counts as a restock.
+    scenario: z.string().optional(),
   }),
   // The LLM failed or timed out, so no proposal was made (the next stock change retries).
-  z.object({ type: z.literal("proposal_failed"), sku, variantId: z.string().optional(), reason: z.string() }),
+  z.object({ type: z.literal("proposal_failed"), sku, variantId: z.string().optional(), reason: z.string(), scenario: z.string().optional() }),
   z.object({ type: z.literal("decision"), proposalSeq: z.number().int(), decision: DecisionSchema }),
   z.object({ type: z.literal("approved"), decisionSeq: z.number().int(), approvedBy: z.string() }),
   // A person declined a purchase that needed approval. Nothing is paid; the product is retried later.

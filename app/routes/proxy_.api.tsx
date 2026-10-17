@@ -2,7 +2,7 @@ import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
 
 import { authenticate } from "../shopify.server";
 import { ExecutionRefused } from "../lib/agent/execute.server";
-import { judgeApprove, judgeAttack, judgeDecline, JudgeRefused, judgeRestock, judgeState } from "../lib/judge/console.server";
+import { judgeApprove, judgeAttack, judgeDecline, JudgeRefused, judgeRestock, judgeState, judgeWhatIf } from "../lib/judge/console.server";
 
 // JSON API for the judge console, reached through the app proxy at https://<shop>/apps/guardbuy/api.
 // Shopify signs every proxied request (appProxy() rejects anything unsigned). Judges act only on
@@ -40,6 +40,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         return json({ ok: true, message: await judgeRestock(shop, judgeId) });
       case "attack":
         return json({ ok: true, message: await judgeAttack(shop, judgeId) });
+      case "whatif":
+        return json({ ok: true, message: await judgeWhatIf(shop, judgeId) });
       case "approve":
         return json({ ok: true, message: await judgeApprove(shop, judgeId, decisionSeq) });
       case "decline":
