@@ -16,6 +16,9 @@ import { currentRuleSet, paypalBalanceCents, policyContext } from "./restock.ser
 
 const COFFEE_SKU = "COFFEE-HOUSE-1KG";
 
+/** Scenario id for the judge console's simulated "what if the AI obeyed the supplier" test. */
+export const WHAT_IF_SCENARIO = "what-if-fooled";
+
 /** Puts the demo coffee offers back to their seeded state before each test. */
 async function resetDemoCoffee(shop: string, variantId: string) {
   const email = process.env.SUPPLIER_EMAIL ?? "";

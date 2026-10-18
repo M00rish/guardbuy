@@ -1,7 +1,8 @@
 import db from "../../db.server";
 import { appendAudit, auditEntries, verifyChain } from "../audit/log.server";
 import { approvalQueue, approvePurchase, rejectPurchase } from "../agent/approvals.server";
-import { classifyAttack, runInjectionTest } from "../agent/attack.server";
+import { classifyAttack, runInjectionTest, WHAT_IF_SCENARIO } from "../agent/attack.server";
+import { scoreboard } from "../agent/scoreboard.server";
 import { currentRuleSet, defaultRuleSet, paypalBalanceCents, policyContext, runRestock, signRuleSet } from "../agent/restock.server";
 import { evaluate } from "../policy/engine";
 import { RuleSetSchema, type AuditEntry } from "../policy/schema";
@@ -63,7 +64,7 @@ export type FeedItem = {
   untrustedLabel?: string;
 };
 
-const WHAT_IF = "what-if-fooled"; // simulated: the AI obeyed the dishonest supplier
+const WHAT_IF = WHAT_IF_SCENARIO; // simulated: the AI obeyed the dishonest supplier
 
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
@@ -154,7 +155,26 @@ export async function judgeState(shop: string, judgeId: string) {
   const sandbox = judgeShop(shop, judgeId);
   await ensureSandbox(sandbox);
   const [log, queue, chain] = await Promise.all([auditEntries(sandbox), approvalQueue(sandbox), verifyChain(sandbox)]);
+  const score = await scoreboard(sandbox, log);
+  const a = score.attacks;
+  const answered = a.tried - a.failed;
   return {
+    scoreboard: {
+      tried: a.tried,
+      aiFooled: a.blocked + a.flagged + a.slipped,
+      answered,
+      blocked: a.blocked,
+      flagged: a.flagged,
+      slipped: a.slipped,
+      blockedDollars: usd(a.blockedCents),
+      flaggedDollars: usd(a.flaggedCents),
+      slippedDollars: usd(a.slippedCents),
+      levels: (["easy", "medium", "hard"] as const).map((l) => ({ level: l, ...a.byLevel[l] })),
+      simulated: a.simulated,
+      stoppedBy: score.stoppedBy,
+      knownGaps: a.knownGaps,
+      remaining: ATTACKS.length - a.tried,
+    },
     feed: toFeed(log),
     approvals: queue.map((c) => ({
       decisionSeq: c.decisionSeq,

@@ -31,6 +31,10 @@ const SHELL = `
   .gb li.k-flagged { border-color: #f79009; } .gb li.k-slipped { border-color: #d92d20; background: #fef3f2; }
   .gb li.k-failed { border-color: #d92d20; } .gb li.k-stock { border-color: #2e90fa; } .gb li.k-approved { border-color: #12b76a; }
   .gb .chain { font-weight: 600; }
+  .gb .stats { display: flex; flex-wrap: wrap; gap: 18px; margin: 6px 0 10px; }
+  .gb .stat b { display: block; font-size: 1.5rem; line-height: 1.2; }
+  .gb .stat span { color: #666; font-size: .85rem; }
+  .gb .gap { color: #b42318; }
 </style>
 <div class="gb">
   <h1>GuardBuy</h1>
@@ -43,6 +47,7 @@ const SHELL = `
     <button data-action="new">New session</button>
   </div>
   <p class="msg" id="gb-msg"></p>
+  <div class="card" id="gb-score"></div>
   <div id="gb-approvals"></div>
   <h2>Activity</h2>
   <p class="chain" id="gb-chain"></p>
@@ -93,6 +98,23 @@ const SHELL = `
       card.appendChild(row);
       box.appendChild(card);
     });
+    var sc = data.scoreboard, box2 = document.getElementById("gb-score");
+    box2.replaceChildren();
+    box2.appendChild(el("b", null, "Attack scoreboard"));
+    var stats = el("div", "stats");
+    [[sc.tried, "attacks tried"], [sc.aiFooled + " / " + sc.answered, "times the AI was fooled"], [sc.blockedDollars, "blocked by rules"],
+     [sc.flaggedDollars, "held for a person"], [sc.slippedDollars, "would have moved (known gaps)"]].forEach(function (s) {
+      var d = el("div", "stat"); d.appendChild(el("b", null, String(s[0]))); d.appendChild(el("span", null, s[1])); stats.appendChild(d);
+    });
+    box2.appendChild(stats);
+    box2.appendChild(el("div", "muted", sc.levels.map(function (l) {
+      return l.level + ": " + l.tried + " tried, " + l.resisted + " resisted, " + l.blocked + " blocked, " + l.flagged + " flagged, " + l.slipped + " slipped";
+    }).join(" · ")));
+    if (sc.simulated.tried) box2.appendChild(el("div", "muted", "Simulated 'AI fooled' runs: " + sc.simulated.blocked + " of " + sc.simulated.tried + " blocked"));
+    if (sc.stoppedBy.length) box2.appendChild(el("div", "muted", "Stopped by: " + sc.stoppedBy.map(function (r) { return r.rule + " (" + r.count + ")"; }).join(", ")));
+    sc.knownGaps.forEach(function (g) { box2.appendChild(el("div", "gap", "Known gap: " + g.title + ". Fix planned: " + g.fix)); });
+    box2.appendChild(el("div", "muted", sc.remaining > 0 ? sc.remaining + " of the attacks not tried yet in this session." : "Every attack has been tried; the button starts over."));
+
     var c = data.chain;
     document.getElementById("gb-chain").textContent = c.valid ? "Audit log: " + c.entries + " entries, hash chain intact" : "Audit log: BROKEN at entry #" + c.brokenAt + " (" + c.reason + ")";
   }
