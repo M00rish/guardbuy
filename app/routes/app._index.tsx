@@ -5,7 +5,8 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { auditEntries, verifyChain } from "../lib/audit/log.server";
-import { toFeed, usd } from "../lib/audit/feed.server";
+import { toFeed } from "../lib/audit/feed.server";
+import { usd } from "../lib/format";
 import { approvalQueue } from "../lib/agent/approvals.server";
 import { agentOn, currentRuleSet, setAgentState, spending } from "../lib/agent/restock.server";
 import { scoreboard } from "../lib/agent/scoreboard.server";

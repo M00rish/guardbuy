@@ -1,4 +1,5 @@
 import type { AuditEntry } from "../policy/schema";
+import { usd } from "../format";
 import { classifyAttack, WHAT_IF_SCENARIO } from "../agent/attack.server";
 import { attackById } from "../suppliers/attacks";
 
@@ -14,7 +15,7 @@ export type FeedItem = {
 
 const WHAT_IF = WHAT_IF_SCENARIO; // simulated: the AI obeyed the dishonest supplier
 
-export const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
+export { usd } from "../format";
 
 const actor = (by: string, you?: string) =>
   you && by === you ? "you" : by.startsWith("shopify-staff:") ? `staff member ${by.slice("shopify-staff:".length)}` : by;
