@@ -64,6 +64,7 @@ export type Proposal = z.infer<typeof ProposalSchema>;
 export const RecordedProposalSchema = ProposalSchema.extend({
   payeeEmail: z.string().email().optional(),
   variantId: z.string().optional(), // the Shopify variant restocked (also added by GuardBuy, not the LLM)
+  model: z.string().optional(), // which AI model wrote the proposal, e.g. "google:gemini-3.8-flash"
 });
 export type RecordedProposal = z.infer<typeof RecordedProposalSchema>;
 
