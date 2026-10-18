@@ -164,7 +164,7 @@ export default function Home() {
           )}
           {d.ready && (
             <s-query-container>
-            <s-grid gridTemplateColumns="@container (inline-size <= 640px) repeat(2, minmax(0, 1fr)), repeat(4, minmax(0, 1fr))" gap="base">
+            <s-grid gridTemplateColumns="@container (inline-size <= 640px) 1fr 1fr, 1fr 1fr 1fr 1fr" gap="base">
               <Metric label="Spent this week" value={usd(d.spentCents)} detail={capCents ? `of ${usd(capCents)} weekly cap` : undefined}>
                 {capCents > 0 && (
                   <s-progress value={Math.min(d.spentCents, capCents)} max={capCents} tone={d.spentCents > capCents * 0.8 ? "critical" : "auto"} accessibilityLabel="Weekly spending" />
@@ -197,8 +197,9 @@ export default function Home() {
 
       {d.ready && (
         <s-section>
+          {/* Responsive values are comma-separated, so the column lists must not contain commas themselves */}
           <s-query-container>
-          <s-grid gridTemplateColumns="@container (inline-size <= 640px) minmax(0, 1fr), repeat(2, minmax(0, 1fr))" gap="large">
+          <s-grid gridTemplateColumns="@container (inline-size <= 640px) 1fr, 1fr 1fr" gap="large">
             <s-stack gap="small-200">
               <s-heading>Your rules</s-heading>
               {d.rules && (
@@ -320,7 +321,7 @@ function Metric({ label, value, detail, href, badge, children }: { label: string
 /** A label / value line (Polaris text only). */
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <s-grid gridTemplateColumns="@container (inline-size <= 320px) minmax(0, 1fr), 140px minmax(0, 1fr)" gap="small-200">
+    <s-grid gridTemplateColumns="@container (inline-size <= 320px) 1fr, 140px 1fr" gap="small-200">
       <s-text tone="neutral">{label}</s-text>
       <s-text>{value}</s-text>
     </s-grid>
