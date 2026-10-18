@@ -98,6 +98,14 @@ export async function linkSupplier(shop: string, variantId: string, supplierId: 
   });
 }
 
+/** Makes one linked supplier the preferred one for a product (and no other). */
+export async function setPreferred(shop: string, variantId: string, supplierId: string) {
+  await db.$transaction([
+    db.productSupplier.updateMany({ where: { shop, variantId }, data: { preferred: false } }),
+    db.productSupplier.updateMany({ where: { shop, variantId, supplierId }, data: { preferred: true } }),
+  ]);
+}
+
 export async function unlinkSupplier(shop: string, variantId: string, supplierId: string) {
   await db.productSupplier.deleteMany({ where: { shop, variantId, supplierId } });
 }
