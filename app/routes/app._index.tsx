@@ -116,7 +116,7 @@ export default function Home() {
   const lowBalance = d.balanceCents !== null && d.rules !== null && d.balanceCents < d.rules.cashFloorCents * 1.5;
 
   return (
-    <s-page heading="GuardBuy">
+    <s-page heading="GuardBuy" inlineSize="large">
       {d.ready && (
         <s-button slot="primary-action" variant={d.running ? "secondary" : "primary"} disabled={busy}
           onClick={() => fetcher.submit({ intent: "agent", on: String(!d.running) }, { method: "POST" })}>
@@ -125,7 +125,7 @@ export default function Home() {
       )}
       <s-button slot="secondary-actions" href="/app/rules">Edit rules</s-button>
 
-      {/* Status line: a small badge when all is well, banners only when something needs attention */}
+      {/* Status, attention banners (only when needed) and the key numbers, in one card */}
       <s-section>
         <s-stack gap="base">
           <s-stack direction="inline" gap="small-200" alignItems="center">
@@ -156,6 +156,16 @@ export default function Home() {
               Entry #{d.chain.brokenAtSeq}: {d.chain.reason}. <s-link href="/app/activity">Open activity</s-link>
             </s-banner>
           )}
+          {d.ready && (
+              <s-grid gridTemplateColumns="repeat(4, minmax(0, 1fr))" gap="base">
+                <Metric label="Spent this week" value={usd(d.spentCents)} detail={capCents ? `of ${usd(capCents)} weekly cap` : undefined}>
+                  {capCents > 0 && <s-progress value={Math.min(d.spentCents, capCents)} max={capCents} tone={d.spentCents > capCents * 0.8 ? "critical" : "auto"} accessibilityLabel="Weekly spending" />}
+                </Metric>
+                <Metric label="PayPal balance" value={d.balanceCents === null ? "Unavailable" : usd(d.balanceCents)} detail={d.rules ? `Floor ${usd(d.rules.cashFloorCents)}` : undefined} />
+                <Metric label="Waiting for you" value={String(d.waiting)} detail={d.waiting ? "Open Approvals" : "Nothing to approve"} href={d.waiting ? "/app/approvals" : undefined} />
+                <Metric label="Stopped by your rules" value={String(d.blocked.count)} detail={d.blocked.count ? `${usd(d.blocked.cents)} not spent` : "Nothing blocked yet"} href="/app/protection" />
+              </s-grid>
+          )}
         </s-stack>
       </s-section>
 
@@ -172,19 +182,6 @@ export default function Home() {
               </s-stack>
             ))}
           </s-stack>
-        </s-section>
-      )}
-
-      {d.ready && (
-        <s-section>
-          <s-grid gridTemplateColumns="@container (inline-size > 560px) repeat(4, 1fr), 1fr 1fr" gap="base">
-            <Metric label="Spent this week" value={usd(d.spentCents)} detail={capCents ? `of ${usd(capCents)} weekly cap` : undefined}>
-              {capCents > 0 && <s-progress value={Math.min(d.spentCents, capCents)} max={capCents} tone={d.spentCents > capCents * 0.8 ? "critical" : "auto"} accessibilityLabel="Weekly spending" />}
-            </Metric>
-            <Metric label="PayPal balance" value={d.balanceCents === null ? "Unavailable" : usd(d.balanceCents)} detail={d.rules ? `Floor ${usd(d.rules.cashFloorCents)}` : undefined} />
-            <Metric label="Waiting for you" value={String(d.waiting)} detail={d.waiting ? "Open Approvals" : "Nothing to approve"} href={d.waiting ? "/app/approvals" : undefined} />
-            <Metric label="Stopped by your rules" value={String(d.blocked.count)} detail={d.blocked.count ? `${usd(d.blocked.cents)} not spent` : "Nothing blocked yet"} href="/app/protection" />
-          </s-grid>
         </s-section>
       )}
 
@@ -211,8 +208,10 @@ export default function Home() {
                 <s-table-cell>{p.cover === null ? "–" : p.cover}</s-table-cell>
                 <s-table-cell>{p.supplier ?? <s-link href="/app/products">Link a supplier</s-link>}</s-table-cell>
                 <s-table-cell>
-                  <s-badge tone={p.status.tone}>{p.status.label}</s-badge>
-                  {p.status.at && <s-text tone="neutral"> {ago(p.status.at, now)}</s-text>}
+                  <s-stack direction="inline" gap="small-200" alignItems="center">
+                    <s-badge tone={p.status.tone}>{p.status.label}</s-badge>
+                    {p.status.at && <s-text tone="neutral">{ago(p.status.at, now)}</s-text>}
+                  </s-stack>
                 </s-table-cell>
                 <s-table-cell>
                   <s-switch label="Restock with GuardBuy" labelAccessibilityVisibility="exclusive" checked={p.managed} disabled={busy}
@@ -225,17 +224,27 @@ export default function Home() {
       </s-section>
 
       <s-section heading="Recent activity">
-        <s-stack gap="small-300">
-          {d.recent.length === 0 && <s-text tone="neutral">Nothing yet. The agent's work shows up here.</s-text>}
-          {d.recent.map((f) => (
-            <s-stack key={`${f.seq}-${f.kind}`} direction="inline" gap="small-200" alignItems="center">
-              <s-badge tone={FEED_TONE[f.kind] ?? "neutral"}>{FEED_LABEL[f.kind] ?? f.kind}</s-badge>
-              <s-text>{f.title}</s-text>
-              <s-text tone="neutral">{ago(f.at, now)}</s-text>
-            </s-stack>
-          ))}
-          <s-link href="/app/activity">All activity</s-link>
-        </s-stack>
+        {d.recent.length === 0 ? (
+          <s-text tone="neutral">Nothing yet. The agent's work shows up here.</s-text>
+        ) : (
+          <s-table>
+            <s-table-header-row>
+              <s-table-header>Type</s-table-header>
+              <s-table-header listSlot="primary">Event</s-table-header>
+              <s-table-header listSlot="secondary">When</s-table-header>
+            </s-table-header-row>
+            <s-table-body>
+              {d.recent.map((f) => (
+                <s-table-row key={`${f.seq}-${f.kind}`}>
+                  <s-table-cell><s-badge tone={FEED_TONE[f.kind] ?? "neutral"}>{FEED_LABEL[f.kind] ?? f.kind}</s-badge></s-table-cell>
+                  <s-table-cell>{f.title}</s-table-cell>
+                  <s-table-cell><s-text tone="neutral">{ago(f.at, now)}</s-text></s-table-cell>
+                </s-table-row>
+              ))}
+            </s-table-body>
+          </s-table>
+        )}
+        <s-box paddingBlockStart="small-200"><s-link href="/app/activity">All activity</s-link></s-box>
       </s-section>
 
       {d.rules && (
@@ -246,7 +255,7 @@ export default function Home() {
             <s-text>Keep {usd(d.rules.cashFloorCents)} in PayPal</s-text>
             <s-text>Restock below {plural(d.rules.reorderBelow, "day")} of stock</s-text>
             <s-text tone="neutral">Approved suppliers: {d.rules.allowlist.join(", ")}</s-text>
-            {d.signed && <s-text tone="neutral">Signed by {d.signed.by}, {new Date(d.signed.at).toLocaleDateString()}</s-text>}
+            {d.signed && <s-text tone="neutral">Signed by {d.signed.by} · {new Date(d.signed.at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</s-text>}
             <s-link href="/app/rules">Edit rules</s-link>
           </s-stack>
         </s-section>
