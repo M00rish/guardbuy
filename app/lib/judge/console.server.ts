@@ -1,7 +1,7 @@
 import db from "../../db.server";
 import { appendAudit, auditEntries, verifyChain } from "../audit/log.server";
 import { approvalQueue, approvePurchase, rejectPurchase } from "../agent/approvals.server";
-import { runInjectionTest } from "../agent/attack.server";
+import { classifyAttack, runInjectionTest } from "../agent/attack.server";
 import { currentRuleSet, defaultRuleSet, paypalBalanceCents, policyContext, runRestock, signRuleSet } from "../agent/restock.server";
 import { evaluate } from "../policy/engine";
 import { RuleSetSchema, type AuditEntry } from "../policy/schema";
@@ -56,7 +56,7 @@ async function checkCaps(sandbox: string) {
 export type FeedItem = {
   seq: number;
   at: string;
-  kind: "rules" | "stock" | "attack" | "proposed" | "auto" | "approval" | "block" | "resisted" | "approved" | "declined" | "paid" | "failed" | "paypal" | "status";
+  kind: "rules" | "stock" | "attack" | "proposed" | "auto" | "approval" | "block" | "resisted" | "flagged" | "slipped" | "approved" | "declined" | "paid" | "failed" | "paypal" | "status";
   title: string;
   detail?: string;
   untrusted?: string; // AI or supplier text: rendered as plain text and labelled
@@ -81,7 +81,18 @@ function toFeed(log: AuditEntry[]): FeedItem[] {
         if (ev.scenario === WHAT_IF) {
           items.push({ ...base, kind: "attack", title: "What if the AI were fooled? (simulated)", detail: "Recorded as if the AI obeyed Bean Bargains' note. Test only: never paid." });
         } else if (attack) {
-          items.push({ ...base, kind: "attack", title: `Dishonest supplier attack: ${attack.title}`, untrusted: attack.note, untrustedLabel: "Bean Bargains' note, as the AI read it (untrusted)" });
+          const notes = Object.values(attack.setup.notes ?? {}).join(" / ");
+          const quiet = [
+            attack.setup.payeeChange && `the supplier's PayPal address was changed to ${attack.setup.payeeChange.email}`,
+            attack.setup.lookalike && `staff added "${attack.setup.lookalike.name}" as a supplier`,
+            attack.setup.perDay && `fake orders pushed sales to ${attack.setup.perDay}/day`,
+          ].filter(Boolean).join("; ");
+          items.push({
+            ...base, kind: "attack",
+            title: `${attack.level[0].toUpperCase()}${attack.level.slice(1)} attack: ${attack.title}`,
+            detail: `Copies: ${attack.realWorld}.${quiet ? ` Setup: ${quiet}.` : ""}`,
+            ...(notes ? { untrusted: notes, untrustedLabel: "Supplier note the AI read (written by the attacker)" } : {}),
+          });
         } else if (ev.stock) {
           items.push({ ...base, kind: "stock", title: `Stock fell: ${ev.proposal.sku}`, detail: `${ev.stock.available} left, ${ev.stock.perDay}/day, ${ev.stock.daysOfCover} days of cover` });
         }
@@ -97,10 +108,16 @@ function toFeed(log: AuditEntry[]): FeedItem[] {
         const proposalSeq = ev.proposalSeq;
         const source = log.find((p) => p.seq === proposalSeq);
         if (source?.event.type === "proposal" && source.event.scenario) {
-          const swayed = source.event.proposal.supplierId === "bean-bargains" || d.verdict === "block";
-          items.push(swayed
-            ? { ...base, kind: "block", title: `Rules: BLOCKED (${usd(d.totalCents)}). Test only, nothing paid.`, detail: flagged.filter((c) => c.outcome === "block").map((c) => c.detail).join(" · ") }
-            : { ...base, kind: "resisted", title: `The AI resisted: it kept the honest supplier and the normal quantity. Test only, nothing paid.` });
+          const attack = attackById(source.event.scenario);
+          const outcome = attack ? classifyAttack(attack, source.event.proposal, d.verdict) : d.verdict === "block" ? "blocked" : "resisted";
+          const reasons = flagged.map((c) => c.detail).join(" · ");
+          const tail = "Test only, nothing paid.";
+          items.push(
+            outcome === "resisted" ? { ...base, kind: "resisted", title: `The AI resisted the attack. ${tail}` }
+            : outcome === "blocked" ? { ...base, kind: "block", title: `The AI was swayed, and the rules BLOCKED it (${usd(d.totalCents)}). ${tail}`, detail: reasons }
+            : outcome === "flagged" ? { ...base, kind: "flagged", title: `The AI was swayed; the rules sent it to a person (${usd(d.totalCents)}). ${tail}`, detail: reasons }
+            : { ...base, kind: "slipped", title: `The AI was swayed and the rules would have ALLOWED it (${usd(d.totalCents)}). ${tail}`, detail: attack?.gap ? `Known gap, fix planned: ${attack.gap}` : "Unexpected: no rule caught this" },
+          );
           break;
         }
         const title = d.verdict === "auto" ? `Rules checked: allowed (${usd(d.totalCents)})` : d.verdict === "approval" ? `Rules checked: needs your approval (${usd(d.totalCents)})` : `Rules checked: BLOCKED (${usd(d.totalCents)})`;
@@ -180,7 +197,7 @@ export async function judgeAttack(shop: string, judgeId: string) {
   const attack = ATTACKS[tried % ATTACKS.length];
   const check = { ...COFFEE, daysOfCover: COFFEE.available / COFFEE.perDay, needsRestock: true };
   void runInjectionTest(sandbox, check, attack.id).catch((e) => console.error(`[judge] attack ${sandbox}:`, e));
-  return `Bean Bargains is trying: "${attack.title}". The AI is reading its note now.`;
+  return `${attack.level[0].toUpperCase()}${attack.level.slice(1)} attack: "${attack.title}". The AI is deciding now.`;
 }
 
 /**

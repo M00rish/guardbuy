@@ -28,6 +28,7 @@ const SHELL = `
   .gb ul.feed li { border-left: 3px solid #ddd; padding: 6px 12px; margin: 6px 0; }
   .gb li.k-block { border-color: #d92d20; } .gb li.k-paid { border-color: #12b76a; } .gb li.k-approval { border-color: #f79009; }
   .gb li.k-attack { border-color: #7a5af8; } .gb li.k-resisted { border-color: #12b76a; }
+  .gb li.k-flagged { border-color: #f79009; } .gb li.k-slipped { border-color: #d92d20; background: #fef3f2; }
   .gb li.k-failed { border-color: #d92d20; } .gb li.k-stock { border-color: #2e90fa; } .gb li.k-approved { border-color: #12b76a; }
   .gb .chain { font-weight: 600; }
 </style>
@@ -36,7 +37,7 @@ const SHELL = `
   <p class="lede">An AI restocks this coffee shop, but it can only spend PayPal money inside rules the merchant signed. Try it: these buttons run the real agent, the real rules engine and real PayPal sandbox payments, in a private sandbox just for you.</p>
   <div class="actions">
     <button class="primary" data-action="restock">Simulate a sale (low stock)</button>
-    <button data-action="attack">Send the dishonest supplier (real AI)</button>
+    <button data-action="attack">Run the next attack (real AI)</button>
     <button data-action="whatif">What if the AI were fooled?</button>
     <button data-action="verify">Verify the log</button>
     <button data-action="new">New session</button>
