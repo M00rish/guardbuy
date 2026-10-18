@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Link, useFetcher, useLoaderData } from "react-router";
+import { useFetcher, useLoaderData } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
@@ -85,17 +85,19 @@ function ago(iso: string, now: number) {
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-// Pill colors follow the architecture page: green = money, brown = AI, blue = information, red = stopped.
-const FEED_PILL: Record<string, string> = {
-  paid: "gb-pill-money", approved: "gb-pill-money", resisted: "gb-pill-money", auto: "gb-pill-money",
-  block: "gb-pill-crit", failed: "gb-pill-crit", slipped: "gb-pill-crit",
-  approval: "gb-pill-llm", flagged: "gb-pill-llm", declined: "gb-pill-muted",
-  proposed: "gb-pill-llm", attack: "gb-pill-llm", stock: "gb-pill-read", paypal: "gb-pill-read", rules: "gb-pill-muted",
+// Polaris badge tones carry the same meaning as the architecture palette:
+// success = money moved, caution = needs a person, critical = stopped, info = the AI / information.
+type Tone = "success" | "caution" | "warning" | "critical" | "info" | "neutral";
+const FEED_TONE: Record<string, Tone> = {
+  paid: "success", approved: "success", resisted: "success", auto: "success",
+  block: "critical", failed: "critical", slipped: "critical",
+  approval: "caution", flagged: "caution", declined: "neutral",
+  proposed: "info", attack: "info", stock: "info", paypal: "info", rules: "neutral",
 };
-const PILL: Record<string, string> = { success: "gb-pill-money", warning: "gb-pill-llm", critical: "gb-pill-crit", info: "gb-pill-read", neutral: "gb-pill-muted" };
+const STATUS_TONE: Record<string, Tone> = { success: "success", warning: "caution", critical: "critical", info: "info", neutral: "neutral" };
 const FEED_LABEL: Record<string, string> = {
   paid: "Paid", approved: "Approved", auto: "Allowed", block: "Blocked", failed: "Failed", approval: "Needs you", declined: "Declined",
-  stock: "Low stock", proposed: "Proposed", rules: "Rules", paypal: "PayPal", attack: "Attack test", resisted: "Resisted", flagged: "Flagged", slipped: "Gap",
+  stock: "Low stock", proposed: "AI proposed", rules: "Rules", paypal: "PayPal", attack: "Attack test", resisted: "Resisted", flagged: "Flagged", slipped: "Gap",
 };
 
 export default function Home() {
@@ -129,21 +131,22 @@ export default function Home() {
       )}
       <s-button slot="secondary-actions" href="/app/rules">Edit rules</s-button>
 
-      {/* Status, attention banners (only when needed) and the key numbers, in one card */}
+      {/* Status, alerts (only when needed) and the key numbers */}
       <s-section>
         <s-stack gap="base">
-          <div className="gb-brand">
-            <span className="gb-wordmark">GuardBuy</span>
-            <span className="gb-eyebrow">AI restocking · your rules decide · every step on a verifiable log</span>
-          </div>
           <s-stack direction="inline" gap="small-200" alignItems="center">
-            <span className={`gb-pill ${d.running ? "gb-pill-money" : d.paused ? "gb-pill-llm" : "gb-pill-read"}`}>{d.running ? "Running" : d.paused ? "Paused" : "Setup needed"}</span>
+            <s-badge tone={d.running ? "success" : d.paused ? "caution" : "info"}>{d.running ? "Running" : d.paused ? "Paused" : "Setup needed"}</s-badge>
             <s-text tone="neutral">
               {d.running
                 ? `Restocks your switched-on products within your signed rules. Purchases above ${d.rules?.approvalAbove} wait for you.`
                 : d.paused ? "Nothing is proposed or bought until you resume it." : `${doneSteps} of 4 setup steps done. Nothing is bought before setup is finished.`}
             </s-text>
           </s-stack>
+          {!d.chain.valid && (
+            <s-banner tone="critical" heading="The audit log failed verification">
+              Entry #{d.chain.brokenAtSeq}: {d.chain.reason}. <s-link href="/app/activity">Open activity</s-link>
+            </s-banner>
+          )}
           {d.waiting > 0 && (
             <s-banner tone="warning" heading={`${plural(d.waiting, "purchase")} waiting for your approval`}>
               <s-link href="/app/approvals">Review now</s-link>
@@ -159,24 +162,17 @@ export default function Home() {
               Purchases that would take the balance below {usd(d.rules!.cashFloorCents)} are blocked.
             </s-banner>
           )}
-          {!d.chain.valid && (
-            <s-banner tone="critical" heading="The audit log failed verification">
-              Entry #{d.chain.brokenAtSeq}: {d.chain.reason}. <s-link href="/app/activity">Open activity</s-link>
-            </s-banner>
-          )}
           {d.ready && (
-            <div className="gb-metrics">
-              <Metric accent="money" label="Spent this week" value={usd(d.spentCents)} detail={capCents ? `of ${usd(capCents)} weekly cap` : undefined}>
+            <s-grid gridTemplateColumns="repeat(4, minmax(0, 1fr))" gap="base">
+              <Metric label="Spent this week" value={usd(d.spentCents)} detail={capCents ? `of ${usd(capCents)} weekly cap` : undefined}>
                 {capCents > 0 && (
-                  <div className={`gb-bar${d.spentCents > capCents * 0.8 ? " gb-bar-hot" : ""}`} role="progressbar" aria-label="Weekly spending" aria-valuenow={d.spentCents} aria-valuemax={capCents}>
-                    <span style={{ width: `${Math.min(100, (d.spentCents / capCents) * 100)}%` }} />
-                  </div>
+                  <s-progress value={Math.min(d.spentCents, capCents)} max={capCents} tone={d.spentCents > capCents * 0.8 ? "critical" : "auto"} accessibilityLabel="Weekly spending" />
                 )}
               </Metric>
-              <Metric accent={lowBalance ? "llm" : "ink"} label="PayPal balance" value={d.balanceCents === null ? "Unavailable" : usd(d.balanceCents)} detail={d.rules ? `Floor ${usd(d.rules.cashFloorCents)}` : undefined} />
-              <Metric accent={d.waiting ? "llm" : "ink"} label="Waiting for you" value={String(d.waiting)} detail={d.waiting ? "Open Approvals" : "Nothing to approve"} href={d.waiting ? "/app/approvals" : undefined} />
-              <Metric accent="money" label="Stopped by your rules" value={String(d.blocked.count)} detail={d.blocked.count ? `${usd(d.blocked.cents)} not spent` : "Nothing blocked yet"} href="/app/protection" />
-            </div>
+              <Metric label="PayPal balance" value={d.balanceCents === null ? "Unavailable" : usd(d.balanceCents)} detail={d.rules ? `Floor ${usd(d.rules.cashFloorCents)}` : undefined} badge={lowBalance ? { tone: "caution", label: "Near floor" } : undefined} />
+              <Metric label="Waiting for you" value={String(d.waiting)} detail={d.waiting ? "Open Approvals" : "Nothing to approve"} href={d.waiting ? "/app/approvals" : undefined} />
+              <Metric label="Stopped by your rules" value={String(d.blocked.count)} detail={d.blocked.count ? `${usd(d.blocked.cents)} not spent` : "Nothing blocked yet"} href="/app/protection" />
+            </s-grid>
           )}
         </s-stack>
       </s-section>
@@ -199,34 +195,39 @@ export default function Home() {
 
       {d.ready && (
         <s-section>
-          <div className="gb-cards">
-            <div className="gb-card">
-              <h3>Your rules</h3>
+          <s-grid gridTemplateColumns="repeat(2, minmax(0, 1fr))" gap="large">
+            <s-stack gap="small-200">
+              <s-heading>Your rules</s-heading>
               {d.rules && (
-                <dl>
-                  <dt>Ask me above</dt><dd>{d.rules.approvalAbove}</dd>
-                  <dt>Weekly cap</dt><dd>{usd(d.rules.weeklyCapCents)}</dd>
-                  <dt>Keep in PayPal</dt><dd>{usd(d.rules.cashFloorCents)}</dd>
-                  <dt>Restock below</dt><dd>{plural(d.rules.reorderBelow, "day")} of stock</dd>
-                  <dt>May buy from</dt><dd>{d.rules.allowlist.join(", ")}</dd>
-                </dl>
+                <>
+                  <Row label="Ask me above" value={d.rules.approvalAbove} />
+                  <Row label="Weekly cap" value={usd(d.rules.weeklyCapCents)} />
+                  <Row label="Keep in PayPal" value={usd(d.rules.cashFloorCents)} />
+                  <Row label="Restock below" value={`${plural(d.rules.reorderBelow, "day")} of stock`} />
+                  <Row label="May buy from" value={d.rules.allowlist.join(", ")} />
+                </>
               )}
-              <div className="gb-foot">
-                {d.signed && <>Signed by {d.signed.by} · {new Date(d.signed.at).toLocaleDateString(undefined, { month: "short", day: "numeric" })} · </>}
-                <Link to="/app/rules">Edit rules</Link>
-              </div>
-            </div>
-            <div className="gb-card">
-              <h3>Protection</h3>
-              <dl>
-                <dt>Audit log</dt>
-                <dd>{d.chain.valid ? <span className="gb-pill gb-pill-money">intact · {d.chain.length} {d.chain.length === 1 ? "entry" : "entries"}</span> : <span className="gb-pill gb-pill-crit">broken at #{d.chain.brokenAtSeq}</span>}</dd>
-                <dt>Fingerprint</dt><dd><span className="gb-mono">{d.head ? d.head.slice(0, 16) : "none yet"}</span></dd>
-                <dt>Blocked</dt><dd>{plural(d.blocked.count, "purchase")}{d.attacksBlocked > 0 ? ` · ${plural(d.attacksBlocked, "attack")} stopped in tests` : ""}</dd>
-              </dl>
-              <div className="gb-foot"><Link to="/app/protection">Protection details</Link> · <Link to="/app/activity">Verify the log</Link></div>
-            </div>
-          </div>
+              <s-text tone="neutral">
+                {d.signed ? `Signed by ${d.signed.by} · ${new Date(d.signed.at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : "Not signed yet"}
+              </s-text>
+              <s-link href="/app/rules">Edit rules</s-link>
+            </s-stack>
+            <s-stack gap="small-200">
+              <s-heading>Protection</s-heading>
+              <s-stack direction="inline" gap="small-200" alignItems="center">
+                <s-text tone="neutral">Audit log</s-text>
+                <s-badge tone={d.chain.valid ? "success" : "critical"}>
+                  {d.chain.valid ? `Intact · ${d.chain.length} ${d.chain.length === 1 ? "entry" : "entries"}` : `Broken at #${d.chain.brokenAtSeq}`}
+                </s-badge>
+              </s-stack>
+              <Row label="Fingerprint" value={d.head ? d.head.slice(0, 16) : "None yet"} />
+              <Row label="Blocked" value={`${plural(d.blocked.count, "purchase")}${d.attacksBlocked > 0 ? ` · ${plural(d.attacksBlocked, "attack")} stopped in tests` : ""}`} />
+              <s-stack direction="inline" gap="base">
+                <s-link href="/app/protection">Protection details</s-link>
+                <s-link href="/app/activity">Verify the log</s-link>
+              </s-stack>
+            </s-stack>
+          </s-grid>
         </s-section>
       )}
 
@@ -244,15 +245,19 @@ export default function Home() {
             {d.products.map((p) => (
               <s-table-row key={p.variantId}>
                 <s-table-cell>
-                  <div className={`gb-name${p.managed ? "" : " gb-off"}`}>{p.title}</div>
-                  {p.sku && <div className="gb-mono">{p.sku}</div>}
+                  <s-stack gap="none">
+                    <s-text type={p.managed ? "strong" : "generic"} tone={p.managed ? "auto" : "neutral"}>{p.title}</s-text>
+                    {p.sku && <s-text tone="neutral">{p.sku}</s-text>}
+                  </s-stack>
                 </s-table-cell>
-                <s-table-cell><span className="gb-num">{p.stock}</span></s-table-cell>
-                <s-table-cell><span className="gb-num">{p.cover === null ? "–" : p.cover}</span></s-table-cell>
-                <s-table-cell>{p.supplier ? <span className="gb-event">{p.supplier}</span> : <s-link href="/app/products">Link a supplier</s-link>}</s-table-cell>
+                <s-table-cell>{p.stock}</s-table-cell>
+                <s-table-cell>{p.cover === null ? "–" : p.cover}</s-table-cell>
+                <s-table-cell>{p.supplier ?? <s-link href="/app/products">Link a supplier</s-link>}</s-table-cell>
                 <s-table-cell>
-                  <span className={`gb-pill ${PILL[p.status.tone]}`}>{p.status.label}</span>
-                  {p.status.at && <span className="gb-when"> · {ago(p.status.at, now)}</span>}
+                  <s-stack direction="inline" gap="small-200" alignItems="center">
+                    <s-badge tone={STATUS_TONE[p.status.tone]}>{p.status.label}</s-badge>
+                    {p.status.at && <s-text tone="neutral">{ago(p.status.at, now)}</s-text>}
+                  </s-stack>
                 </s-table-cell>
                 <s-table-cell>
                   <s-switch label="Restock with GuardBuy" labelAccessibilityVisibility="exclusive" checked={p.managed} disabled={busy}
@@ -277,9 +282,9 @@ export default function Home() {
             <s-table-body>
               {d.recent.map((f) => (
                 <s-table-row key={`${f.seq}-${f.kind}`}>
-                  <s-table-cell><span className={`gb-pill ${FEED_PILL[f.kind] ?? "gb-pill-muted"}`}>{FEED_LABEL[f.kind] ?? f.kind}</span></s-table-cell>
-                  <s-table-cell><span className="gb-event">{f.title}</span></s-table-cell>
-                  <s-table-cell><span className="gb-when">{ago(f.at, now)}</span></s-table-cell>
+                  <s-table-cell><s-badge tone={FEED_TONE[f.kind] ?? "neutral"}>{FEED_LABEL[f.kind] ?? f.kind}</s-badge></s-table-cell>
+                  <s-table-cell>{f.title}</s-table-cell>
+                  <s-table-cell><s-text tone="neutral">{ago(f.at, now)}</s-text></s-table-cell>
                 </s-table-row>
               ))}
             </s-table-body>
@@ -287,19 +292,34 @@ export default function Home() {
         )}
         <s-box paddingBlockStart="small-200"><s-link href="/app/activity">All activity</s-link></s-box>
       </s-section>
-
     </s-page>
   );
 }
 
-function Metric({ label, value, detail, href, accent, children }: { label: string; value: string; detail?: string; href?: string; accent: "money" | "ink" | "llm" | "crit"; children?: React.ReactNode }) {
+/** A Polaris-style metric card: subdued box, neutral label, large value. */
+function Metric({ label, value, detail, href, badge, children }: { label: string; value: string; detail?: string; href?: string; badge?: { tone: Tone; label: string }; children?: React.ReactNode }) {
   return (
-    <div className={`gb-metric gb-accent-${accent}`}>
-      <div className="gb-label">{label}</div>
-      <div className="gb-value">{value}</div>
-      {children}
-      {detail && (href ? <Link className="gb-detail" to={href}>{detail}</Link> : <div className="gb-detail">{detail}</div>)}
-    </div>
+    <s-box padding="base" background="subdued" borderRadius="base">
+      <s-stack gap="small-200">
+        <s-stack direction="inline" gap="small-200" alignItems="center">
+          <s-text tone="neutral">{label}</s-text>
+          {badge && <s-badge tone={badge.tone}>{badge.label}</s-badge>}
+        </s-stack>
+        <s-heading>{value}</s-heading>
+        {children}
+        {detail && (href ? <s-link href={href}>{detail}</s-link> : <s-text tone="neutral">{detail}</s-text>)}
+      </s-stack>
+    </s-box>
+  );
+}
+
+/** A label / value line (Polaris text only). */
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <s-grid gridTemplateColumns="140px minmax(0, 1fr)" gap="small-200">
+      <s-text tone="neutral">{label}</s-text>
+      <s-text>{value}</s-text>
+    </s-grid>
   );
 }
 
