@@ -85,6 +85,17 @@ function payoutFailedAt(payout: AuditEntry, log: AuditEntry[]): string | null {
   return PAYOUT_FAILED.has(payout.event.status) ? payout.at : null;
 }
 
+/** Money that left (payouts that didn't fail, plus captured PayPal orders) over the rolling windows the rules use. */
+export function spending(log: AuditEntry[], now = new Date()) {
+  const spent = log.flatMap((e) =>
+    (e.event.type === "payout" && !payoutFailedAt(e, log)) || e.event.type === "order_captured"
+      ? [{ at: e.at, cents: e.event.amountCents }]
+      : [],
+  );
+  const since = (ms: number) => spent.filter((s) => now.getTime() - Date.parse(s.at) < ms);
+  return { spentLast7dCents: since(7 * DAY_MS).reduce((sum, s) => sum + s.cents, 0), purchasesLast24h: since(DAY_MS).length };
+}
+
 /** Everything the policy engine needs, built from the audit log and the merchant's own offers. */
 export function policyContext(
   proposal: RecordedProposal,
@@ -94,22 +105,15 @@ export function policyContext(
   now = new Date(),
 ): PolicyContext {
   const offer = merchant.offers.find((o) => o.supplierId === proposal.supplierId);
-  // Money that left: payouts that didn't fail, plus captured PayPal orders.
-  const spent = log.flatMap((e) =>
-    (e.event.type === "payout" && !payoutFailedAt(e, log)) || e.event.type === "order_captured"
-      ? [{ at: e.at, cents: e.event.amountCents }]
-      : [],
-  );
-  const since = (ms: number) => spent.filter((s) => now.getTime() - Date.parse(s.at) < ms);
-
+  const { spentLast7dCents, purchasesLast24h } = spending(log, now);
   return {
     productManaged: merchant.managed,
     supplierLinked: !!offer,
     // An offer the merchant never linked has no history: 0 makes the price check block it too.
     avgUnitPrice30dCents: offer?.avgUnitPrice30dCents ?? 0,
     usualQuantity: offer?.usualQuantity ?? 0,
-    spentLast7dCents: since(7 * DAY_MS).reduce((sum, s) => sum + s.cents, 0),
-    purchasesLast24h: since(DAY_MS).length,
+    spentLast7dCents,
+    purchasesLast24h,
     paypalBalanceCents: balanceCents,
   };
 }

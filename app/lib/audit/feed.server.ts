@@ -24,8 +24,20 @@ const actor = (by: string, you?: string) =>
  * console. Untrusted text (AI explanations, supplier notes) is kept separate and labelled; the
  * callers render it as plain text. `you` is the actor id to show as "you".
  */
-export function toFeed(log: AuditEntry[], you?: string): FeedItem[] {
+export type FeedNames = { product?: (sku: string, variantId?: string) => string | undefined; supplier?: (id: string) => string | undefined };
+
+export function toFeed(log: AuditEntry[], you?: string, names: FeedNames = {}): FeedItem[] {
   const items: FeedItem[] = [];
+  const product = (sku: string, variantId?: string) => names.product?.(sku, variantId) ?? sku;
+  const supplier = (id: string) => names.supplier?.(id) ?? id;
+  /** "38 × House Blend Coffee 1kg from Atlas Roasters" for the purchase behind a decision. */
+  const purchaseOf = (decisionSeq: number) => {
+    const d = log.find((x) => x.seq === decisionSeq);
+    const p = d?.event.type === "decision" ? log.find((x) => x.seq === (d.event.type === "decision" ? d.event.proposalSeq : -1)) : undefined;
+    return p?.event.type === "proposal"
+      ? `${p.event.proposal.quantity} × ${product(p.event.proposal.sku, p.event.proposal.variantId)} from ${supplier(p.event.proposal.supplierId)}`
+      : undefined;
+  };
   for (const e of log) {
     const ev = e.event;
     const base = { seq: e.seq, at: e.at };
@@ -51,9 +63,9 @@ export function toFeed(log: AuditEntry[], you?: string): FeedItem[] {
             ...(notes ? { untrusted: notes, untrustedLabel: "Supplier note the AI read (written by the attacker)" } : {}),
           });
         } else if (ev.stock) {
-          items.push({ ...base, kind: "stock", title: `Stock fell: ${ev.proposal.sku}`, detail: `${ev.stock.available} left, ${ev.stock.perDay}/day, ${ev.stock.daysOfCover} days of cover` });
+          items.push({ ...base, kind: "stock", title: `Stock fell: ${product(ev.proposal.sku, ev.proposal.variantId)}`, detail: `${ev.stock.available} left, ${ev.stock.perDay}/day, ${ev.stock.daysOfCover} days of cover` });
         }
-        items.push({ ...base, kind: "proposed", title: `AI proposed ${ev.proposal.quantity} × ${ev.proposal.sku} from ${ev.proposal.supplierId} at ${usd(ev.proposal.unitPriceCents)}`, untrusted: ev.proposal.reasoning, untrustedLabel: "The AI's explanation (not verified)" });
+        items.push({ ...base, kind: "proposed", title: `AI proposed ${ev.proposal.quantity} × ${product(ev.proposal.sku, ev.proposal.variantId)} from ${supplier(ev.proposal.supplierId)} at ${usd(ev.proposal.unitPriceCents)}`, untrusted: ev.proposal.reasoning, untrustedLabel: "The AI's explanation (not verified)" });
         break;
       }
       case "proposal_failed":
@@ -82,7 +94,7 @@ export function toFeed(log: AuditEntry[], you?: string): FeedItem[] {
         break;
       }
       case "approved":
-        items.push({ ...base, kind: "approved", title: `Approved by ${actor(ev.approvedBy, you)}` });
+        items.push({ ...base, kind: "approved", title: `Approved by ${actor(ev.approvedBy, you)}${purchaseOf(ev.decisionSeq) ? `: ${purchaseOf(ev.decisionSeq)}` : ""}` });
         break;
       case "rejected":
         items.push({ ...base, kind: "declined", title: `Declined by ${actor(ev.rejectedBy, you)}. Nothing was paid.`, detail: ev.reason });
@@ -94,7 +106,7 @@ export function toFeed(log: AuditEntry[], you?: string): FeedItem[] {
         items.push({ ...base, kind: "failed", title: "Payment failed", detail: ev.reason });
         break;
       case "payout":
-        items.push({ ...base, kind: "paid", title: `Paid ${usd(ev.amountCents)} via PayPal Payouts`, detail: `PayPal payout batch ${ev.payoutBatchId} (${ev.status})` });
+        items.push({ ...base, kind: "paid", title: `Paid ${usd(ev.amountCents)} via PayPal Payouts${purchaseOf(ev.decisionSeq) ? ` for ${purchaseOf(ev.decisionSeq)}` : ""}`, detail: `PayPal payout batch ${ev.payoutBatchId} (${ev.status})` });
         break;
       case "payout_status":
         items.push({ ...base, kind: "status", title: `Payout status: ${ev.status}`, detail: ev.confirmedByTransactionSearch ? "Confirmed in PayPal's transaction records" : undefined });
@@ -103,7 +115,7 @@ export function toFeed(log: AuditEntry[], you?: string): FeedItem[] {
         items.push({ ...base, kind: "paypal", title: `PayPal order ${ev.orderId} created`, detail: "Waiting for approval in PayPal" });
         break;
       case "order_captured":
-        items.push({ ...base, kind: "paid", title: `Paid ${usd(ev.amountCents)} via PayPal Orders`, detail: `Capture ${ev.captureId} (${ev.status})` });
+        items.push({ ...base, kind: "paid", title: `Paid ${usd(ev.amountCents)} via PayPal Orders${purchaseOf(ev.decisionSeq) ? ` for ${purchaseOf(ev.decisionSeq)}` : ""}`, detail: `Capture ${ev.captureId} (${ev.status})` });
         break;
     }
   }
