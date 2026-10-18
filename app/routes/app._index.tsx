@@ -163,16 +163,18 @@ export default function Home() {
             </s-banner>
           )}
           {d.ready && (
-            <s-grid gridTemplateColumns="repeat(4, minmax(0, 1fr))" gap="base">
+            <s-query-container>
+            <s-grid gridTemplateColumns="@container (inline-size <= 640px) repeat(2, minmax(0, 1fr)), repeat(4, minmax(0, 1fr))" gap="base">
               <Metric label="Spent this week" value={usd(d.spentCents)} detail={capCents ? `of ${usd(capCents)} weekly cap` : undefined}>
                 {capCents > 0 && (
                   <s-progress value={Math.min(d.spentCents, capCents)} max={capCents} tone={d.spentCents > capCents * 0.8 ? "critical" : "auto"} accessibilityLabel="Weekly spending" />
                 )}
               </Metric>
-              <Metric label="PayPal balance" value={d.balanceCents === null ? "Unavailable" : usd(d.balanceCents)} detail={d.rules ? `Floor ${usd(d.rules.cashFloorCents)}` : undefined} badge={lowBalance ? { tone: "caution", label: "Near floor" } : undefined} />
+              <Metric label="PayPal balance" value={d.balanceCents === null ? "Unavailable" : usd(d.balanceCents)} detail={d.rules ? `Floor ${usd(d.rules.cashFloorCents)}` : undefined} badge={lowBalance ? { tone: "caution", label: "Low" } : undefined} />
               <Metric label="Waiting for you" value={String(d.waiting)} detail={d.waiting ? "Open Approvals" : "Nothing to approve"} href={d.waiting ? "/app/approvals" : undefined} />
               <Metric label="Stopped by your rules" value={String(d.blocked.count)} detail={d.blocked.count ? `${usd(d.blocked.cents)} not spent` : "Nothing blocked yet"} href="/app/protection" />
             </s-grid>
+            </s-query-container>
           )}
         </s-stack>
       </s-section>
@@ -195,7 +197,8 @@ export default function Home() {
 
       {d.ready && (
         <s-section>
-          <s-grid gridTemplateColumns="repeat(2, minmax(0, 1fr))" gap="large">
+          <s-query-container>
+          <s-grid gridTemplateColumns="@container (inline-size <= 640px) minmax(0, 1fr), repeat(2, minmax(0, 1fr))" gap="large">
             <s-stack gap="small-200">
               <s-heading>Your rules</s-heading>
               {d.rules && (
@@ -228,6 +231,7 @@ export default function Home() {
               </s-stack>
             </s-stack>
           </s-grid>
+          </s-query-container>
         </s-section>
       )}
 
@@ -316,7 +320,7 @@ function Metric({ label, value, detail, href, badge, children }: { label: string
 /** A label / value line (Polaris text only). */
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <s-grid gridTemplateColumns="140px minmax(0, 1fr)" gap="small-200">
+    <s-grid gridTemplateColumns="@container (inline-size <= 320px) minmax(0, 1fr), 140px minmax(0, 1fr)" gap="small-200">
       <s-text tone="neutral">{label}</s-text>
       <s-text>{value}</s-text>
     </s-grid>
