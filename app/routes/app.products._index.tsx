@@ -7,6 +7,8 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import db from "../db.server";
 import { authenticate } from "../shopify.server";
 import { productOverview } from "../lib/merchant/dashboard.server";
+import { auditEntries } from "../lib/audit/log.server";
+import { currentRuleSet } from "../lib/agent/restock.server";
 import { setManaged } from "../lib/suppliers/directory.server";
 import { usd } from "../lib/format";
 
@@ -16,11 +18,13 @@ import { usd } from "../lib/format";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
-  const [products, links, supplierCount] = await Promise.all([
+  const [products, links, supplierCount, log] = await Promise.all([
     productOverview(admin, shop),
     db.productSupplier.findMany({ where: { shop }, include: { supplier: true }, orderBy: [{ preferred: "desc" }, { unitPriceCents: "asc" }] }),
     db.supplier.count({ where: { shop } }),
+    auditEntries(shop),
   ]);
+  const allow = currentRuleSet(log)?.supplierAllowlist ?? null; // null: no rules signed yet
   return {
     supplierCount,
     products: products.map((p) => ({
@@ -30,7 +34,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       stock: p.stock,
       cover: Number.isFinite(p.cover) ? Number(p.cover.toFixed(1)) : null,
       managed: p.managed,
-      suppliers: links.filter((l) => l.variantId === p.variantId).map((l) => ({ name: l.supplier.name, price: usd(l.unitPriceCents), preferred: l.preferred })),
+      suppliers: links.filter((l) => l.variantId === p.variantId).map((l) => ({
+        name: l.supplier.name, price: usd(l.unitPriceCents), preferred: l.preferred,
+        approved: allow === null || allow.includes(l.supplierId), // not on the rules' list: the agent's purchase would be blocked
+      })),
     })),
   };
 };
@@ -45,11 +52,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return { ok: true, message: on ? "GuardBuy will restock this product" : "Product switched off" };
 };
 
-type View = "all" | "managed" | "needs";
+type View = "all" | "managed" | "none";
 const VIEWS: { id: View; label: string }[] = [
   { id: "all", label: "All" },
   { id: "managed", label: "Managed" },
-  { id: "needs", label: "Needs a supplier" },
+  { id: "none", label: "No supplier" },
 ];
 
 export default function Products() {
@@ -65,8 +72,9 @@ export default function Products() {
   }, [fetcher.state, fetcher.data, shopify]);
 
   const needsSupplier = (p: (typeof products)[number]) => p.managed && p.suppliers.length === 0;
-  const shown = products.filter((p) => (view === "managed" ? p.managed : view === "needs" ? needsSupplier(p) : true));
-  const count = (v: View) => products.filter((p) => (v === "managed" ? p.managed : v === "needs" ? needsSupplier(p) : true)).length;
+  const inView = (p: (typeof products)[number], v: View) => (v === "managed" ? p.managed : v === "none" ? p.suppliers.length === 0 : true);
+  const shown = products.filter((p) => inView(p, view));
+  const count = (v: View) => products.filter((p) => inView(p, v)).length;
 
   return (
     <s-page heading="Products & suppliers" inlineSize="large">
@@ -125,6 +133,7 @@ export default function Products() {
                               <s-text type={s.preferred ? "strong" : "generic"}>{s.name}</s-text>
                               <s-text tone="neutral">{s.price}</s-text>
                               {s.preferred && <s-badge tone="info">Preferred</s-badge>}
+                              {!s.approved && <s-badge tone="caution">Not approved in rules</s-badge>}
                             </s-stack>
                           ))}
                         </s-stack>

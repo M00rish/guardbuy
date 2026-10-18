@@ -8,6 +8,9 @@ import db from "../db.server";
 import { authenticate } from "../shopify.server";
 import { linkSupplier, setManaged, setPreferred, unlinkSupplier } from "../lib/suppliers/directory.server";
 import { usd } from "../lib/format";
+import { auditEntries } from "../lib/audit/log.server";
+import { currentRuleSet } from "../lib/agent/restock.server";
+import { daysOfCover, salesPerDay } from "../lib/inventory/sales.server";
 
 // One product: whether GuardBuy restocks it, which suppliers it may buy it from, on what terms,
 // and which one is preferred.
@@ -21,30 +24,37 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const res = await admin.graphql(
     `#graphql
     query GuardBuyVariant($id: ID!) {
-      productVariant(id: $id) { title sku inventoryQuantity product { title } }
+      productVariant(id: $id) { title sku inventoryQuantity createdAt product { title } }
     }`,
     { variables: { id: `gid://shopify/ProductVariant/${variantId}` } },
   );
   const { data } = (await res.json()) as {
-    data: { productVariant: { title: string; sku: string | null; inventoryQuantity: number | null; product: { title: string } } | null };
+    data: { productVariant: { title: string; sku: string | null; inventoryQuantity: number | null; createdAt: string; product: { title: string } } | null };
   };
   const v = data.productVariant;
   if (!v) throw new Response("Product not found", { status: 404 });
 
-  const [managed, links, suppliers] = await Promise.all([
+  const [managed, links, suppliers, log, perDay] = await Promise.all([
     db.managedProduct.findUnique({ where: { shop_variantId: { shop, variantId } } }),
     db.productSupplier.findMany({ where: { shop, variantId }, include: { supplier: true }, orderBy: [{ preferred: "desc" }, { unitPriceCents: "asc" }] }),
     db.supplier.findMany({ where: { shop }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+    auditEntries(shop),
+    salesPerDay(shop, variantId, new Date(v.createdAt)),
   ]);
+  const allow = currentRuleSet(log)?.supplierAllowlist ?? null;
+  const cover = daysOfCover(v.inventoryQuantity ?? 0, perDay);
   return {
     variantId,
     title: v.title === "Default Title" ? v.product.title : `${v.product.title} · ${v.title}`,
     sku: v.sku || null,
     stock: v.inventoryQuantity,
+    perDay: Number(perDay.toFixed(2)),
+    cover: Number.isFinite(cover) ? Number(cover.toFixed(1)) : null,
     managed: managed?.managed ?? false,
     links: links.map((l) => ({
       supplierId: l.supplierId, name: l.supplier.name, paypalEmail: l.supplier.paypalEmail,
       price: usd(l.unitPriceCents), usualQuantity: l.usualQuantity, leadTimeDays: l.leadTimeDays, preferred: l.preferred,
+      approved: allow === null || allow.includes(l.supplierId),
     })),
     available: suppliers.filter((s) => !links.some((l) => l.supplierId === s.id)),
   };
@@ -107,7 +117,9 @@ export default function ProductSuppliers() {
         <s-stack direction="inline" gap="base" alignItems="center">
           <s-switch label="GuardBuy restocks this product" checked={p.managed} disabled={busy}
             onChange={() => submit({ intent: "toggle", sku: p.sku ?? "", title: p.title, managed: String(!p.managed) })} />
-          <s-text tone="neutral">{p.sku ? `SKU ${p.sku} · ` : ""}{p.stock ?? "?"} in stock</s-text>
+          <s-text tone="neutral">
+            {p.sku ? `SKU ${p.sku} · ` : ""}{p.stock ?? "?"} in stock · {p.perDay} sold/day · {p.cover === null ? "no recent sales" : `${p.cover} days left`}
+          </s-text>
         </s-stack>
         {p.managed && p.links.length === 0 && (
           <s-box paddingBlockStart="base">
@@ -117,6 +129,14 @@ export default function ProductSuppliers() {
       </s-section>
 
       <s-section heading="Suppliers for this product">
+        {p.links.some((l) => !l.approved) && (
+          <s-box paddingBlockEnd="base">
+            <s-banner tone="info" heading="Some suppliers aren't approved in your rules">
+              The agent may still consider them, but any purchase from them is blocked until you approve them in{" "}
+              <s-link href="/app/rules">your rules</s-link>.
+            </s-banner>
+          </s-box>
+        )}
         {p.links.length === 0 ? (
           <s-text tone="neutral">No suppliers linked yet. The agent only ever sees the suppliers you link here.</s-text>
         ) : (
@@ -136,6 +156,7 @@ export default function ProductSuppliers() {
                     <s-stack direction="inline" gap="small-200" alignItems="center">
                       <s-text type="strong">{l.name}</s-text>
                       {l.preferred && <s-badge tone="info">Preferred</s-badge>}
+                      {!l.approved && <s-badge tone="caution">Not approved in rules</s-badge>}
                     </s-stack>
                   </s-table-cell>
                   <s-table-cell>{l.price}</s-table-cell>
