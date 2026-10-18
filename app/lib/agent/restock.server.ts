@@ -46,6 +46,16 @@ export function currentRuleSet(log: AuditEntry[]): RuleSet | null {
   return signed?.event.type === "ruleset_signed" ? signed.event.ruleSet.rules : null;
 }
 
+/** Whether the agent is running: on once rules are signed, unless the merchant paused it since. */
+export function agentOn(log: AuditEntry[]) {
+  const last = log.filter((e) => e.event.type === "agent_state").at(-1);
+  return last?.event.type === "agent_state" ? last.event.on : true;
+}
+
+export function setAgentState(shop: string, on: boolean, by: string) {
+  return appendAudit(shop, { type: "agent_state", on, by });
+}
+
 export function signRuleSet(shop: string, rules: RuleSet, signedBy: string) {
   return appendAudit(shop, {
     type: "ruleset_signed",
@@ -171,6 +181,7 @@ async function restock(shop: string, check: StockCheck): Promise<RestockResult> 
   let log = await auditEntries(shop);
   const rules = currentRuleSet(log);
   if (!rules) return { outcome: "skipped", reason: "no signed rules yet, so the agent is off" };
+  if (!agentOn(log)) return { outcome: "skipped", reason: "the merchant paused the agent" };
   // The merchant chooses what GuardBuy may buy, and from whom. Checked again by the policy engine.
   const managed = await isManaged(shop, check.variantId);
   if (!managed) return { outcome: "skipped", reason: `${check.sku} is not switched on for GuardBuy` };

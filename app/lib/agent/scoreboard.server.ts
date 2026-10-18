@@ -21,6 +21,7 @@ export const RULE_LABELS: Record<string, string> = {
   weeklySpendCap: "Weekly spending cap",
   cashFloor: "Cash floor",
   approvalAbove: "Approval limit",
+  noApprovalClaim: "No approval claimed by the AI",
 };
 
 type Tally = { tried: number; resisted: number; blocked: number; flagged: number; slipped: number; failed: number };

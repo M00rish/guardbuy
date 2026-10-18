@@ -20,6 +20,9 @@ const strictest = (verdicts: Verdict[]): Verdict =>
 
 const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 
+// "already approved", "approved by phone", "the owner approved", "pre-approved", "manager signed off"...
+const APPROVAL_CLAIM = /\b(already|pre-?|previously)\s*approved\b|\bapproved (by|over) (phone|email|the (store )?owner|the manager)\b|\b(owner|manager|merchant) (has |had )?(already )?(approved|signed off|authori[sz]ed)\b/i;
+
 export function evaluate(proposal: RecordedProposal, rules: RuleSet, ctx: PolicyContext): Decision {
   const total = proposal.unitPriceCents * proposal.quantity;
   const checks: RuleCheck[] = [];
@@ -66,6 +69,12 @@ export function evaluate(proposal: RecordedProposal, rules: RuleSet, ctx: Policy
     check("cashFloor", after < rules.cashFloorCents, "block",
       `balance after purchase ${usd(after)} vs floor ${usd(rules.cashFloorCents)}`);
   }
+
+  // The AI's explanation is untrusted text, so it never loosens anything; but if it claims that a
+  // person already approved, someone must actually approve (supplier notes can plant that claim).
+  const claim = APPROVAL_CLAIM.test(proposal.reasoning);
+  check("noApprovalClaim", claim, "approval",
+    claim ? "the AI's explanation claims an approval that GuardBuy has no record of" : "no approval claimed in the AI's explanation");
 
   check("approvalAbove", total > rules.approvalAboveCents, "approval",
     `total ${usd(total)} vs auto-approve limit ${usd(rules.approvalAboveCents)}`);

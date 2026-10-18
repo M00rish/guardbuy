@@ -1,352 +1,131 @@
-import { useEffect } from "react";
-import type {
-  ActionFunctionArgs,
-  HeadersFunction,
-  LoaderFunctionArgs,
-} from "react-router";
-import { useFetcher } from "react-router";
-import { useAppBridge } from "@shopify/app-bridge-react";
-import { authenticate } from "../shopify.server";
+import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
+import { authenticate } from "../shopify.server";
+import { auditEntries, verifyChain } from "../lib/audit/log.server";
+import { toFeed, usd } from "../lib/audit/feed.server";
+import { approvalQueue } from "../lib/agent/approvals.server";
+import { agentOn, currentRuleSet, setAgentState } from "../lib/agent/restock.server";
+import { scoreboard } from "../lib/agent/scoreboard.server";
+import { setupStatus } from "../lib/suppliers/directory.server";
+import { adminWithStaff } from "../lib/merchant/staff.server";
+
+// Home: setup checklist until GuardBuy is ready, then the agent's status and what it did lately.
+// The pitch, in the app's own words: you choose what and from whom, the agent decides when and how
+// much, your rules decide if.
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  await authenticate.admin(request);
-
-  return null;
-};
-
-export const action = async ({ request }: ActionFunctionArgs) => {
-  const { admin } = await authenticate.admin(request);
-  const color = ["Red", "Orange", "Yellow", "Green"][
-    Math.floor(Math.random() * 4)
-  ];
-  const response = await admin.graphql(
-    `#graphql
-      mutation populateProduct($product: ProductCreateInput!) {
-        productCreate(product: $product) {
-          product {
-            id
-            title
-            handle
-            status
-            variants(first: 10) {
-              edges {
-                node {
-                  id
-                  price
-                  barcode
-                  createdAt
-                }
-              }
-            }
-            demoInfo: metafield(namespace: "$app", key: "demo_info") {
-              jsonValue
-            }
-          }
-        }
-      }`,
-    {
-      variables: {
-        product: {
-          title: `${color} Snowboard`,
-          metafields: [
-            {
-              namespace: "$app",
-              key: "demo_info",
-              value: "Created by React Router Template",
-            },
-          ],
-        },
-      },
-    },
-  );
-  const responseJson = await response.json();
-
-  const product = responseJson.data!.productCreate!.product!;
-  const variantId = product.variants.edges[0]!.node!.id!;
-
-  const variantResponse = await admin.graphql(
-    `#graphql
-    mutation shopifyReactRouterTemplateUpdateVariant($productId: ID!, $variants: [ProductVariantsBulkInput!]!) {
-      productVariantsBulkUpdate(productId: $productId, variants: $variants) {
-        productVariants {
-          id
-          price
-          barcode
-          createdAt
-        }
-      }
-    }`,
-    {
-      variables: {
-        productId: product.id,
-        variants: [{ id: variantId, price: "100.00" }],
-      },
-    },
-  );
-
-  const variantResponseJson = await variantResponse.json();
-
-  const metaobjectResponse = await admin.graphql(
-    `#graphql
-    mutation shopifyReactRouterTemplateUpsertMetaobject($handle: MetaobjectHandleInput!, $values: JSON!) {
-      metaobjectUpsert(handle: $handle, values: $values) {
-        metaobject {
-          id
-          handle
-          values
-        }
-        userErrors {
-          field
-          message
-        }
-      }
-    }`,
-    {
-      variables: {
-        handle: {
-          type: "$app:example",
-          handle: "demo-entry",
-        },
-        values: {
-          title: "Demo Entry",
-          description:
-            "This metaobject was created by the Shopify app template to demonstrate the metaobject API.",
-        },
-      },
-    },
-  );
-
-  const metaobjectResponseJson = await metaobjectResponse.json();
-
+  const { session } = await authenticate.admin(request);
+  const shop = session.shop;
+  const log = await auditEntries(shop);
+  const [setup, queue, chain, score] = await Promise.all([setupStatus(shop), approvalQueue(shop), verifyChain(shop), scoreboard(shop, log)]);
+  const rules = currentRuleSet(log);
   return {
-    product: responseJson!.data!.productCreate!.product,
-    variant:
-      variantResponseJson!.data!.productVariantsBulkUpdate!.productVariants,
-    metaobject: metaobjectResponseJson!.data!.metaobjectUpsert!.metaobject,
+    setup,
+    rulesSigned: !!rules,
+    approvalLimit: rules ? usd(rules.approvalAboveCents) : null,
+    agentOn: agentOn(log),
+    waiting: queue.length,
+    chain,
+    real: score.real,
+    recent: toFeed(log).filter((f) => f.kind !== "status").slice(0, 6),
   };
 };
 
-export default function Index() {
-  const fetcher = useFetcher<typeof action>();
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { session, actor } = await adminWithStaff(request);
+  const form = await request.formData();
+  await setAgentState(session.shop, form.get("on") === "true", actor);
+  return { ok: true };
+};
 
-  const shopify = useAppBridge();
-  const isLoading =
-    ["loading", "submitting"].includes(fetcher.state) &&
-    fetcher.formMethod === "POST";
-
-  useEffect(() => {
-    if (fetcher.data?.product?.id) {
-      shopify.toast.show("Product created");
-    }
-  }, [fetcher.data?.product?.id, shopify]);
-
-  const generateProduct = () => fetcher.submit({}, { method: "POST" });
+export default function Home() {
+  const d = useLoaderData<typeof loader>();
+  const fetcher = useFetcher();
+  const steps = [
+    { done: d.setup.managedProducts > 0, label: "Choose the products GuardBuy may restock", href: "/app/products", detail: `${d.setup.managedProducts} switched on` },
+    { done: d.setup.suppliers > 0, label: "Add your suppliers and their PayPal emails", href: "/app/suppliers", detail: `${d.setup.suppliers} suppliers` },
+    { done: d.setup.managedWithSuppliers > 0, label: "Link suppliers to those products", href: "/app/products", detail: `${d.setup.managedWithSuppliers} of ${d.setup.managedProducts} products have a supplier` },
+    { done: d.rulesSigned, label: "Set and sign your spending rules", href: "/app/rules", detail: d.rulesSigned ? `approval needed above ${d.approvalLimit}` : "not signed yet" },
+  ];
+  const ready = steps.every((s) => s.done);
+  const running = ready && d.agentOn;
 
   return (
-    <s-page heading="Shopify app template">
-      <s-button slot="primary-action" onClick={generateProduct}>
-        Generate a product
-      </s-button>
-
-      <s-section heading="Congrats on creating a new Shopify app 🎉">
-        <s-paragraph>
-          This embedded app template uses{" "}
-          <s-link
-            href="https://shopify.dev/docs/apps/tools/app-bridge"
-            target="_blank"
-          >
-            App Bridge
-          </s-link>{" "}
-          interface examples like an{" "}
-          <s-link href="/app/additional">additional page in the app nav</s-link>
-          , as well as an{" "}
-          <s-link
-            href="https://shopify.dev/docs/api/admin-graphql"
-            target="_blank"
-          >
-            Admin GraphQL
-          </s-link>{" "}
-          mutation demo, to provide a starting point for app development.
-        </s-paragraph>
-      </s-section>
-      <s-section heading="Get started with products">
-        <s-paragraph>
-          Generate a product with GraphQL and get the JSON output for that
-          product. Learn more about the{" "}
-          <s-link
-            href="https://shopify.dev/docs/api/admin-graphql/latest/mutations/productCreate"
-            target="_blank"
-          >
-            productCreate
-          </s-link>{" "}
-          mutation in our API references. Includes a product{" "}
-          <s-link
-            href="https://shopify.dev/docs/apps/build/custom-data/metafields"
-            target="_blank"
-          >
-            metafield
-          </s-link>{" "}
-          and{" "}
-          <s-link
-            href="https://shopify.dev/docs/apps/build/custom-data/metaobjects"
-            target="_blank"
-          >
-            metaobject
-          </s-link>
-          .
-        </s-paragraph>
-        <s-stack direction="inline" gap="base">
-          <s-button
-            onClick={generateProduct}
-            {...(isLoading ? { loading: true } : {})}
-          >
-            Generate a product
-          </s-button>
-          {fetcher.data?.product && (
-            <s-button
-              onClick={() => {
-                shopify.intents.invoke?.("edit:shopify/Product", {
-                  value: fetcher.data?.product?.id,
-                });
-              }}
-              target="_blank"
-              variant="tertiary"
-            >
-              Edit product
-            </s-button>
+    <s-page heading="GuardBuy">
+      <s-section>
+        <s-stack gap="base">
+          <s-paragraph>
+            You choose what to restock and from whom. The agent decides when and how much. Your rules decide whether money moves.
+          </s-paragraph>
+          {running ? (
+            <s-banner tone="success" heading="The agent is running">
+              It restocks your switched-on products within your signed rules. Purchases above {d.approvalLimit} wait for you.
+            </s-banner>
+          ) : ready ? (
+            <s-banner tone="warning" heading="The agent is paused">Nothing is proposed or bought until you resume it.</s-banner>
+          ) : (
+            <s-banner tone="info" heading="The agent is off until setup is done">Finish the steps below; nothing is bought before that.</s-banner>
+          )}
+          {ready && (
+            <s-stack direction="inline" gap="base">
+              <s-button
+                variant={d.agentOn ? "secondary" : "primary"}
+                onClick={() => fetcher.submit({ on: String(!d.agentOn) }, { method: "POST" })}
+                {...(fetcher.state !== "idle" ? { loading: true } : {})}
+              >
+                {d.agentOn ? "Pause the agent" : "Resume the agent"}
+              </s-button>
+              {d.waiting > 0 && (
+                <s-button href="/app/approvals" variant="primary">
+                  {`Review ${d.waiting} waiting for approval`}
+                </s-button>
+              )}
+            </s-stack>
           )}
         </s-stack>
-        {fetcher.data?.product && (
-          <s-section heading="productCreate mutation">
-            <s-stack direction="block" gap="base">
-              <s-box
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background="subdued"
-              >
-                <pre
-                  style={{
-                    margin: 0,
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                  }}
-                >
-                  <code>{JSON.stringify(fetcher.data.product, null, 2)}</code>
-                </pre>
-              </s-box>
+      </s-section>
 
-              <s-heading>productVariantsBulkUpdate mutation</s-heading>
-              <s-box
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background="subdued"
-              >
-                <pre
-                  style={{
-                    margin: 0,
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                  }}
-                >
-                  <code>{JSON.stringify(fetcher.data.variant, null, 2)}</code>
-                </pre>
-              </s-box>
-
-              <s-heading>metaobjectUpsert mutation</s-heading>
-              <s-box
-                padding="base"
-                borderWidth="base"
-                borderRadius="base"
-                background="subdued"
-              >
-                <pre
-                  style={{
-                    margin: 0,
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                  }}
-                >
-                  <code>
-                    {JSON.stringify(fetcher.data.metaobject, null, 2)}
-                  </code>
-                </pre>
-              </s-box>
+      <s-section heading={ready ? "Setup" : "Set up GuardBuy"}>
+        <s-stack gap="small-200">
+          {steps.map((s, i) => (
+            <s-stack key={s.label} direction="inline" gap="small-200" alignItems="center">
+              <s-badge tone={s.done ? "success" : "neutral"}>{s.done ? "Done" : `Step ${i + 1}`}</s-badge>
+              <s-link href={s.href}>{s.label}</s-link>
+              <s-text tone="neutral">{s.detail}</s-text>
             </s-stack>
-          </s-section>
-        )}
+          ))}
+        </s-stack>
       </s-section>
 
-      <s-section slot="aside" heading="App template specs">
-        <s-paragraph>
-          <s-text>Framework: </s-text>
-          <s-link href="https://reactrouter.com/" target="_blank">
-            React Router
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>Interface: </s-text>
-          <s-link
-            href="https://shopify.dev/docs/api/app-home/using-polaris-components"
-            target="_blank"
-          >
-            Polaris web components
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>API: </s-text>
-          <s-link
-            href="https://shopify.dev/docs/api/admin-graphql"
-            target="_blank"
-          >
-            GraphQL
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>Custom data: </s-text>
-          <s-link
-            href="https://shopify.dev/docs/apps/build/custom-data"
-            target="_blank"
-          >
-            Metafields &amp; metaobjects
-          </s-link>
-        </s-paragraph>
-        <s-paragraph>
-          <s-text>Database: </s-text>
-          <s-link href="https://www.prisma.io/" target="_blank">
-            Prisma
-          </s-link>
-        </s-paragraph>
+      <s-section heading="Recent activity">
+        <s-stack gap="small-200">
+          {d.recent.length === 0 ? (
+            <s-text tone="neutral">Nothing yet. Activity appears here once the agent starts working.</s-text>
+          ) : (
+            d.recent.map((f) => (
+              <s-text key={`${f.seq}-${f.kind}`}>
+                #{f.seq} · {f.title}
+              </s-text>
+            ))
+          )}
+          <s-link href="/app/activity">See all activity and verify the log</s-link>
+        </s-stack>
       </s-section>
 
-      <s-section slot="aside" heading="Next steps">
-        <s-unordered-list>
-          <s-list-item>
-            Build an{" "}
-            <s-link
-              href="https://shopify.dev/docs/apps/getting-started/build-app-example"
-              target="_blank"
-            >
-              example app
-            </s-link>
-          </s-list-item>
-          <s-list-item>
-            Explore Shopify&apos;s API with{" "}
-            <s-link
-              href="https://shopify.dev/docs/apps/tools/graphiql-admin-api"
-              target="_blank"
-            >
-              GraphiQL
-            </s-link>
-          </s-list-item>
-        </s-unordered-list>
+      <s-section slot="aside" heading="At a glance">
+        <s-stack gap="small-200">
+          <s-text>{d.real.decisions} purchases checked</s-text>
+          <s-text>{d.real.blocked} blocked by your rules</s-text>
+          <s-text>{d.waiting} waiting for approval</s-text>
+          <s-text tone={d.chain.valid ? "success" : "critical"}>
+            {d.chain.valid ? `Audit log intact (${d.chain.length} entries)` : `Audit log BROKEN at entry #${d.chain.brokenAtSeq}`}
+          </s-text>
+        </s-stack>
       </s-section>
     </s-page>
   );
 }
 
-export const headers: HeadersFunction = (headersArgs) => {
-  return boundary.headers(headersArgs);
-};
+export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);

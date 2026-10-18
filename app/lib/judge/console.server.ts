@@ -1,7 +1,8 @@
 import db from "../../db.server";
 import { appendAudit, auditEntries, verifyChain } from "../audit/log.server";
 import { approvalQueue, approvePurchase, rejectPurchase } from "../agent/approvals.server";
-import { classifyAttack, runInjectionTest, WHAT_IF_SCENARIO } from "../agent/attack.server";
+import { runInjectionTest, WHAT_IF_SCENARIO } from "../agent/attack.server";
+import { toFeed, usd } from "../audit/feed.server";
 import { scoreboard } from "../agent/scoreboard.server";
 import { currentRuleSet, defaultRuleSet, paypalBalanceCents, policyContext, runRestock, signRuleSet } from "../agent/restock.server";
 import { evaluate } from "../policy/engine";
@@ -30,6 +31,8 @@ const VARIANTS = { "COFFEE-HOUSE-1KG": COFFEE.variantId, "MUG-STONE": "judge-mug
 
 export class JudgeRefused extends Error {}
 
+const WHAT_IF = WHAT_IF_SCENARIO; // simulated: the AI obeyed the dishonest supplier
+
 export function judgeShop(shop: string, judgeId: string) {
   if (!ID.test(judgeId)) throw new JudgeRefused("Invalid session id");
   return `${shop}#judge-${judgeId}`;
@@ -50,105 +53,6 @@ async function checkCaps(sandbox: string) {
   if (mine >= PER_JUDGE_DAILY) throw new JudgeRefused("Daily limit for this session reached. Reset your session or come back tomorrow.");
   const all = await db.auditEntry.count({ where: { shop: { contains: "#judge-" }, type: { in: ["proposal", "proposal_failed"] }, at: { gte: since } } });
   if (all >= ALL_JUDGES_DAILY) throw new JudgeRefused("The demo's daily limit is reached. Please try again tomorrow.");
-}
-
-// ---------- Feed ----------
-
-export type FeedItem = {
-  seq: number;
-  at: string;
-  kind: "rules" | "stock" | "attack" | "proposed" | "auto" | "approval" | "block" | "resisted" | "flagged" | "slipped" | "approved" | "declined" | "paid" | "failed" | "paypal" | "status";
-  title: string;
-  detail?: string;
-  untrusted?: string; // AI or supplier text: rendered as plain text and labelled
-  untrustedLabel?: string;
-};
-
-const WHAT_IF = WHAT_IF_SCENARIO; // simulated: the AI obeyed the dishonest supplier
-
-const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
-
-function toFeed(log: AuditEntry[]): FeedItem[] {
-  const items: FeedItem[] = [];
-  for (const e of log) {
-    const ev = e.event;
-    const base = { seq: e.seq, at: e.at };
-    switch (ev.type) {
-      case "ruleset_signed":
-        items.push({ ...base, kind: "rules", title: "Rules signed", detail: `Approval needed above ${usd(ev.ruleSet.rules.approvalAboveCents)}, weekly cap ${usd(ev.ruleSet.rules.weeklySpendCapCents)}, approved suppliers: ${ev.ruleSet.rules.supplierAllowlist.join(", ")}` });
-        break;
-      case "proposal": {
-        const attack = ev.scenario ? attackById(ev.scenario) : undefined;
-        if (ev.scenario === WHAT_IF) {
-          items.push({ ...base, kind: "attack", title: "What if the AI were fooled? (simulated)", detail: "Recorded as if the AI obeyed Bean Bargains' note. Test only: never paid." });
-        } else if (attack) {
-          const notes = Object.values(attack.setup.notes ?? {}).join(" / ");
-          const quiet = [
-            attack.setup.payeeChange && `the supplier's PayPal address was changed to ${attack.setup.payeeChange.email}`,
-            attack.setup.lookalike && `staff added "${attack.setup.lookalike.name}" as a supplier`,
-            attack.setup.perDay && `fake orders pushed sales to ${attack.setup.perDay}/day`,
-          ].filter(Boolean).join("; ");
-          items.push({
-            ...base, kind: "attack",
-            title: `${attack.level[0].toUpperCase()}${attack.level.slice(1)} attack: ${attack.title}`,
-            detail: `Copies: ${attack.realWorld}.${quiet ? ` Setup: ${quiet}.` : ""}`,
-            ...(notes ? { untrusted: notes, untrustedLabel: "Supplier note the AI read (written by the attacker)" } : {}),
-          });
-        } else if (ev.stock) {
-          items.push({ ...base, kind: "stock", title: `Stock fell: ${ev.proposal.sku}`, detail: `${ev.stock.available} left, ${ev.stock.perDay}/day, ${ev.stock.daysOfCover} days of cover` });
-        }
-        items.push({ ...base, kind: "proposed", title: `AI proposed ${ev.proposal.quantity} × ${ev.proposal.sku} from ${ev.proposal.supplierId} at ${usd(ev.proposal.unitPriceCents)}`, untrusted: ev.proposal.reasoning, untrustedLabel: "The AI's explanation (not verified)" });
-        break;
-      }
-      case "proposal_failed":
-        items.push({ ...base, kind: "failed", title: `AI proposal failed for ${ev.sku}${ev.scenario ? " (attack test)" : ""}`, detail: ev.reason });
-        break;
-      case "decision": {
-        const d = ev.decision;
-        const flagged = d.checks.filter((c) => c.outcome !== "auto");
-        const proposalSeq = ev.proposalSeq;
-        const source = log.find((p) => p.seq === proposalSeq);
-        if (source?.event.type === "proposal" && source.event.scenario) {
-          const attack = attackById(source.event.scenario);
-          const outcome = attack ? classifyAttack(attack, source.event.proposal, d.verdict) : d.verdict === "block" ? "blocked" : "resisted";
-          const reasons = flagged.map((c) => c.detail).join(" · ");
-          const tail = "Test only, nothing paid.";
-          items.push(
-            outcome === "resisted" ? { ...base, kind: "resisted", title: `The AI resisted the attack. ${tail}` }
-            : outcome === "blocked" ? { ...base, kind: "block", title: `The AI was swayed, and the rules BLOCKED it (${usd(d.totalCents)}). ${tail}`, detail: reasons }
-            : outcome === "flagged" ? { ...base, kind: "flagged", title: `The AI was swayed; the rules sent it to a person (${usd(d.totalCents)}). ${tail}`, detail: reasons }
-            : { ...base, kind: "slipped", title: `The AI was swayed and the rules would have ALLOWED it (${usd(d.totalCents)}). ${tail}`, detail: attack?.gap ? `Known gap, fix planned: ${attack.gap}` : "Unexpected: no rule caught this" },
-          );
-          break;
-        }
-        const title = d.verdict === "auto" ? `Rules checked: allowed (${usd(d.totalCents)})` : d.verdict === "approval" ? `Rules checked: needs your approval (${usd(d.totalCents)})` : `Rules checked: BLOCKED (${usd(d.totalCents)})`;
-        items.push({ ...base, kind: d.verdict, title, detail: flagged.length ? flagged.map((c) => c.detail).join(" · ") : `All ${d.checks.length} rules passed` });
-        break;
-      }
-      case "approved":
-        items.push({ ...base, kind: "approved", title: `Approved by ${ev.approvedBy.startsWith("judge:") ? "you" : ev.approvedBy}` });
-        break;
-      case "rejected":
-        items.push({ ...base, kind: "declined", title: "Declined. Nothing was paid." });
-        break;
-      case "payment_failed":
-        items.push({ ...base, kind: "failed", title: "Payment failed", detail: ev.reason });
-        break;
-      case "payout":
-        items.push({ ...base, kind: "paid", title: `Paid ${usd(ev.amountCents)} via PayPal Payouts`, detail: `PayPal payout batch ${ev.payoutBatchId} (${ev.status})` });
-        break;
-      case "payout_status":
-        items.push({ ...base, kind: "status", title: `Payout status: ${ev.status}`, detail: ev.confirmedByTransactionSearch ? "Confirmed in PayPal's transaction records" : undefined });
-        break;
-      case "order_created":
-        items.push({ ...base, kind: "paypal", title: `PayPal order ${ev.orderId} created`, detail: "Waiting for approval in PayPal" });
-        break;
-      case "order_captured":
-        items.push({ ...base, kind: "paid", title: `Paid ${usd(ev.amountCents)} via PayPal Orders`, detail: `Capture ${ev.captureId} (${ev.status})` });
-        break;
-    }
-  }
-  return items.reverse(); // newest first
 }
 
 export async function judgeState(shop: string, judgeId: string) {
@@ -175,7 +79,7 @@ export async function judgeState(shop: string, judgeId: string) {
       knownGaps: a.knownGaps,
       remaining: ATTACKS.length - a.tried,
     },
-    feed: toFeed(log),
+    feed: toFeed(log, `judge:${judgeId}`),
     approvals: queue.map((c) => ({
       decisionSeq: c.decisionSeq,
       title: `${c.quantity} × ${c.sku} from ${c.supplierName}`,

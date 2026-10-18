@@ -8,7 +8,7 @@ process.loadEnvFile(".env");
 
 const { default: db } = await import("../app/db.server");
 const { appendAudit, auditEntries, verifyChain } = await import("../app/lib/audit/log.server");
-const { defaultRuleSet, policyContext, runRestock, signRuleSet, skipReason } = await import("../app/lib/agent/restock.server");
+const { agentOn, defaultRuleSet, policyContext, runRestock, signRuleSet, skipReason } = await import("../app/lib/agent/restock.server");
 const { executePurchase, ExecutionRefused } = await import("../app/lib/agent/execute.server");
 const { deleteDirectory, offersForVariant, saveSupplier, seedDemoCatalog } = await import("../app/lib/suppliers/directory.server");
 const { evaluate } = await import("../app/lib/policy/engine");
@@ -56,6 +56,8 @@ for (const [name, log, skip] of states) {
 }
 const ctx = policyContext(proposal, restockWith(1440, "auto", payout(1440, "PENDING"), payoutStatus(120, "RETURNED")), 500_000, { managed: true, offers: [] }, NOW);
 ok(ctx.spentLast7dCents === 0 && ctx.purchasesLast24h === 0, "a returned payout doesn't count toward spend caps");
+
+ok(agentOn([]) && !agentOn(logOf([1, { type: "agent_state", on: false, by: "staff" }])) && agentOn(logOf([2, { type: "agent_state", on: false, by: "s" }], [1, { type: "agent_state", on: true, by: "s" }])), "pause and resume");
 
 // ---------- 2. Live ----------
 console.log("-- live (Gemini + PayPal sandbox)");

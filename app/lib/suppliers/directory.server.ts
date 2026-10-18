@@ -89,11 +89,37 @@ export type SupplierTerms = {
 };
 
 export async function linkSupplier(shop: string, variantId: string, supplierId: string, terms: SupplierTerms) {
+  // One preferred supplier per product.
+  if (terms.preferred) await db.productSupplier.updateMany({ where: { shop, variantId, NOT: { supplierId } }, data: { preferred: false } });
   await db.productSupplier.upsert({
     where: { shop_variantId_supplierId: { shop, variantId, supplierId } },
     create: { shop, variantId, supplierId, ...terms },
     update: terms,
   });
+}
+
+export async function unlinkSupplier(shop: string, variantId: string, supplierId: string) {
+  await db.productSupplier.deleteMany({ where: { shop, variantId, supplierId } });
+}
+
+/** Removes a supplier and every product link to it. */
+export async function removeSupplier(shop: string, supplierId: string) {
+  await db.supplier.deleteMany({ where: { shop, id: supplierId } });
+}
+
+/** Where the merchant is in setup: the agent only buys once all of this is done. */
+export async function setupStatus(shop: string) {
+  const [managed, suppliers, links] = await Promise.all([
+    db.managedProduct.findMany({ where: { shop, managed: true }, select: { variantId: true } }),
+    db.supplier.count({ where: { shop } }),
+    db.productSupplier.findMany({ where: { shop }, select: { variantId: true } }),
+  ]);
+  const linked = new Set(links.map((l) => l.variantId));
+  return {
+    managedProducts: managed.length,
+    managedWithSuppliers: managed.filter((m) => linked.has(m.variantId)).length,
+    suppliers,
+  };
 }
 
 /** Deletes a shop's products and suppliers (tests now; the shop/redact privacy webhook later). */
