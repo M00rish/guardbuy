@@ -43,7 +43,9 @@ async function ensureSandbox(sandbox: string) {
   const log = await auditEntries(sandbox);
   if (currentRuleSet(log)) return;
   await seedDemoCatalog(sandbox, VARIANTS, process.env.SUPPLIER_EMAIL ?? "", []);
-  const rules = RuleSetSchema.parse({ ...defaultRuleSet(sandbox), approvalAboveCents: 30_000 });
+  // Small purchases so judges don't drain the shared sandbox balance: 5 days of cover (~8 bags,
+  // about $90) instead of 14, and a $50 approval limit so the "needs your approval" step still shows.
+  const rules = RuleSetSchema.parse({ ...defaultRuleSet(sandbox), targetDaysOfCover: 5, approvalAboveCents: 5_000 });
   await signRuleSet(sandbox, rules, "judge-demo");
 }
 
