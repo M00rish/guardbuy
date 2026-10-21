@@ -2,6 +2,7 @@ import { appendAudit, auditEntries } from "../audit/log.server";
 import type { AuditEntry, RuleCheck } from "../policy/schema";
 import { offersForVariant, supplierNames } from "../suppliers/directory.server";
 import { createApprovalOrder, ExecutionRefused, executePurchase } from "./execute.server";
+import { APPROVAL_TTL_MS, approvalExpired } from "./restock.server";
 
 // The approval queue: purchases the policy engine sent to a person ("approval" verdict).
 // Cards lead with facts GuardBuy computed itself (price vs history, quantity vs usual, who gets
@@ -11,6 +12,7 @@ import { createApprovalOrder, ExecutionRefused, executePurchase } from "./execut
 export type ApprovalCard = {
   decisionSeq: number;
   proposedAt: string;
+  expiresAt: string; // approvals are valid for 48 hours
   status: "waiting" | "paypal_pending"; // paypal_pending: a PayPal order exists, waiting for approval in PayPal
   sku: string;
   quantity: number;
@@ -30,10 +32,11 @@ export type ApprovalCard = {
 const ofDecision = (log: AuditEntry[], type: AuditEntry["event"]["type"], decisionSeq: number) =>
   log.filter((e) => e.event.type === type && "decisionSeq" in e.event && e.event.decisionSeq === decisionSeq);
 
-/** Decisions still waiting for a person: verdict "approval", not yet approved, declined or paid. */
-function pendingDecisions(log: AuditEntry[]) {
+/** Decisions still waiting for a person: verdict "approval", not yet approved, declined, paid or expired (48 h). */
+function pendingDecisions(log: AuditEntry[], now = new Date()) {
   return log.filter((e) => {
     if (e.event.type !== "decision" || e.event.decision.verdict !== "approval") return false;
+    if (approvalExpired(e.at, now)) return false;
     const proposalSeq = e.event.proposalSeq;
     const proposal = log.find((p) => p.seq === proposalSeq);
     if (proposal?.event.type === "proposal" && proposal.event.scenario) return false; // injection tests are never paid
@@ -61,6 +64,7 @@ export async function approvalQueue(shop: string): Promise<ApprovalCard[]> {
     cards.push({
       decisionSeq: d.seq,
       proposedAt: p.at,
+      expiresAt: new Date(Date.parse(d.at) + APPROVAL_TTL_MS).toISOString(),
       status: order ? "paypal_pending" : "waiting",
       sku: proposal.sku,
       quantity: proposal.quantity,
@@ -92,6 +96,10 @@ function oncePerDecision<T>(shop: string, decisionSeq: number, fn: () => Promise
 
 async function assertPending(shop: string, decisionSeq: number) {
   const log = await auditEntries(shop);
+  const d = log.find((e) => e.seq === decisionSeq);
+  if (d?.event.type === "decision" && d.event.decision.verdict === "approval" && approvalExpired(d.at)) {
+    throw new ExecutionRefused(`Purchase #${decisionSeq} expired (approvals are valid for 48 hours); the agent will propose it again with fresh numbers`);
+  }
   if (!pendingDecisions(log).some((d) => d.seq === decisionSeq)) {
     throw new ExecutionRefused(`Purchase #${decisionSeq} is not waiting for approval`);
   }

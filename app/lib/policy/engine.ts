@@ -59,7 +59,7 @@ export function evaluate(proposal: RecordedProposal, rules: RuleSet, ctx: Policy
     `${ctx.purchasesLast24h} purchases in the last 24h, limit ${rules.maxPurchasesPer24h}`);
 
   check("weeklySpendCap", ctx.spentLast7dCents + total > rules.weeklySpendCapCents, "block",
-    `${usd(ctx.spentLast7dCents)} spent this week + ${usd(total)} vs cap ${usd(rules.weeklySpendCapCents)}`);
+    `${usd(ctx.spentLast7dCents)} spent or awaiting approval this week + ${usd(total)} vs cap ${usd(rules.weeklySpendCapCents)}`);
 
   if (ctx.paypalBalanceCents === null) {
     // Fail safe: if we can't see the balance, a human decides.

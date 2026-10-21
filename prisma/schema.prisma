@@ -128,3 +128,12 @@ model ShopSettings {
   shareVerifyDetails Boolean  @default(false) // public verify page shows product, supplier and amount (default: hashes only)
   updatedAt          DateTime @updatedAt
 }
+
+// One payment at a time per shop: the payment module takes this lock before re-checking the rules
+// and paying, so two purchases can't both pass the weekly cap or cash floor. Expires on its own if
+// a server dies while holding it.
+model PaymentLock {
+  shop        String   @id
+  holder      String
+  lockedUntil DateTime
+}

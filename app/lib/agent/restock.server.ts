@@ -1,3 +1,4 @@
+import db from "../../db.server";
 import { appendAudit, auditEntries } from "../audit/log.server";
 import type { StockCheck } from "../inventory/trigger.server";
 import { paypal } from "../paypal/client.server";
@@ -18,6 +19,10 @@ const RETRY_AFTER_BLOCK_MS = 60 * 60_000; // after a blocked proposal or failed 
 const RETRY_AFTER_LLM_FAILURE_MS = 15 * 60_000; // after the LLM failed or timed out
 const RETRY_AFTER_REJECT_MS = DAY_MS; // the merchant said no: don't ask again the same day
 const IN_FLIGHT_MS = 10 * 60_000; // an "auto" decision with no payment result yet is still being paid
+
+/** A purchase waiting for approval expires after this long: it can't be paid, and the product is re-proposed with fresh numbers. */
+export const APPROVAL_TTL_MS = 48 * 60 * 60_000;
+export const approvalExpired = (decisionAt: string, now = new Date()) => now.getTime() - Date.parse(decisionAt) >= APPROVAL_TTL_MS;
 
 // PayPal payout statuses (batch or item) meaning the supplier did not get, or did not keep, the money.
 const PAYOUT_FAILED = new Set(["DENIED", "CANCELED", "FAILED", "RETURNED", "BLOCKED", "REFUNDED", "REVERSED", "UNCLAIMED"]);
@@ -63,19 +68,34 @@ export function signRuleSet(shop: string, rules: RuleSet, signedBy: string) {
   });
 }
 
-/** PayPal available balance in cents, or null if it can't be read (the policy then asks a person). */
+/**
+ * PayPal available balance in cents, or null if it can't be read (the policy then asks a person).
+ * PayPal's balance report lags (minutes to hours), so GuardBuy's own payments made after the
+ * report's "as of" time are subtracted; a burst of purchases can't all see the same stale balance.
+ * (Demo: one PayPal account serves every shop, so payments from all shops count.)
+ */
 export async function paypalBalanceCents(): Promise<number | null> {
   try {
-    const res = await paypal<{ balances?: { currency: string; available_balance?: { value: string } }[] }>(
+    const res = await paypal<{ as_of_time?: string; balances?: { currency: string; available_balance?: { value: string } }[] }>(
       "/v1/reporting/balances?currency_code=USD",
     );
     const usd = res.balances?.find((b) => b.currency === "USD")?.available_balance?.value;
-    return usd === undefined ? null : Math.round(Number(usd) * 100);
+    if (usd === undefined) return null;
+    return adjustForLag(Math.round(Number(usd) * 100), res.as_of_time ? new Date(res.as_of_time) : null);
   } catch (e) {
     console.warn(`[restock] balance unavailable: ${(e as Error).message}`);
     return null;
   }
 }
+
+async function adjustForLag(reportedCents: number, asOf: Date | null) {
+  if (!asOf || Number.isNaN(asOf.getTime())) return reportedCents;
+  const since = await db.auditEntry.findMany({ where: { type: { in: ["payout", "order_captured"] }, at: { gt: asOf } }, select: { event: true } });
+  return reportedCents - sinceTotal(since.map((r) => r.event as { amountCents?: number }));
+}
+
+/** Sum of amounts paid after the balance report (exported for checks). */
+export const sinceTotal = (events: { amountCents?: number }[]) => events.reduce((sum, e) => sum + (e.amountCents ?? 0), 0);
 
 /** When a payout's latest known status shows the money didn't reach (or stay with) the supplier. */
 function payoutFailedAt(payout: AuditEntry, log: AuditEntry[]): string | null {
@@ -85,15 +105,40 @@ function payoutFailedAt(payout: AuditEntry, log: AuditEntry[]): string | null {
   return PAYOUT_FAILED.has(payout.event.status) ? payout.at : null;
 }
 
-/** Money that left (payouts that didn't fail, plus captured PayPal orders) over the rolling windows the rules use. */
-export function spending(log: AuditEntry[], now = new Date()) {
-  const spent = log.flatMap((e) =>
-    (e.event.type === "payout" && !payoutFailedAt(e, log)) || e.event.type === "order_captured"
+/**
+ * Money committed over the rolling windows the rules use: payouts that didn't fail, captured PayPal
+ * orders, and purchases still waiting for approval (they'd be paid if approved). `exclude` is the
+ * decision being paid right now, so it doesn't count against itself.
+ */
+export function spending(log: AuditEntry[], now = new Date(), exclude?: number) {
+  const paid = log.flatMap((e) =>
+    (e.event.type === "payout" && !payoutFailedAt(e, log) && e.event.decisionSeq !== exclude) ||
+    (e.event.type === "order_captured" && e.event.decisionSeq !== exclude)
       ? [{ at: e.at, cents: e.event.amountCents }]
       : [],
   );
-  const since = (ms: number) => spent.filter((s) => now.getTime() - Date.parse(s.at) < ms);
-  return { spentLast7dCents: since(7 * DAY_MS).reduce((sum, s) => sum + s.cents, 0), purchasesLast24h: since(DAY_MS).length };
+  const since = (ms: number) => paid.filter((s) => now.getTime() - Date.parse(s.at) < ms);
+  return {
+    spentLast7dCents: since(7 * DAY_MS).reduce((sum, s) => sum + s.cents, 0),
+    purchasesLast24h: since(DAY_MS).length,
+    pendingCents: pendingApprovalCents(log, now, exclude),
+  };
+}
+
+/** Total of purchases waiting for approval (not expired, not paid, declined or tests). */
+export function pendingApprovalCents(log: AuditEntry[], now = new Date(), exclude?: number) {
+  let total = 0;
+  for (const d of log) {
+    if (d.event.type !== "decision" || d.event.decision.verdict !== "approval" || d.seq === exclude || approvalExpired(d.at, now)) continue;
+    const proposalSeq = d.event.proposalSeq;
+    const p = log.find((e) => e.seq === proposalSeq);
+    if (p?.event.type === "proposal" && p.event.scenario) continue;
+    const settled = log.some(
+      (e) => "decisionSeq" in e.event && e.event.decisionSeq === d.seq && ["payout", "order_captured", "rejected", "payment_failed"].includes(e.event.type),
+    );
+    if (!settled) total += d.event.decision.totalCents;
+  }
+  return total;
 }
 
 /** Everything the policy engine needs, built from the audit log and the merchant's own offers. */
@@ -103,16 +148,17 @@ export function policyContext(
   balanceCents: number | null,
   merchant: { managed: boolean; offers: Offer[] },
   now = new Date(),
+  exclude?: number, // the decision being paid right now (re-check at payment time)
 ): PolicyContext {
   const offer = merchant.offers.find((o) => o.supplierId === proposal.supplierId);
-  const { spentLast7dCents, purchasesLast24h } = spending(log, now);
+  const { spentLast7dCents, purchasesLast24h, pendingCents } = spending(log, now, exclude);
   return {
     productManaged: merchant.managed,
     supplierLinked: !!offer,
     // An offer the merchant never linked has no history: 0 makes the price check block it too.
     avgUnitPrice30dCents: offer?.avgUnitPrice30dCents ?? 0,
     usualQuantity: offer?.usualQuantity ?? 0,
-    spentLast7dCents,
+    spentLast7dCents: spentLast7dCents + pendingCents, // committed: paid plus waiting for approval
     purchasesLast24h,
     paypalBalanceCents: balanceCents,
   };
@@ -156,7 +202,7 @@ export function skipReason(item: { variantId: string; sku: string }, log: AuditE
   if (rejected) return wait(rejected.at, RETRY_AFTER_REJECT_MS, `restock #${last.seq} was declined`);
   const failed = ofDecision("payment_failed").at(-1);
   if (failed) return wait(failed.at, RETRY_AFTER_BLOCK_MS, `payment for #${last.seq} failed`);
-  if (verdict === "approval") return open(); // waiting for a person
+  if (verdict === "approval") return approvalExpired(decision.at, now) ? null : open(); // waiting for a person (until it expires)
   // "auto" with no payment result: still being paid, or the server stopped mid-payment.
   return wait(decision.at, IN_FLIGHT_MS, `restock #${last.seq} started paying`);
 }

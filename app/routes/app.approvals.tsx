@@ -51,6 +51,11 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<ActionRes
   }
 };
 
+/** "expires in 5 h" / "expires in 20 min" */
+const expiresIn = (iso: string) => {
+  const min = Math.max(0, Math.round((Date.parse(iso) - Date.now()) / 60_000));
+  return min >= 120 ? `expires in ${Math.round(min / 60)} h` : `expires in ${min} min`;
+};
 const pct = (n: number) => `${n >= 0 ? "+" : ""}${Math.round(n)}%`;
 
 type Card = ApprovalCard & { productTitle: string };
@@ -101,7 +106,7 @@ function CardView({ card }: { card: Card }) {
         <s-stack direction="inline" gap="small-200" alignItems="center">
           <s-badge tone={card.status === "paypal_pending" ? "info" : "caution"}>{card.status === "paypal_pending" ? "Waiting for PayPal" : "Needs you"}</s-badge>
           <s-heading>{usd(card.totalCents)}</s-heading>
-          <s-text tone="neutral">from {card.supplierName} · proposed {ago(card.proposedAt, Date.now())}</s-text>
+          <s-text tone="neutral">from {card.supplierName} · proposed {ago(card.proposedAt, Date.now())} · {expiresIn(card.expiresAt)}</s-text>
         </s-stack>
 
         <s-stack gap="small-200">
