@@ -1,73 +1,32 @@
-.index {
-  align-items: center;
-  display: flex;
-  justify-content: center;
-  height: 100%;
-  width: 100%;
-  text-align: center;
-  padding: 1rem;
+/* Public landing page (outside the Shopify admin): GuardBuy's own palette, shared with the
+   architecture page. Green = money, ink = everything else. */
+.page {
+  --ink: #15201b; --muted: #56665e; --line: #c4cfc9; --bg: #f3f6f4; --surface: #ffffff; --money: #14734a; --money-soft: #e1f1e8;
+  min-height: 100vh; box-sizing: border-box; background: var(--bg); color: var(--ink);
+  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 56px 16px; overflow-x: hidden;
 }
+.wrap { max-width: 920px; margin: 0 auto; }
+.eyebrow { font: 500 0.75rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0; }
+.heading { font-size: clamp(2rem, 5vw, 3rem); line-height: 1.08; letter-spacing: -0.02em; font-weight: 800; margin: 14px 0 0; text-wrap: balance; }
+.lede { color: var(--muted); font-size: 1.12rem; max-width: 62ch; margin: 16px 0 0; }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+.primary, .secondary { display: inline-block; padding: 11px 18px; border-radius: 10px; font-weight: 600; text-decoration: none; }
+.primary { background: var(--ink); color: #fff; }
+.primary:hover { background: #26352e; }
+.secondary { border: 1px solid var(--line); color: var(--ink); background: var(--surface); }
+.secondary:hover { border-color: var(--ink); }
+.features { list-style: none; padding: 0; margin: 44px 0 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 760px) { .features { grid-template-columns: 1fr; } }
+.features li { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+.features li.money { border-color: var(--money); background: var(--money-soft); }
+.features h2 { font-size: 1rem; margin: 0 0 6px; }
+.features p { margin: 0; color: var(--muted); font-size: .94rem; }
+.install { margin-top: 44px; padding-top: 22px; border-top: 1px solid var(--line); }
+.label { display: block; font-weight: 600; margin-bottom: 8px; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; }
+.input { flex: 1 1 260px; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; font: inherit; background: var(--surface); color: var(--ink); }
+.input:focus { outline: 2px solid var(--money); outline-offset: 1px; }
+.button { padding: 10px 16px; border-radius: 8px; border: 0; background: var(--ink); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+.error { color: #b42318; margin: 8px 0 0; font-size: .9rem; }
 
-.heading,
-.text {
-  padding: 0;
-  margin: 0;
-}
-
-.text {
-  font-size: 1.2rem;
-  padding-bottom: 2rem;
-}
-
-.content {
-  display: grid;
-  gap: 2rem;
-}
-
-.form {
-  display: flex;
-  align-items: center;
-  justify-content: flex-start;
-  margin: 0 auto;
-  gap: 1rem;
-}
-
-.label {
-  display: grid;
-  gap: 0.2rem;
-  max-width: 20rem;
-  text-align: left;
-  font-size: 1rem;
-}
-
-.input {
-  padding: 0.4rem;
-}
-
-.button {
-  padding: 0.4rem;
-}
-
-.list {
-  list-style: none;
-  padding: 0;
-  padding-top: 3rem;
-  margin: 0;
-  display: flex;
-  gap: 2rem;
-}
-
-.list > li {
-  max-width: 20rem;
-  text-align: left;
-}
-
-@media only screen and (max-width: 50rem) {
-  .list {
-    display: block;
-  }
-
-  .list > li {
-    padding-bottom: 1rem;
-  }
-}
+:global(body) { margin: 0; }
