@@ -13,6 +13,7 @@ import { scoreboard } from "../lib/agent/scoreboard.server";
 import { cachedBalanceCents, feedNames, productOverview, productStatus } from "../lib/merchant/dashboard.server";
 import { adminWithStaff } from "../lib/merchant/staff.server";
 import { setManaged, setupStatus } from "../lib/suppliers/directory.server";
+import { ago, FEED_LABEL, FEED_TONE, Metric, plural, Row, type Tone } from "../components/ui";
 
 // Home: what the agent is doing, what it spent, which products need attention, and what changed.
 // While setup isn't finished, the setup checklist takes the place of the numbers.
@@ -73,33 +74,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return { ok: false, message: "Unknown action" };
 };
 
-/** "just now", "5 min ago", "3 h ago", "2 days ago" (computed in the browser, so it's local). */
-function ago(iso: string, now: number) {
-  const s = Math.max(0, (now - Date.parse(iso)) / 1000);
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
-  const d = Math.floor(s / 86400);
-  return d === 1 ? "yesterday" : `${d} days ago`;
-}
-
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
-
-// Polaris badge tones carry the same meaning as the architecture palette:
-// success = money moved, caution = needs a person, critical = stopped, info = the AI / information.
-type Tone = "success" | "caution" | "warning" | "critical" | "info" | "neutral";
-const FEED_TONE: Record<string, Tone> = {
-  paid: "success", approved: "success", resisted: "success", auto: "success",
-  block: "critical", failed: "critical", slipped: "critical",
-  approval: "caution", flagged: "caution", declined: "neutral",
-  proposed: "info", attack: "info", stock: "info", paypal: "info", rules: "neutral",
-};
 const STATUS_TONE: Record<string, Tone> = { success: "success", warning: "caution", critical: "critical", info: "info", neutral: "neutral" };
-const FEED_LABEL: Record<string, string> = {
-  paid: "Paid", approved: "Approved", auto: "Allowed", block: "Blocked", failed: "Failed", approval: "Needs you", declined: "Declined",
-  stock: "Low stock", proposed: "AI proposed", rules: "Rules", paypal: "PayPal", attack: "Attack test", resisted: "Resisted", flagged: "Flagged", slipped: "Gap",
-};
-
 export default function Home() {
   const d = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
@@ -204,11 +179,11 @@ export default function Home() {
               <s-heading>Your rules</s-heading>
               {d.rules && (
                 <>
-                  <Row label="Ask me above" value={d.rules.approvalAbove} />
-                  <Row label="Weekly cap" value={usd(d.rules.weeklyCapCents)} />
-                  <Row label="Keep in PayPal" value={usd(d.rules.cashFloorCents)} />
-                  <Row label="Restock below" value={`${plural(d.rules.reorderBelow, "day")} of stock`} />
-                  <Row label="May buy from" value={d.rules.allowlist.join(", ")} />
+                  <Row label="Ask me above"><s-text>{d.rules.approvalAbove}</s-text></Row>
+                  <Row label="Weekly cap"><s-text>{usd(d.rules.weeklyCapCents)}</s-text></Row>
+                  <Row label="Keep in PayPal"><s-text>{usd(d.rules.cashFloorCents)}</s-text></Row>
+                  <Row label="Restock below"><s-text>{`${plural(d.rules.reorderBelow, "day")} of stock`}</s-text></Row>
+                  <Row label="May buy from"><s-text>{d.rules.allowlist.join(", ")}</s-text></Row>
                 </>
               )}
               <s-text tone="neutral">
@@ -224,8 +199,8 @@ export default function Home() {
                   {d.chain.valid ? `Intact · ${d.chain.length} ${d.chain.length === 1 ? "entry" : "entries"}` : `Broken at #${d.chain.brokenAtSeq}`}
                 </s-badge>
               </s-stack>
-              <Row label="Fingerprint" value={d.head ? d.head.slice(0, 16) : "None yet"} />
-              <Row label="Blocked" value={`${plural(d.blocked.count, "purchase")}${d.attacksBlocked > 0 ? ` · ${plural(d.attacksBlocked, "attack")} stopped in tests` : ""}`} />
+              <Row label="Fingerprint"><s-text>{d.head ? d.head.slice(0, 16) : "None yet"}</s-text></Row>
+              <Row label="Blocked"><s-text>{`${plural(d.blocked.count, "purchase")}${d.attacksBlocked > 0 ? ` · ${plural(d.attacksBlocked, "attack")} stopped in tests` : ""}`}</s-text></Row>
               <s-stack direction="inline" gap="base">
                 <s-link href="/app/protection">Protection details</s-link>
                 <s-link href="/app/activity">Verify the log</s-link>
@@ -298,33 +273,6 @@ export default function Home() {
         <s-box paddingBlockStart="small-200"><s-link href="/app/activity">All activity</s-link></s-box>
       </s-section>
     </s-page>
-  );
-}
-
-/** A Polaris-style metric card: subdued box, neutral label, large value. */
-function Metric({ label, value, detail, href, badge, children }: { label: string; value: string; detail?: string; href?: string; badge?: { tone: Tone; label: string }; children?: React.ReactNode }) {
-  return (
-    <s-box padding="base" background="subdued" borderRadius="base">
-      <s-stack gap="small-200">
-        <s-stack direction="inline" gap="small-200" alignItems="center">
-          <s-text tone="neutral">{label}</s-text>
-          {badge && <s-badge tone={badge.tone}>{badge.label}</s-badge>}
-        </s-stack>
-        <s-heading>{value}</s-heading>
-        {children}
-        {detail && (href ? <s-link href={href}>{detail}</s-link> : <s-text tone="neutral">{detail}</s-text>)}
-      </s-stack>
-    </s-box>
-  );
-}
-
-/** A label / value line (Polaris text only). */
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <s-grid gridTemplateColumns="@container (inline-size <= 320px) 1fr, 140px 1fr" gap="small-200">
-      <s-text tone="neutral">{label}</s-text>
-      <s-text>{value}</s-text>
-    </s-grid>
   );
 }
 

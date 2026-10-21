@@ -7,13 +7,17 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { authenticate } from "../shopify.server";
 import { approvalQueue, approveInPayPal, approvePurchase, rejectPurchase, type ApprovalCard } from "../lib/agent/approvals.server";
 import { ExecutionRefused } from "../lib/agent/execute.server";
+import { feedNames } from "../lib/merchant/dashboard.server";
+import { usd } from "../lib/format";
+import { ago, plural, Row } from "../components/ui";
 
 // Purchases waiting for a person. Only a signed-in staff member (verified Shopify session token)
 // can act, and their staff id is written to the audit log with the decision.
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
-  return { cards: await approvalQueue(session.shop) };
+  const [cards, names] = await Promise.all([approvalQueue(session.shop), feedNames(session.shop)]);
+  return { cards: cards.map((c) => ({ ...c, productTitle: names.product(c.sku) ?? c.sku })) };
 };
 
 type ActionResult = { ok: boolean; message: string; approveUrl?: string };
@@ -47,28 +51,36 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<ActionRes
   }
 };
 
-const usd = (cents: number) => `$${(cents / 100).toFixed(2)}`;
 const pct = (n: number) => `${n >= 0 ? "+" : ""}${Math.round(n)}%`;
+
+type Card = ApprovalCard & { productTitle: string };
 
 export default function Approvals() {
   const { cards } = useLoaderData<typeof loader>();
-
   return (
-    <s-page heading="Approvals">
+    <s-page heading="Approvals" inlineSize="large">
       {cards.length === 0 ? (
         <s-section>
-          <s-paragraph>
-            Nothing is waiting for you. Purchases over your approval limit, or that a rule flags, show up here.
-          </s-paragraph>
+          <s-stack gap="small-200">
+            <s-heading>Nothing is waiting for you</s-heading>
+            <s-text tone="neutral">Purchases above your approval limit, or that a rule flags, wait here until you decide.</s-text>
+          </s-stack>
         </s-section>
       ) : (
-        cards.map((card) => <Card key={card.decisionSeq} card={card} />)
+        <>
+          <s-section>
+            <s-text tone="neutral">
+              {plural(cards.length, "purchase")} waiting. GuardBuy computed the facts below itself; the AI's explanation comes last and isn't verified.
+            </s-text>
+          </s-section>
+          {cards.map((card) => <CardView key={card.decisionSeq} card={card} />)}
+        </>
       )}
     </s-page>
   );
 }
 
-function Card({ card }: { card: ApprovalCard }) {
+function CardView({ card }: { card: Card }) {
   const fetcher = useFetcher<ActionResult>();
   const shopify = useAppBridge();
   const busy = fetcher.state !== "idle";
@@ -84,40 +96,35 @@ function Card({ card }: { card: ApprovalCard }) {
   const passed = card.otherChecks.filter((c) => c.outcome === "auto").length;
 
   return (
-    <s-section heading={`${card.quantity} × ${card.sku} from ${card.supplierName}`}>
+    <s-section heading={`${card.quantity} × ${card.productTitle}`}>
       <s-stack gap="base">
-        <s-stack direction="inline" gap="small-200">
-          <s-badge tone="warning">Needs approval</s-badge>
-          {card.status === "paypal_pending" && <s-badge tone="info">Waiting for PayPal approval</s-badge>}
-          <s-text type="strong">{usd(card.totalCents)}</s-text>
+        <s-stack direction="inline" gap="small-200" alignItems="center">
+          <s-badge tone={card.status === "paypal_pending" ? "info" : "caution"}>{card.status === "paypal_pending" ? "Waiting for PayPal" : "Needs you"}</s-badge>
+          <s-heading>{usd(card.totalCents)}</s-heading>
+          <s-text tone="neutral">from {card.supplierName} · proposed {ago(card.proposedAt, Date.now())}</s-text>
         </s-stack>
-
-        {/* Facts GuardBuy computed itself */}
-        <s-box padding="base" borderWidth="base" borderRadius="base">
-          <s-stack gap="small-200">
-            <s-text>
-              Price: {usd(card.unitPriceCents)} per unit
-              {priceDelta !== null && ` (${pct(priceDelta)} vs 30-day average ${usd(card.avgUnitPrice30dCents!)})`}
-            </s-text>
-            <s-text>
-              Quantity: {card.quantity}
-              {qtyMultiple !== null && ` (${qtyMultiple.toFixed(1)}× the usual ${card.usualQuantity})`}
-            </s-text>
-            <s-text>Pays: {card.payeeEmail ?? "no PayPal email on file"} (PayPal)</s-text>
-          </s-stack>
-        </s-box>
 
         <s-stack gap="small-200">
-          <s-heading>Why it needs you</s-heading>
-          <s-unordered-list>
-            {card.needsApprovalBecause.map((c) => (
-              <s-list-item key={c.rule}>{c.detail}</s-list-item>
-            ))}
-          </s-unordered-list>
-          <s-text tone="neutral">{passed} other rules passed.</s-text>
+          {card.needsApprovalBecause.map((c) => (
+            <s-banner key={c.rule} tone="warning">{c.detail}</s-banner>
+          ))}
         </s-stack>
 
-        {/* Written by the AI: shown last and labelled, because supplier text can steer it */}
+        <s-stack gap="small-200">
+          <Row label="Price per unit">
+            <s-text>{usd(card.unitPriceCents)}{priceDelta !== null && ` · ${pct(priceDelta)} vs 30-day average ${usd(card.avgUnitPrice30dCents!)}`}</s-text>
+          </Row>
+          <Row label="Quantity">
+            <s-text>{card.quantity}{qtyMultiple !== null && ` · ${qtyMultiple.toFixed(1)}× the usual ${card.usualQuantity}`}</s-text>
+          </Row>
+          <Row label="Pays">
+            <s-text>{card.payeeEmail ?? "No PayPal email on file"}</s-text>
+          </Row>
+          <Row label="Other rules">
+            <s-text tone="neutral">{`${passed} passed`}</s-text>
+          </Row>
+        </s-stack>
+
         <s-box padding="base" background="subdued" borderRadius="base">
           <s-stack gap="small-200">
             <s-text type="strong">The AI's explanation (not verified)</s-text>
@@ -126,23 +133,17 @@ function Card({ card }: { card: ApprovalCard }) {
         </s-box>
 
         {card.status === "paypal_pending" && card.paypalApproveUrl ? (
-          <s-stack direction="inline" gap="base">
-            <s-button variant="primary" href={card.paypalApproveUrl} target="_blank">
-              Open PayPal to approve
-            </s-button>
+          <s-stack direction="inline" gap="base" alignItems="center">
+            <s-button variant="primary" href={card.paypalApproveUrl} target="_blank">Open PayPal to approve</s-button>
             <s-text tone="neutral">GuardBuy records the payment when PayPal sends you back.</s-text>
           </s-stack>
         ) : (
           <s-stack direction="inline" gap="base">
             <s-button variant="primary" onClick={() => submit("approve")} disabled={busy} {...(busyWith === "approve" ? { loading: true } : {})}>
-              Approve and pay {usd(card.totalCents)}
+              {`Approve and pay ${usd(card.totalCents)}`}
             </s-button>
-            <s-button onClick={() => submit("paypal")} disabled={busy} {...(busyWith === "paypal" ? { loading: true } : {})}>
-              Approve in PayPal
-            </s-button>
-            <s-button tone="critical" variant="tertiary" onClick={() => submit("reject")} disabled={busy} {...(busyWith === "reject" ? { loading: true } : {})}>
-              Decline
-            </s-button>
+            <s-button onClick={() => submit("paypal")} disabled={busy} {...(busyWith === "paypal" ? { loading: true } : {})}>Approve in PayPal</s-button>
+            <s-button tone="critical" variant="tertiary" onClick={() => submit("reject")} disabled={busy} {...(busyWith === "reject" ? { loading: true } : {})}>Decline</s-button>
           </s-stack>
         )}
       </s-stack>

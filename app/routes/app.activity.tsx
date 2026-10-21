@@ -1,64 +1,108 @@
+import { useState } from "react";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useRevalidator } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { auditEntries, verifyChain } from "../lib/audit/log.server";
 import { toFeed } from "../lib/audit/feed.server";
+import { feedNames } from "../lib/merchant/dashboard.server";
 import { adminWithStaff } from "../lib/merchant/staff.server";
+import { ago, FEED_LABEL, FEED_TONE, Filters } from "../components/ui";
 
-// Everything the agent did, from the hash-chained log. "Verify the log" recomputes every hash
-// from the first entry, so an edited, deleted or reordered row shows up as broken.
+// Everything the agent did, from the hash-chained log. "Verify the log" recomputes every hash from
+// the first entry, so an edited, deleted or reordered row shows up as broken.
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, actor } = await adminWithStaff(request);
-  const log = await auditEntries(session.shop);
-  return { feed: toFeed(log, actor), chain: await verifyChain(session.shop), head: log.at(-1)?.hash ?? null };
+  const [log, names] = await Promise.all([auditEntries(session.shop), feedNames(session.shop)]);
+  return {
+    feed: toFeed(log, actor, names),
+    chain: await verifyChain(session.shop),
+    head: log.at(-1)?.hash ?? null,
+    checkedAt: new Date().toISOString(),
+  };
 };
 
-const TONE: Record<string, "success" | "critical" | "warning" | "info" | "neutral"> = {
-  paid: "success", approved: "success", resisted: "success", auto: "success",
-  block: "critical", failed: "critical", slipped: "critical",
-  approval: "warning", flagged: "warning", declined: "warning",
-  attack: "info", stock: "info", proposed: "info", rules: "neutral", status: "neutral", paypal: "info",
+type View = "all" | "money" | "you" | "blocked" | "ai";
+const IN_VIEW: Record<View, (kind: string) => boolean> = {
+  all: () => true,
+  money: (k) => k === "paid" || k === "paypal" || k === "status",
+  you: (k) => k === "approval" || k === "approved" || k === "declined" || k === "rules",
+  blocked: (k) => k === "block" || k === "failed" || k === "slipped",
+  ai: (k) => k === "proposed" || k === "attack" || k === "resisted" || k === "flagged",
 };
 
 export default function Activity() {
-  const { feed, chain, head } = useLoaderData<typeof loader>();
+  const { feed, chain, head, checkedAt } = useLoaderData<typeof loader>();
   const revalidator = useRevalidator();
+  const [view, setView] = useState<View>("all");
+  const now = Date.now();
+  const shown = feed.filter((f) => IN_VIEW[view](f.kind)).slice(0, 200);
+
   return (
-    <s-page heading="Activity">
-      <s-section>
-        <s-stack direction="inline" gap="base" alignItems="center">
-          <s-badge tone={chain.valid ? "success" : "critical"}>
-            {chain.valid ? `Audit log intact: ${chain.length} entries` : `BROKEN at entry #${chain.brokenAtSeq}: ${chain.reason}`}
-          </s-badge>
-          <s-button onClick={() => revalidator.revalidate()} {...(revalidator.state !== "idle" ? { loading: true } : {})}>
-            Verify the log
-          </s-button>
-          {head && <s-text tone="neutral">Latest fingerprint {head.slice(0, 16)}</s-text>}
-        </s-stack>
-      </s-section>
+    <s-page heading="Activity" inlineSize="large">
       <s-section>
         <s-stack gap="base">
-          {feed.length === 0 && <s-text tone="neutral">Nothing yet.</s-text>}
-          {feed.map((f) => (
-            <s-box key={`${f.seq}-${f.kind}`} padding="small-200" borderWidth="base" borderRadius="base">
-              <s-stack gap="small-200">
-                <s-stack direction="inline" gap="small-200" alignItems="center">
-                  <s-badge tone={TONE[f.kind] ?? "neutral"}>{f.kind}</s-badge>
-                  <s-text type="strong">{f.title}</s-text>
-                </s-stack>
-                {f.detail && <s-text tone="neutral">{f.detail}</s-text>}
-                {f.untrusted && (
-                  <s-box padding="small-200" background="subdued" borderRadius="base">
-                    <s-text type="strong">{f.untrustedLabel ?? "Untrusted text"}</s-text>
-                    <s-paragraph>{f.untrusted}</s-paragraph>
-                  </s-box>
-                )}
-                <s-text tone="neutral">#{f.seq} · {new Date(f.at).toLocaleString()}</s-text>
-              </s-stack>
-            </s-box>
-          ))}
+          <s-stack direction="inline" gap="base" alignItems="center">
+            <s-badge tone={chain.valid ? "success" : "critical"}>
+              {chain.valid ? `Audit log intact · ${chain.length} ${chain.length === 1 ? "entry" : "entries"}` : `Broken at entry #${chain.brokenAtSeq}`}
+            </s-badge>
+            <s-button onClick={() => revalidator.revalidate()} {...(revalidator.state !== "idle" ? { loading: true } : {})}>Verify the log</s-button>
+            <s-text tone="neutral">Checked {ago(checkedAt, now)}{head ? ` · latest fingerprint ${head.slice(0, 16)}` : ""}</s-text>
+          </s-stack>
+          {!chain.valid && <s-banner tone="critical" heading="The audit log failed verification">{chain.reason}</s-banner>}
+          <s-text tone="neutral">
+            Every entry's fingerprint includes the one before it, so changing, deleting or reordering any past entry breaks every fingerprint after it.
+          </s-text>
+        </s-stack>
+      </s-section>
+
+      <s-section>
+        <s-stack gap="base">
+          <Filters<View>
+            value={view}
+            onChange={setView}
+            options={[
+              { id: "all", label: "All", count: feed.length },
+              { id: "money", label: "Money", count: feed.filter((f) => IN_VIEW.money(f.kind)).length },
+              { id: "you", label: "You", count: feed.filter((f) => IN_VIEW.you(f.kind)).length },
+              { id: "blocked", label: "Blocked", count: feed.filter((f) => IN_VIEW.blocked(f.kind)).length },
+              { id: "ai", label: "AI & tests", count: feed.filter((f) => IN_VIEW.ai(f.kind)).length },
+            ]}
+          />
+          {shown.length === 0 ? (
+            <s-text tone="neutral">Nothing here yet.</s-text>
+          ) : (
+            <s-table>
+              <s-table-header-row>
+                <s-table-header>Type</s-table-header>
+                <s-table-header listSlot="primary">Event</s-table-header>
+                <s-table-header format="numeric">Entry</s-table-header>
+                <s-table-header listSlot="secondary">When</s-table-header>
+              </s-table-header-row>
+              <s-table-body>
+                {shown.map((f) => (
+                  <s-table-row key={`${f.seq}-${f.kind}`}>
+                    <s-table-cell><s-badge tone={FEED_TONE[f.kind] ?? "neutral"}>{FEED_LABEL[f.kind] ?? f.kind}</s-badge></s-table-cell>
+                    <s-table-cell>
+                      <s-stack gap="small-200">
+                        <s-text>{f.title}</s-text>
+                        {f.detail && <s-text tone="neutral">{f.detail}</s-text>}
+                        {f.untrusted && (
+                          <s-box padding="small-200" background="subdued" borderRadius="base">
+                            <s-text type="strong">{f.untrustedLabel ?? "Untrusted text"}</s-text>
+                            <s-paragraph>{f.untrusted}</s-paragraph>
+                          </s-box>
+                        )}
+                      </s-stack>
+                    </s-table-cell>
+                    <s-table-cell><s-text tone="neutral">#{f.seq}</s-text></s-table-cell>
+                    <s-table-cell><s-text tone="neutral">{ago(f.at, now)}</s-text></s-table-cell>
+                  </s-table-row>
+                ))}
+              </s-table-body>
+            </s-table>
+          )}
         </s-stack>
       </s-section>
     </s-page>

@@ -2,27 +2,14 @@ import { auditEntries } from "../audit/log.server";
 import type { AuditEntry } from "../policy/schema";
 import { attackById, type AttackLevel } from "../suppliers/attacks";
 import { classifyAttack, WHAT_IF_SCENARIO, type AttackOutcome } from "./attack.server";
+import { RULE_LABELS } from "../policy/rules";
+
+export { RULE_LABELS };
 
 // The attack scoreboard, computed from the hash-chained log only (nothing is counted separately,
 // so it can't drift from what actually happened).
 //   attacks: injection tests (judge sandboxes, demo): how often the AI was fooled and what stopped it
 //   real:    normal operation: what the rules blocked or sent to a person, by rule and in dollars
-
-/** Plain names for the policy engine's rules (scoreboard, cards). */
-export const RULE_LABELS: Record<string, string> = {
-  productManaged: "Product switched on",
-  supplierLinked: "Supplier linked to the product",
-  payeeOnFile: "PayPal email on file",
-  supplierAllowlist: "Approved suppliers",
-  maxUnitPrice: "Price cap",
-  maxPriceAboveAvg: "Price vs 30-day average",
-  maxQuantityMultiple: "Quantity limit",
-  maxPurchasesPer24h: "Purchases per day",
-  weeklySpendCap: "Weekly spending cap",
-  cashFloor: "Cash floor",
-  approvalAbove: "Approval limit",
-  noApprovalClaim: "No approval claimed by the AI",
-};
 
 type Tally = { tried: number; resisted: number; blocked: number; flagged: number; slipped: number; failed: number };
 const tally = (): Tally => ({ tried: 0, resisted: 0, blocked: 0, flagged: 0, slipped: 0, failed: 0 });
