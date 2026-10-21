@@ -20,6 +20,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     chain: await verifyChain(session.shop),
     head: log.at(-1)?.hash ?? null,
     checkedAt: new Date().toISOString(),
+    verifyBase: process.env.SHOPIFY_APP_URL ? `${process.env.SHOPIFY_APP_URL}/verify?id=` : null,
   };
 };
 
@@ -33,7 +34,7 @@ const IN_VIEW: Record<View, (kind: string) => boolean> = {
 };
 
 export default function Activity() {
-  const { feed, chain, head, checkedAt } = useLoaderData<typeof loader>();
+  const { feed, chain, head, checkedAt, verifyBase } = useLoaderData<typeof loader>();
   const revalidator = useRevalidator();
   const [view, setView] = useState<View>("all");
   const now = Date.now();
@@ -88,6 +89,7 @@ export default function Activity() {
                       <s-stack gap="small-200">
                         <s-text>{f.title}</s-text>
                         {f.detail && <s-text tone="neutral">{f.detail}</s-text>}
+                        {f.verifyId && verifyBase && <s-link href={verifyBase + encodeURIComponent(f.verifyId)} target="_blank">Verify this payment publicly</s-link>}
                         {f.untrusted && (
                           <s-box padding="small-200" background="subdued" borderRadius="base">
                             <s-text type="strong">{f.untrustedLabel ?? "Untrusted text"}</s-text>

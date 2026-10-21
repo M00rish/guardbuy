@@ -1,0 +1,55 @@
+/* Public landing page (outside the Shopify admin): GuardBuy's own palette, shared with the
+   architecture page. Green = money, ink = everything else. */
+.page {
+  --ink: #15201b; --muted: #56665e; --line: #c4cfc9; --bg: #f3f6f4; --surface: #ffffff; --money: #14734a; --money-soft: #e1f1e8;
+  min-height: 100vh; box-sizing: border-box; background: var(--bg); color: var(--ink);
+  font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 56px 16px; overflow-x: hidden;
+}
+.wrap { max-width: 920px; margin: 0 auto; }
+.eyebrow { font: 500 0.75rem/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 0; }
+.heading { font-size: clamp(2rem, 5vw, 3rem); line-height: 1.08; letter-spacing: -0.02em; font-weight: 800; margin: 14px 0 0; text-wrap: balance; }
+.lede { color: var(--muted); font-size: 1.12rem; max-width: 62ch; margin: 16px 0 0; }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 28px; }
+.primary, .secondary { display: inline-block; padding: 11px 18px; border-radius: 10px; font-weight: 600; text-decoration: none; }
+.primary { background: var(--ink); color: #fff; }
+.primary:hover { background: #26352e; }
+.secondary { border: 1px solid var(--line); color: var(--ink); background: var(--surface); }
+.secondary:hover { border-color: var(--ink); }
+.features { list-style: none; padding: 0; margin: 44px 0 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+@media (max-width: 760px) { .features { grid-template-columns: 1fr; } }
+.features li { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px 18px; }
+.features li.money { border-color: var(--money); background: var(--money-soft); }
+.features h2 { font-size: 1rem; margin: 0 0 6px; }
+.features p { margin: 0; color: var(--muted); font-size: .94rem; }
+.install { margin-top: 44px; padding-top: 22px; border-top: 1px solid var(--line); }
+.label { display: block; font-weight: 600; margin-bottom: 8px; }
+.row { display: flex; flex-wrap: wrap; gap: 10px; }
+.input { flex: 1 1 260px; min-width: 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; font: inherit; background: var(--surface); color: var(--ink); }
+.input:focus { outline: 2px solid var(--money); outline-offset: 1px; }
+.button { padding: 10px 16px; border-radius: 8px; border: 0; background: var(--ink); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+.error { color: #b42318; margin: 8px 0 0; font-size: .9rem; }
+
+:global(body) { margin: 0; }
+
+/* verify page */
+.search { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 24px; }
+.result { margin-top: 28px; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px 20px; }
+.ok, .bad, .none { display: inline-block; font-weight: 700; padding: 3px 10px; border-radius: 999px; font-size: .9rem; }
+.ok { background: var(--money-soft); color: var(--money); border: 1px solid var(--money); }
+.bad { background: #fdecea; color: #b42318; border: 1px solid #b42318; }
+.none { background: #eef2f0; color: var(--muted); border: 1px solid var(--line); }
+.facts { display: grid; grid-template-columns: 180px 1fr; gap: 6px 16px; margin: 16px 0 0; font-size: .95rem; }
+@media (max-width: 560px) { .facts { grid-template-columns: 1fr; } .facts dt { margin-top: 6px; } }
+.facts dt { color: var(--muted); }
+.facts dd { margin: 0; }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .82rem; word-break: break-all; }
+.steps { list-style: none; padding: 0; margin: 18px 0 0; border-left: 2px solid var(--line); }
+.steps li { position: relative; padding: 2px 0 14px 18px; }
+.steps li::before { content: ""; position: absolute; left: -7px; top: 6px; width: 12px; height: 12px; border-radius: 50%; background: var(--surface); border: 2px solid var(--ink); }
+.steps li.pay::before { border-color: var(--money); background: var(--money-soft); }
+.steps .title { font-weight: 600; }
+.steps .meta { color: var(--muted); font-size: .85rem; }
+.checks { margin: 8px 0 0; padding-left: 18px; color: var(--muted); font-size: .9rem; }
+.note { color: var(--muted); font-size: .9rem; margin-top: 14px; }
+.back { color: var(--muted); text-decoration: none; font-size: .9rem; }
+.back:hover { color: var(--ink); }

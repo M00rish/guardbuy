@@ -121,3 +121,10 @@ model ProductSupplier {
 
   @@id([shop, variantId, supplierId])
 }
+
+// Per-shop settings the merchant controls.
+model ShopSettings {
+  shop               String   @id
+  shareVerifyDetails Boolean  @default(false) // public verify page shows product, supplier and amount (default: hashes only)
+  updatedAt          DateTime @updatedAt
+}

@@ -82,6 +82,7 @@ export async function judgeState(shop: string, judgeId: string) {
       remaining: ATTACKS.length - a.tried,
     },
     feed: toFeed(log, `judge:${judgeId}`),
+    verifyBase: process.env.SHOPIFY_APP_URL ? `${process.env.SHOPIFY_APP_URL}/verify?id=` : null,
     approvals: queue.map((c) => ({
       decisionSeq: c.decisionSeq,
       title: `${c.quantity} × ${c.sku} from ${c.supplierName}`,

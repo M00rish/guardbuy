@@ -75,6 +75,10 @@ const SHELL = `
       li.appendChild(el("div", null, item.title));
       if (item.detail) li.appendChild(el("div", "muted", item.detail));
       if (item.untrusted) { var ai = el("div", "ai"); ai.appendChild(el("b", null, item.untrustedLabel || "Untrusted text")); ai.appendChild(el("span", null, item.untrusted)); li.appendChild(ai); }
+      if (item.verifyId && data.verifyBase) {
+        var v = el("a", null, "Verify this payment ↗"); v.href = data.verifyBase + encodeURIComponent(item.verifyId); v.target = "_blank"; v.rel = "noopener";
+        li.appendChild(v);
+      }
       li.appendChild(el("div", "muted", "#" + item.seq + " · " + new Date(item.at).toLocaleTimeString()));
       feed.appendChild(li);
     });

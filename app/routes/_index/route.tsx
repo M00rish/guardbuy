@@ -48,6 +48,7 @@ export default function App() {
 
         <div className={styles.actions}>
           <a className={styles.primary} href={`https://${DEMO_STORE}/apps/guardbuy`}>Try the live demo</a>
+          <a className={styles.secondary} href="/verify">Verify a payment</a>
           <a className={styles.secondary} href="https://github.com/M00rish/guardbuy">How it works</a>
         </div>
 

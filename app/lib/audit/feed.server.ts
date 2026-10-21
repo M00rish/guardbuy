@@ -11,6 +11,7 @@ export type FeedItem = {
   detail?: string;
   untrusted?: string; // AI or supplier text: rendered as plain text and labelled
   untrustedLabel?: string;
+  verifyId?: string; // PayPal id to look up on the public verify page (payments only)
 };
 
 const WHAT_IF = WHAT_IF_SCENARIO; // simulated: the AI obeyed the dishonest supplier
@@ -107,7 +108,7 @@ export function toFeed(log: AuditEntry[], you?: string, names: FeedNames = {}): 
         items.push({ ...base, kind: "failed", title: "Payment failed", detail: ev.reason });
         break;
       case "payout":
-        items.push({ ...base, kind: "paid", title: `Paid ${usd(ev.amountCents)} via PayPal Payouts${purchaseOf(ev.decisionSeq) ? ` for ${purchaseOf(ev.decisionSeq)}` : ""}`, detail: `PayPal payout batch ${ev.payoutBatchId} (${ev.status})` });
+        items.push({ ...base, kind: "paid", title: `Paid ${usd(ev.amountCents)} via PayPal Payouts${purchaseOf(ev.decisionSeq) ? ` for ${purchaseOf(ev.decisionSeq)}` : ""}`, detail: `PayPal payout batch ${ev.payoutBatchId} (${ev.status})`, verifyId: ev.payoutBatchId });
         break;
       case "payout_status":
         items.push({ ...base, kind: "status", title: `Payout status: ${ev.status}`, detail: ev.confirmedByTransactionSearch ? "Confirmed in PayPal's transaction records" : undefined });
@@ -116,7 +117,7 @@ export function toFeed(log: AuditEntry[], you?: string, names: FeedNames = {}): 
         items.push({ ...base, kind: "paypal", title: `PayPal order ${ev.orderId} created`, detail: "Waiting for approval in PayPal" });
         break;
       case "order_captured":
-        items.push({ ...base, kind: "paid", title: `Paid ${usd(ev.amountCents)} via PayPal Orders${purchaseOf(ev.decisionSeq) ? ` for ${purchaseOf(ev.decisionSeq)}` : ""}`, detail: `Capture ${ev.captureId} (${ev.status})` });
+        items.push({ ...base, kind: "paid", title: `Paid ${usd(ev.amountCents)} via PayPal Orders${purchaseOf(ev.decisionSeq) ? ` for ${purchaseOf(ev.decisionSeq)}` : ""}`, detail: `Capture ${ev.captureId} (${ev.status})`, verifyId: ev.orderId });
         break;
     }
   }

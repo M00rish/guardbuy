@@ -1,5 +1,5 @@
-import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { useLoaderData } from "react-router";
+import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
+import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
@@ -7,6 +7,7 @@ import { auditEntries, verifyChain } from "../lib/audit/log.server";
 import { scoreboard } from "../lib/agent/scoreboard.server";
 import { RULE_HELP, RULE_LABELS } from "../lib/policy/rules";
 import { usd } from "../lib/format";
+import { setShareVerifyDetails, shareVerifyDetails } from "../lib/audit/verify.server";
 import { Metric, Metrics } from "../components/ui";
 
 // What protects the merchant's money: every rule and how often it fired, what was blocked or sent
@@ -15,12 +16,22 @@ import { Metric, Metrics } from "../components/ui";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const log = await auditEntries(session.shop);
-  const [score, chain] = await Promise.all([scoreboard(session.shop, log), verifyChain(session.shop)]);
-  return { ...score, chain };
+  const [score, chain, share] = await Promise.all([scoreboard(session.shop, log), verifyChain(session.shop), shareVerifyDetails(session.shop)]);
+  const lastPayment = log.filter((e) => e.event.type === "payout" || e.event.type === "order_captured").at(-1);
+  const lastId = lastPayment?.event.type === "payout" ? lastPayment.event.payoutBatchId : lastPayment?.event.type === "order_captured" ? lastPayment.event.orderId : null;
+  return { ...score, chain, share, verifyUrl: process.env.SHOPIFY_APP_URL ? `${process.env.SHOPIFY_APP_URL}/verify${lastId ? `?id=${lastId}` : ""}` : null };
+};
+
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const { session } = await authenticate.admin(request);
+  const f = await request.formData();
+  await setShareVerifyDetails(session.shop, f.get("share") === "true");
+  return { ok: true };
 };
 
 export default function Protection() {
-  const { real, attacks, stoppedBy, chain } = useLoaderData<typeof loader>();
+  const { real, attacks, stoppedBy, chain, share, verifyUrl } = useLoaderData<typeof loader>();
+  const fetcher = useFetcher<typeof action>();
   const fired = new Map(stoppedBy.map((r) => [r.rule, r.count]));
   const answered = attacks.tried - attacks.failed;
   const fooled = attacks.blocked + attacks.flagged + attacks.slipped;
@@ -62,6 +73,19 @@ export default function Protection() {
               })}
             </s-table-body>
           </s-table>
+        </s-stack>
+      </s-section>
+
+      <s-section heading="Public verification">
+        <s-stack gap="base">
+          <s-text tone="neutral">
+            Anyone with a PayPal payment ID can check it on GuardBuy's verify page: that it's on your audit log, which signed
+            rules allowed it, and that the log is intact. By default the page shows fingerprints and outcomes only.
+          </s-text>
+          <s-switch label="Also show the product, supplier and amount" checked={share} disabled={fetcher.state !== "idle"}
+            details="Emails, PayPal links and your balance are never shown"
+            onChange={() => fetcher.submit({ share: String(!share) }, { method: "POST" })} />
+          {verifyUrl && <s-link href={verifyUrl} target="_blank">Open the verify page{verifyUrl.includes("?id=") ? " for your latest payment" : ""}</s-link>}
         </s-stack>
       </s-section>
 
