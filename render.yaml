@@ -1,0 +1,44 @@
+# Render blueprint: one free web service. Secrets are set in Render's dashboard (sync: false),
+# never in this file. Database: Neon (DATABASE_URL pooled, DIRECT_URL for migrations).
+services:
+  - type: web
+    name: guardbuy
+    runtime: node
+    plan: free
+    region: oregon
+    buildCommand: npm ci && npx prisma generate && npm run build
+    startCommand: npx prisma migrate deploy && npm run start
+    healthCheckPath: /healthz
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
+      - key: SCOPES
+        value: read_products,read_orders,write_inventory
+      - key: SHOPIFY_APP_URL # the Render URL, e.g. https://guardbuy.onrender.com
+        sync: false
+      - key: SHOPIFY_API_KEY
+        sync: false
+      - key: SHOPIFY_API_SECRET
+        sync: false
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: SUPPLIER_EMAIL
+        sync: false
+      - key: GUARDBUY_APPROVER_PAYER_IDS
+        sync: false
+      - key: GOOGLE_GENERATIVE_AI_API_KEY
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: JOBS_SECRET # long random string, also stored as a GitHub Actions secret
+        sync: false
+      - key: GUARDBUY_DEMO_STORE
+        value: guardbuy-demo.myshopify.com
