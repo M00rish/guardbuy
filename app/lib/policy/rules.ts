@@ -1,6 +1,9 @@
 // Plain-language names and descriptions for the policy engine's rules (shared by server and
 // browser code: no secrets, no database).
 
+/** Price increases up to this much per unit go through when the rules don't set a tolerance. */
+export const DEFAULT_PRICE_TOLERANCE_CENTS = 50;
+
 /** Plain names for the policy engine's rules (scoreboard, cards). */
 export const RULE_LABELS: Record<string, string> = {
   productManaged: "Product switched on",
@@ -9,6 +12,7 @@ export const RULE_LABELS: Record<string, string> = {
   supplierAllowlist: "Approved suppliers",
   maxUnitPrice: "Price cap",
   maxPriceAboveAvg: "Price vs 30-day average",
+  priceAboveAccepted: "Price you accepted",
   maxQuantityMultiple: "Quantity limit",
   maxPurchasesPer24h: "Purchases per day",
   weeklySpendCap: "Weekly spending cap",
@@ -29,6 +33,7 @@ export const RULE_HELP: Record<string, string> = {
   payeeOnFile: "The supplier must have a PayPal email on file; the AI never chooses who gets paid",
   maxUnitPrice: "Hard price cap per product (when set)",
   maxPriceAboveAvg: "No sudden price jumps above the 30-day average",
+  priceAboveAccepted: "A price higher than the one you entered or last approved (beyond your tolerance) needs you once; approving makes it the new accepted price",
   maxQuantityMultiple: "No orders many times larger than usual",
   maxPurchasesPer24h: "No bursts of purchases in a day",
   weeklySpendCap: "Total spending stays under your weekly cap",

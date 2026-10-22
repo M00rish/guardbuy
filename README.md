@@ -50,7 +50,10 @@ flowchart LR
 | Product switched on / supplier linked / supplier approved | Only products and suppliers the merchant chose, ever |
 | PayPal email on file | The AI never chooses who gets paid |
 | Price vs 30-day average, price cap | No sudden price jumps |
-| Quantity limit | No orders many times larger than usual |
+| Price you accepted | A price more than your tolerance (default $0.50 per unit) above the one you entered or last approved → a person approves once, and that becomes the new accepted price. Small automatic increases can't add up |
+| Quantity limit, order size vs your history | No orders many times larger than usual; more than 1.5× what you usually buy of a product → a person confirms |
+| Split orders | Purchases of the same product from the same supplier within 24 h count together against the approval limit |
+| New or lookalike supplier | The first purchase from a supplier added in the last 30 days, or any purchase from one whose name imitates another supplier's → a person confirms |
 | Purchases per 24 h, weekly spending cap | Limits how often and how much; the weekly cap also counts purchases still waiting for approval |
 | Cash floor | Never takes the PayPal balance below a set amount |
 | Recent payee change | A supplier's PayPal email changed in the last 14 days → a person confirms |
@@ -212,11 +215,6 @@ anchors/           published audit-log fingerprints (created by the first hourly
 - AI SDK with Gemini, plus OpenRouter free models as fallbacks
 - PayPal REST APIs and the PayPal Agent Toolkit
 - Render, and GitHub Actions for the hourly job and CI
-
-## Known limits
-
-- **Price creep:** a trusted supplier raising prices in small steps under the "% above average" limit isn't caught yet. The fix compares against what the merchant actually paid, from PayPal's records, and is planned.
-- **Signing:** rule signing uses the Shopify staff session. Passkey signing is planned.
 
 ## License
 

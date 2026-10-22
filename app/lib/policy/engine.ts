@@ -1,5 +1,6 @@
 import type { Decision, RecordedProposal, RuleCheck, RuleSet, Verdict } from "./schema";
 import { hashOf } from "./hash";
+import { DEFAULT_PRICE_TOLERANCE_CENTS } from "./rules";
 
 // Deterministic: same proposal + rules + context always gives the same decision.
 // No network, no LLM, no clock reads. Everything the rules need is passed in.
@@ -23,6 +24,9 @@ export type PolicyContext = {
   supplierAddedDaysAgo?: number | null;
   supplierPaidBefore?: number;
   lookalikeOf?: string | null;
+  // The unit price the merchant accepted for this product from this supplier (entered when linking,
+  // raised only by purchases a person approved). Null/undefined: unknown, the rule doesn't run.
+  acceptedUnitPriceCents?: number | null;
 };
 
 /** A supplier whose PayPal email changed this recently needs a person for every purchase. */
@@ -81,6 +85,18 @@ export function evaluate(proposal: RecordedProposal, rules: RuleSet, ctx: Policy
   const priceLimit = Math.floor(ctx.avgUnitPrice30dCents * (1 + rules.maxPriceAboveAvgPct / 100));
   check("maxPriceAboveAvg", proposal.unitPriceCents > priceLimit, "block",
     `unit price ${usd(proposal.unitPriceCents)} vs 30-day avg ${usd(ctx.avgUnitPrice30dCents)} (limit +${rules.maxPriceAboveAvgPct}% = ${usd(priceLimit)})`);
+
+  // Price creep: every increase beyond the tolerance needs a person once; their approval becomes the
+  // new accepted price, so the next increase asks again. Small automatic steps never move it.
+  const accepted = ctx.acceptedUnitPriceCents ?? null;
+  if (accepted !== null) {
+    const tolerance = rules.priceToleranceCents ?? DEFAULT_PRICE_TOLERANCE_CENTS;
+    const rise = proposal.unitPriceCents - accepted;
+    check("priceAboveAccepted", rise > tolerance, "approval",
+      rise > 0
+        ? `unit price ${usd(proposal.unitPriceCents)} is ${usd(rise)} above the ${usd(accepted)} you accepted (tolerance ${usd(tolerance)})`
+        : `unit price ${usd(proposal.unitPriceCents)}, at or below the ${usd(accepted)} you accepted`);
+  }
 
   const qtyLimit = Math.floor(ctx.usualQuantity * rules.maxQuantityMultiple);
   check("maxQuantityMultiple", proposal.quantity > qtyLimit, "block",

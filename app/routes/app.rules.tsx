@@ -8,6 +8,7 @@ import db from "../db.server";
 import { auditEntries } from "../lib/audit/log.server";
 import { currentRuleSet, defaultRuleSet, signRuleSet } from "../lib/agent/restock.server";
 import { adminWithStaff } from "../lib/merchant/staff.server";
+import { DEFAULT_PRICE_TOLERANCE_CENTS } from "../lib/policy/rules";
 import { RuleSetSchema } from "../lib/policy/schema";
 import { Empty } from "../components/ui";
 import { usd } from "../lib/format";
@@ -51,6 +52,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     reorderBelowDaysOfCover: num("reorderBelowDaysOfCover"),
     targetDaysOfCover: num("targetDaysOfCover"),
     maxPriceAboveAvgPct: num("maxPriceAboveAvgPct"),
+    priceToleranceCents: cents("priceTolerance"),
     approvalAboveCents: cents("approvalAbove"),
     weeklySpendCapCents: cents("weeklySpendCap"),
     cashFloorCents: cents("cashFloor"),
@@ -85,6 +87,7 @@ export default function Rules() {
     maxQuantityMultiple: String(rules.maxQuantityMultiple), approvalAbove: dollars(rules.approvalAboveCents),
     weeklySpendCap: dollars(rules.weeklySpendCapCents), cashFloor: dollars(rules.cashFloorCents),
     maxPriceAboveAvgPct: String(rules.maxPriceAboveAvgPct), maxPurchasesPer24h: String(rules.maxPurchasesPer24h),
+    priceTolerance: dollars(rules.priceToleranceCents ?? DEFAULT_PRICE_TOLERANCE_CENTS),
     allow: rules.supplierAllowlist.filter((id) => suppliers.some((s) => s.id === id)),
   }), [rules, suppliers]);
   const formRef = useRef<HTMLFormElement>(null);
@@ -135,6 +138,7 @@ export default function Rules() {
               {field("weeklySpendCap", "Weekly spending cap ($)", "Rolling 7 days, all suppliers", { min: 0, step: 1 })}
               {field("cashFloor", "Keep at least this in PayPal ($)", "Purchases that would go below are blocked", { min: 0, step: 1 })}
               {field("maxPriceAboveAvgPct", "Highest price above 30-day average (%)", "Stops sudden price jumps", { min: 0, max: 100, step: 1 })}
+              {field("priceTolerance", "Price increase without asking ($ per unit)", "Above the price you entered or last approved", { min: 0, step: 0.05 })}
               {field("maxPurchasesPer24h", "Purchases per 24 hours", "Across all products", { min: 1, step: 1 })}
             </s-grid>
           </s-query-container>

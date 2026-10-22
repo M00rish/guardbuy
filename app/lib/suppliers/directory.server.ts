@@ -13,6 +13,7 @@ export type Offer = {
   paypalEmail: string; // looked up by GuardBuy, never shown to or taken from the AI
   paypalEmailChangedAt: string | null; // last change of that email (null: unchanged since added)
   supplierAddedAt: string; // when the merchant added this supplier (re-adding resets it)
+  acceptedUnitPriceCents: number; // the price the merchant entered when linking (quotes above it need a person)
   unitPriceTodayCents: number;
   avgUnitPrice30dCents: number;
   usualQuantity: number;
@@ -37,6 +38,7 @@ export async function offersForVariant(shop: string, variantId: string, today = 
       paypalEmail: r.supplier.paypalEmail,
       paypalEmailChangedAt: r.supplier.emailChangedAt.getTime() - r.supplier.createdAt.getTime() > 1000 ? r.supplier.emailChangedAt.toISOString() : null,
       supplierAddedAt: r.supplier.createdAt.toISOString(),
+      acceptedUnitPriceCents: r.acceptedUnitPriceCents ?? r.unitPriceCents,
       // Without a price feed the merchant's listed price is today's price and its own average.
       // (The rule comparing against what was actually paid replaces this average on Oct 20.)
       unitPriceTodayCents: r.simulatedPrices ? simulatedPrice(key, r.unitPriceCents, today) : r.unitPriceCents,
@@ -104,8 +106,9 @@ export async function linkSupplier(shop: string, variantId: string, supplierId: 
   if (terms.preferred) await db.productSupplier.updateMany({ where: { shop, variantId, NOT: { supplierId } }, data: { preferred: false } });
   await db.productSupplier.upsert({
     where: { shop_variantId_supplierId: { shop, variantId, supplierId } },
-    create: { shop, variantId, supplierId, ...terms },
-    update: terms,
+    // The merchant entered (or confirmed) this price: it becomes the accepted price.
+    create: { shop, variantId, supplierId, ...terms, acceptedUnitPriceCents: terms.unitPriceCents },
+    update: { ...terms, acceptedUnitPriceCents: terms.unitPriceCents },
   });
 }
 
@@ -179,7 +182,9 @@ export async function seedDemoCatalog(
         leadTimeDays: 3,
         preferred: offers.length === 1 || o.supplierId !== "bean-bargains",
         note: o.note,
-        simulatedPrices: true,
+        // Fixed prices: they only change when a scenario changes them (the price-increase rule
+        // would otherwise send every day's simulated drift to Approvals).
+        simulatedPrices: false,
       });
     }
   }

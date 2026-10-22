@@ -37,6 +37,7 @@ export function defaultRuleSet(shop: string): RuleSet {
     reorderBelowDaysOfCover: 7,
     targetDaysOfCover: 14,
     maxPriceAboveAvgPct: 10,
+    priceToleranceCents: 50, // $0.50 per unit
     approvalAboveCents: 50_000, // $500
     weeklySpendCapCents: 150_000, // $1,500
     cashFloorCents: 100_000, // $1,000
@@ -216,7 +217,7 @@ function historyContext(
   offer: Offer | undefined,
   now: Date,
   exclude?: number,
-): Pick<PolicyContext, "recentPaidQuantities" | "sameSupplierLast24hCents" | "supplierAddedDaysAgo" | "supplierPaidBefore" | "lookalikeOf"> {
+): Pick<PolicyContext, "recentPaidQuantities" | "sameSupplierLast24hCents" | "supplierAddedDaysAgo" | "supplierPaidBefore" | "lookalikeOf" | "acceptedUnitPriceCents"> {
   const sameProduct = (p: RecordedProposal) => (proposal.variantId && p.variantId ? p.variantId === proposal.variantId : p.sku === proposal.sku);
   const all = commitments(log, now, exclude);
   const fromSupplier = all.filter((c) => c.proposal.supplierId === proposal.supplierId);
@@ -231,7 +232,28 @@ function historyContext(
     supplierAddedDaysAgo: addedAt === null ? null : (now.getTime() - addedAt) / DAY_MS,
     supplierPaidBefore: fromSupplier.filter((c) => c.paid).length,
     lookalikeOf: offer ? lookalikeOf(offer.supplierName, older) : null,
+    // The merchant's price for this product from this supplier: what they entered when linking, raised
+    // only by purchases a person approved (in GuardBuy or in PayPal), never by automatic ones, so
+    // small automatic increases can't add up.
+    acceptedUnitPriceCents: offer
+      ? Math.max(offer.acceptedUnitPriceCents, ...approvedPrices(log, exclude).filter((a) => sameProduct(a) && a.supplierId === proposal.supplierId).map((a) => a.unitPriceCents))
+      : null,
   };
+}
+
+/** Proposals a person approved: approved in GuardBuy (then paid or not) or paid through a PayPal order they approved. */
+function approvedPrices(log: AuditEntry[], exclude?: number): RecordedProposal[] {
+  const out: RecordedProposal[] = [];
+  for (const e of log) {
+    if ((e.event.type !== "approved" && e.event.type !== "order_captured") || e.event.decisionSeq === exclude) continue;
+    const decisionSeq = e.event.decisionSeq;
+    const d = log.find((x) => x.seq === decisionSeq);
+    if (d?.event.type !== "decision") continue;
+    const proposalSeq = d.event.proposalSeq;
+    const p = log.find((x) => x.seq === proposalSeq);
+    if (p?.event.type === "proposal" && !p.event.scenario) out.push(p.event.proposal);
+  }
+  return out;
 }
 
 /**

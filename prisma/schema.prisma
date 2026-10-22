@@ -110,7 +110,8 @@ model ProductSupplier {
   shop            String
   variantId       String
   supplierId      String
-  unitPriceCents  Int
+  unitPriceCents  Int // the supplier's current price quote
+  acceptedUnitPriceCents Int? // the price the merchant entered when linking (null: same as unitPriceCents)
   usualQuantity   Int
   leadTimeDays    Int
   preferred       Boolean @default(false)

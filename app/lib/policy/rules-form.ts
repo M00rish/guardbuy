@@ -5,7 +5,7 @@ import { usd } from "../format";
 
 export const NUMBER_FIELDS = [
   "reorderBelowDaysOfCover", "targetDaysOfCover", "maxQuantityMultiple",
-  "approvalAbove", "weeklySpendCap", "cashFloor", "maxPriceAboveAvgPct", "maxPurchasesPer24h",
+  "approvalAbove", "weeklySpendCap", "cashFloor", "maxPriceAboveAvgPct", "priceTolerance", "maxPurchasesPer24h",
 ] as const;
 export type NumberField = (typeof NUMBER_FIELDS)[number];
 export type RulesForm = Record<NumberField, string> & { allow: string[] };
@@ -28,6 +28,7 @@ export function rulesFormErrors(f: RulesForm): FormErrors {
   atLeast("approvalAbove", 0, "Enter an amount (0 means every purchase waits for you)");
   atLeast("weeklySpendCap", 0.01, "Enter an amount above $0");
   atLeast("cashFloor", 0, "Enter an amount ($0 or more)");
+  atLeast("priceTolerance", 0, "Enter an amount per unit ($0 means any increase waits for you)");
   if (!(n(f.maxPriceAboveAvgPct) >= 0 && n(f.maxPriceAboveAvgPct) <= 100)) e.maxPriceAboveAvgPct = "Enter a percentage from 0 to 100";
   if (!(Number.isInteger(n(f.maxPurchasesPer24h)) && n(f.maxPurchasesPer24h) >= 1)) e.maxPurchasesPer24h = "Enter a whole number, at least 1";
 
@@ -51,6 +52,7 @@ export function rulesSummary(f: RulesForm, supplierNames: string[]) {
     `Purchases up to ${money("approvalAbove")} go through on their own; bigger ones wait for you.`,
     `At most ${money("weeklySpendCap")} a week and ${f.maxPurchasesPer24h || "…"} purchases a day, never leaving less than ${money("cashFloor")} in PayPal.`,
     `Only from ${who}, at no more than ${f.maxPriceAboveAvgPct || "…"}% above the usual price and ${f.maxQuantityMultiple || "…"}× the usual quantity.`,
+    `A price more than ${money("priceTolerance")} per unit above the one you accepted waits for you once; approving it makes it your new price.`,
   ].join(" ");
 }
 

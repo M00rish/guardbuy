@@ -69,6 +69,13 @@ const cases: [string, Proposal, Partial<PolicyContext>, string, string?][] = [
   ["first purchase from a supplier added 3 days ago", coffee({}), { supplierAddedDaysAgo: 3, supplierPaidBefore: 0 }, "approval", "newSupplier"],
   ["supplier added 3 days ago, already paid once", coffee({}), { supplierAddedDaysAgo: 3, supplierPaidBefore: 1 }, "auto"],
   ["supplier added 90 days ago, never paid", coffee({}), { supplierAddedDaysAgo: 90, supplierPaidBefore: 0 }, "auto"],
+  // Price you accepted: $11.19 entered when linking; tolerance $0.50 per unit (default).
+  ["quote $0.40 above the accepted price", coffee({ unitPriceCents: 1159 }), { acceptedUnitPriceCents: 1119 }, "auto"],
+  ["quote $1.04 above (supplier's 9% rise)", coffee({ unitPriceCents: 1223 }), { acceptedUnitPriceCents: 1119 }, "approval", "priceAboveAccepted"],
+  ["after approving $12.23, the same price passes", coffee({ unitPriceCents: 1223 }), { acceptedUnitPriceCents: 1223 }, "auto"],
+  ["next rise above the approved $12.23", coffee({ unitPriceCents: 1290 }), { acceptedUnitPriceCents: 1223, avgUnitPrice30dCents: 1223 }, "approval", "priceAboveAccepted"],
+  ["price drop never asks", coffee({ unitPriceCents: 990 }), { acceptedUnitPriceCents: 1119 }, "auto"],
+  ["accepted price unknown: rule doesn't run", coffee({ unitPriceCents: 1223 }), {}, "auto"],
   ["lookalike name, even after being paid", coffee({}), { supplierAddedDaysAgo: 90, supplierPaidBefore: 4, lookalikeOf: "Atlas Roasters" }, "approval", "newSupplier"],
 ];
 
@@ -80,6 +87,15 @@ for (const [name, proposal, ctx, expected, rule] of cases) {
   if (!ok) failed++;
   const why = d.checks.filter((c) => c.outcome !== "auto").map((c) => `${c.rule}: ${c.detail}`).join(" | ");
   console.log(`${ok ? "PASS" : "FAIL"}  ${name.padEnd(42)} -> ${d.verdict}${why ? `  (${why})` : ""}`);
+}
+
+// The tolerance is the merchant's: $0 means every increase asks.
+{
+  const strict = RuleSetSchema.parse({ ...rules, priceToleranceCents: 0 });
+  const d = evaluate(coffee({ unitPriceCents: 1120 }), strict, { ...base, acceptedUnitPriceCents: 1119 });
+  const ok = d.verdict === "approval" && d.checks.some((c) => c.rule === "priceAboveAccepted" && c.outcome === "approval");
+  if (!ok) failed++;
+  console.log(`${ok ? "PASS" : "FAIL"}  tolerance $0: a 1-cent rise asks              -> ${d.verdict}`);
 }
 
 // Lookalike names: what the new-supplier rule treats as imitating an older supplier.

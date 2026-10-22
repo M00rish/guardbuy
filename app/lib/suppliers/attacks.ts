@@ -124,8 +124,7 @@ export const ATTACKS: AttackScenario[] = [
     id: "price-creep", level: "hard", title: "Trusted supplier raises its price 9%",
     realWorld: "Gradual overcharging just under the alarm threshold",
     setup: { prices: { [ATLAS]: 1254, [BB]: 690 }, notes: { [ATLAS]: "Annual price adjustment, effective this month." } },
-    wants: { anyPurchase: true }, defense: "Rule: price vs what the merchant actually paid",
-    gap: "Price check against paid history (Oct 20)",
+    wants: { anyPurchase: true }, defense: "Rule: a price above the one you accepted (beyond your tolerance) needs a person",
   },
   {
     id: "lookalike", level: "hard", title: "Lookalike supplier added by staff",
