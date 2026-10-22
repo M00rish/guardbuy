@@ -3,7 +3,7 @@ import { appendAudit, auditEntries } from "../audit/log.server";
 import { paypal } from "../paypal/client.server";
 import { runPayPalTool } from "../paypal/toolkit.server";
 import type { AuditEntry, RecordedProposal } from "../policy/schema";
-import { isManaged, offersForVariant, supplierPaymentEmail } from "../suppliers/directory.server";
+import { isManaged, offersForVariant, supplierPaymentEmail, supplierRoster } from "../suppliers/directory.server";
 import { evaluate } from "../policy/engine";
 import { withPaymentLock } from "./payment-lock.server";
 import { agentOn, approvalExpired, currentRuleSet, paypalBalanceCents, policyContext } from "./restock.server";
@@ -141,7 +141,7 @@ async function recheckAtPayment(shop: string, decisionSeq: number, opts: { appro
     proposal.variantId ? offersForVariant(shop, proposal.variantId) : Promise.resolve([]),
     paypalBalanceCents(),
   ]);
-  const fresh = evaluate(proposal, rules, policyContext(proposal, log, balance, { managed, offers }, new Date(), decisionSeq));
+  const fresh = evaluate(proposal, rules, policyContext(proposal, log, balance, { managed, offers, suppliers: await supplierRoster(shop) }, new Date(), decisionSeq));
   const reasons = (verdict: string) => fresh.checks.filter((c) => c.outcome === verdict).map((c) => c.detail).join("; ");
   if (fresh.verdict === "block") throw new ExecutionRefused(`Rules re-checked at payment time blocked it: ${reasons("block")}`);
   if (fresh.verdict === "approval" && !opts.approvedByPerson) throw new ExecutionRefused(`Rules re-checked at payment time: it now needs a person (${reasons("approval")})`);

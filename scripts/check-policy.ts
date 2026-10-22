@@ -1,6 +1,7 @@
 // Lightweight scenario checks for the policy engine (no test framework needed).
 //   npx tsx scripts/check-policy.ts
 import { evaluate, type PolicyContext } from "../app/lib/policy/engine";
+import { lookalikeOf } from "../app/lib/policy/lookalike";
 import { RuleSetSchema, type RecordedProposal as Proposal } from "../app/lib/policy/schema";
 
 const rules = RuleSetSchema.parse({
@@ -56,6 +57,19 @@ const cases: [string, Proposal, Partial<PolicyContext>, string, string?][] = [
   ["supplier's PayPal email changed 2 days ago", coffee({}), { payeeChangedDaysAgo: 2 }, "approval", "payeeChange"],
   ["supplier's PayPal email changed 30 days ago", coffee({}), { payeeChangedDaysAgo: 30 }, "auto"],
   ["balance unknown -> human approves", coffee({}), { paypalBalanceCents: null }, "approval", "cashFloor"],
+  // Order-size creep: each step under "3x usual" (120), but well above what this store buys.
+  ["order creeps to 2x the usual history", coffee({ quantity: 80 }), { recentPaidQuantities: [38, 40, 42, 40] }, "approval", "orderSizeCreep"],
+  ["order slightly above history (1.25x)", coffee({ quantity: 50, unitPriceCents: 500 }), { recentPaidQuantities: [38, 40, 42, 40] }, "auto"],
+  ["only 2 past orders: not enough history", coffee({ quantity: 80, unitPriceCents: 500 }), { recentPaidQuantities: [40, 40] }, "auto"],
+  ["slow climb: median of the last 5 only", coffee({ quantity: 90 }), { recentPaidQuantities: [10, 10, 40, 44, 50, 55, 58] }, "approval", "orderSizeCreep"],
+  // Split orders: 2 x $290 from the same supplier for the same product in a day dodges a $500 limit.
+  ["second $290 order within 24h (limit $500)", coffee({ quantity: 26 }), { sameSupplierLast24hCents: 29_000 }, "approval", "splitOrder"],
+  ["earlier small order, total still under limit", coffee({ quantity: 20 }), { sameSupplierLast24hCents: 10_000 }, "auto"],
+  // New and lookalike suppliers.
+  ["first purchase from a supplier added 3 days ago", coffee({}), { supplierAddedDaysAgo: 3, supplierPaidBefore: 0 }, "approval", "newSupplier"],
+  ["supplier added 3 days ago, already paid once", coffee({}), { supplierAddedDaysAgo: 3, supplierPaidBefore: 1 }, "auto"],
+  ["supplier added 90 days ago, never paid", coffee({}), { supplierAddedDaysAgo: 90, supplierPaidBefore: 0 }, "auto"],
+  ["lookalike name, even after being paid", coffee({}), { supplierAddedDaysAgo: 90, supplierPaidBefore: 4, lookalikeOf: "Atlas Roasters" }, "approval", "newSupplier"],
 ];
 
 let failed = 0;
@@ -66,6 +80,26 @@ for (const [name, proposal, ctx, expected, rule] of cases) {
   if (!ok) failed++;
   const why = d.checks.filter((c) => c.outcome !== "auto").map((c) => `${c.rule}: ${c.detail}`).join(" | ");
   console.log(`${ok ? "PASS" : "FAIL"}  ${name.padEnd(42)} -> ${d.verdict}${why ? `  (${why})` : ""}`);
+}
+
+// Lookalike names: what the new-supplier rule treats as imitating an older supplier.
+const older = ["Atlas Roasters", "Kiln & Co Ceramics", "Paperworks Supply"];
+const names: [string, string | null][] = [
+  ["Atlas Roasters Co.", "Atlas Roasters"],
+  ["Atlas Roasterz", "Atlas Roasters"],
+  ["ATLAS-ROASTERS", "Atlas Roasters"],
+  ["Atlas Roasters Billing", "Atlas Roasters"],
+  ["Kiln and Co Ceramics", "Kiln & Co Ceramics"],
+  ["PaperWorks Supp1y", "Paperworks Supply"],
+  ["Bean Bargains Wholesale", null],
+  ["Atlas Coffee Importers", null],
+  ["Kiln", null],
+];
+for (const [name, expected] of names) {
+  const got = lookalikeOf(name, older);
+  const ok = got === expected;
+  if (!ok) failed++;
+  console.log(`${ok ? "PASS" : "FAIL"}  lookalike ${JSON.stringify(name).padEnd(32)} -> ${got ?? "none"}`);
 }
 
 // Same inputs must always give the same rule-set hash.

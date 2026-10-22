@@ -194,7 +194,7 @@ export default function Home() {
         <s-section heading="You're live">
           <s-stack gap="small-200">
             <s-text>
-              {`When a switched-on product has less than ${plural(d.rules.reorderBelow, "day")} of stock left, the agent proposes a restock. Up to ${d.rules.approvalAbove} it buys right away and pays the supplier through PayPal; above that it waits for you in Approvals.`}
+              {`When a switched-on product has less than ${plural(d.rules.reorderBelow, "day")} of stock left, the agent proposes a restock. Up to ${d.rules.approvalAbove} it buys right away and pays the supplier through PayPal; above that, and for the first purchase from a new supplier, it waits for you in Approvals.`}
             </s-text>
             <s-text tone="neutral">Stock is checked on every sale and once an hour. Every step is written to the audit log, which you can verify in Activity.</s-text>
           </s-stack>

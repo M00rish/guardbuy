@@ -14,10 +14,36 @@ export type PolicyContext = {
   paypalBalanceCents: number | null; // null when the balance could not be read
   // Days since the supplier's PayPal email last changed (null: never changed since it was added).
   payeeChangedDaysAgo?: number | null;
+  // Quantities of this product's most recent paid purchases (any supplier), newest last.
+  recentPaidQuantities?: number[];
+  // This product from this supplier in the last 24 hours, paid or waiting for approval.
+  sameSupplierLast24hCents?: number;
+  // When the supplier was added (null/undefined: unknown), how often it has been paid, and the
+  // older supplier its name imitates, if any.
+  supplierAddedDaysAgo?: number | null;
+  supplierPaidBefore?: number;
+  lookalikeOf?: string | null;
 };
 
 /** A supplier whose PayPal email changed this recently needs a person for every purchase. */
 export const PAYEE_CHANGE_WINDOW_DAYS = 14;
+
+/** Order-size creep: more than this multiple of the median of recent paid orders needs a person. */
+export const CREEP_MULTIPLE = 1.5;
+export const CREEP_MIN_HISTORY = 3; // fewer paid orders than this: not enough history to compare
+export const CREEP_HISTORY = 5; // how many recent paid orders the median is taken over
+
+/** Split orders: same product, same supplier, within this many hours, count as one purchase. */
+export const SPLIT_WINDOW_HOURS = 24;
+
+/** A supplier added this recently needs a person for its first purchase. */
+export const NEW_SUPPLIER_DAYS = 30;
+
+const median = (xs: number[]) => {
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
 
 const RANK: Record<Verdict, number> = { auto: 0, approval: 1, block: 2 };
 const strictest = (verdicts: Verdict[]): Verdict =>
@@ -85,6 +111,34 @@ export function evaluate(proposal: RecordedProposal, rules: RuleSet, ctx: Policy
     recentChange
       ? `${proposal.supplierId}'s PayPal email changed ${changed! < 1 ? "today" : `${Math.floor(changed!)} days ago`}: confirm it with the supplier before paying`
       : `no recent change to ${proposal.supplierId}'s PayPal email`);
+
+  // A quantity that keeps climbing, each step under the "times the usual" limit (a compromised
+  // supplier, or poisoned sales data): compare with what this store actually bought recently.
+  const history = (ctx.recentPaidQuantities ?? []).slice(-CREEP_HISTORY);
+  if (history.length >= CREEP_MIN_HISTORY) {
+    const typical = median(history);
+    const creep = proposal.quantity > typical * CREEP_MULTIPLE;
+    check("orderSizeCreep", creep, "approval",
+      `quantity ${proposal.quantity} vs ${typical} typical in your last ${history.length} paid orders (limit ${CREEP_MULTIPLE}x)`);
+  }
+
+  // Several purchases just under the approval limit add up: same product, same supplier, 24 hours.
+  const earlier = ctx.sameSupplierLast24hCents ?? 0;
+  if (earlier > 0) {
+    check("splitOrder", earlier + total > rules.approvalAboveCents, "approval",
+      `${usd(earlier)} from ${proposal.supplierId} for ${proposal.sku} in the last ${SPLIT_WINDOW_HOURS}h + ${usd(total)} vs auto-approve limit ${usd(rules.approvalAboveCents)}`);
+  }
+
+  // A supplier that was just added, or whose name imitates an existing one, gets a person first.
+  const added = ctx.supplierAddedDaysAgo ?? null;
+  const firstPurchase = added !== null && added < NEW_SUPPLIER_DAYS && (ctx.supplierPaidBefore ?? 0) === 0;
+  const imitates = ctx.lookalikeOf ?? null;
+  check("newSupplier", firstPurchase || imitates !== null, "approval",
+    imitates !== null
+      ? `${proposal.supplierId}'s name looks like ${imitates}: check it's really them before paying`
+      : firstPurchase
+        ? `first purchase from ${proposal.supplierId}, added ${added! < 1 ? "today" : `${Math.floor(added!)} days ago`}`
+        : `${proposal.supplierId} is an established supplier`);
 
   check("noApprovalClaim", claim, "approval",
     claim ? "the AI's explanation claims an approval that GuardBuy has no record of" : "no approval claimed in the AI's explanation");

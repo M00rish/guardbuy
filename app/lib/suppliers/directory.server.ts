@@ -12,6 +12,7 @@ export type Offer = {
   supplierName: string;
   paypalEmail: string; // looked up by GuardBuy, never shown to or taken from the AI
   paypalEmailChangedAt: string | null; // last change of that email (null: unchanged since added)
+  supplierAddedAt: string; // when the merchant added this supplier (re-adding resets it)
   unitPriceTodayCents: number;
   avgUnitPrice30dCents: number;
   usualQuantity: number;
@@ -35,6 +36,7 @@ export async function offersForVariant(shop: string, variantId: string, today = 
       supplierName: r.supplier.name,
       paypalEmail: r.supplier.paypalEmail,
       paypalEmailChangedAt: r.supplier.emailChangedAt.getTime() - r.supplier.createdAt.getTime() > 1000 ? r.supplier.emailChangedAt.toISOString() : null,
+      supplierAddedAt: r.supplier.createdAt.toISOString(),
       // Without a price feed the merchant's listed price is today's price and its own average.
       // (The rule comparing against what was actually paid replaces this average on Oct 20.)
       unitPriceTodayCents: r.simulatedPrices ? simulatedPrice(key, r.unitPriceCents, today) : r.unitPriceCents,
@@ -46,6 +48,13 @@ export async function offersForVariant(shop: string, variantId: string, today = 
     };
   });
 }
+
+/** Every supplier of the shop with when it was added (the new-supplier rule compares names). */
+export async function supplierRoster(shop: string) {
+  const rows = await db.supplier.findMany({ where: { shop }, select: { id: true, name: true, createdAt: true } });
+  return rows.map((r) => ({ id: r.id, name: r.name, addedAt: r.createdAt.toISOString() }));
+}
+export type RosterEntry = Awaited<ReturnType<typeof supplierRoster>>[number];
 
 export async function supplierNames(shop: string) {
   const rows = await db.supplier.findMany({ where: { shop }, select: { id: true, name: true } });

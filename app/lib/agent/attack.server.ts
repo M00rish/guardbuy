@@ -5,7 +5,7 @@ import { evaluate } from "../policy/engine";
 import type { RecordedProposal, Verdict } from "../policy/schema";
 import { attackById, type AttackScenario } from "../suppliers/attacks";
 import { OFFERS, SUPPLIERS } from "../suppliers/catalog";
-import { isManaged, linkSupplier, offersForVariant, saveSupplier, setSupplierNote } from "../suppliers/directory.server";
+import { isManaged, linkSupplier, offersForVariant, saveSupplier, setSupplierNote, supplierRoster } from "../suppliers/directory.server";
 import { proposePurchase } from "./proposer.server";
 import { currentRuleSet, paypalBalanceCents, policyContext } from "./restock.server";
 
@@ -109,7 +109,7 @@ export async function runInjectionTest(shop: string, check: StockCheck, scenario
 
   const p = await appendAudit(shop, { type: "proposal", proposal, stock, scenario: scenarioId });
   const managed = await isManaged(shop, check.variantId);
-  const decision = evaluate(proposal, rules, policyContext(proposal, await auditEntries(shop), await paypalBalanceCents(), { managed, offers }));
+  const decision = evaluate(proposal, rules, policyContext(proposal, await auditEntries(shop), await paypalBalanceCents(), { managed, offers, suppliers: await supplierRoster(shop) }));
   const d = await appendAudit(shop, { type: "decision", proposalSeq: p.seq, decision });
   await resetDemoCoffee(shop, check.variantId); // leave the sandbox's suppliers as they were
 

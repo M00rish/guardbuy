@@ -2,10 +2,11 @@ import db from "../../db.server";
 import { appendAudit, auditEntries } from "../audit/log.server";
 import type { StockCheck } from "../inventory/trigger.server";
 import { paypal } from "../paypal/client.server";
-import { evaluate, type PolicyContext } from "../policy/engine";
+import { evaluate, SPLIT_WINDOW_HOURS, type PolicyContext } from "../policy/engine";
 import { hashOf } from "../policy/hash";
 import { RuleSetSchema, type AuditEntry, type RecordedProposal, type RuleSet } from "../policy/schema";
-import { isManaged, offersForVariant, type Offer } from "../suppliers/directory.server";
+import { isManaged, offersForVariant, supplierRoster, type Offer, type RosterEntry } from "../suppliers/directory.server";
+import { lookalikeOf } from "../policy/lookalike";
 import { executePurchase } from "./execute.server";
 import { proposePurchase } from "./proposer.server";
 
@@ -147,12 +148,47 @@ export function pendingApprovalCents(log: AuditEntry[], now = new Date(), exclud
   return total;
 }
 
+type Commitment = { at: string; proposal: RecordedProposal; cents: number; paid: boolean };
+
+/**
+ * Real purchases that are paid (payouts that didn't fail, captured orders net of refunds) or waiting
+ * for approval, oldest first, with the proposal behind each. Tests and `exclude` are left out.
+ */
+function commitments(log: AuditEntry[], now: Date, exclude?: number): Commitment[] {
+  const proposalOf = (decisionSeq: number) => {
+    const d = log.find((e) => e.seq === decisionSeq);
+    if (d?.event.type !== "decision") return null;
+    const proposalSeq = d.event.proposalSeq;
+    const p = log.find((e) => e.seq === proposalSeq);
+    return p?.event.type === "proposal" && !p.event.scenario ? p.event.proposal : null;
+  };
+  const out: Commitment[] = [];
+  for (const e of log) {
+    const ev = e.event;
+    if ("decisionSeq" in ev && ev.decisionSeq === exclude) continue;
+    if (ev.type === "payout" && !payoutFailedAt(e, log)) {
+      const proposal = proposalOf(ev.decisionSeq);
+      if (proposal) out.push({ at: e.at, proposal, cents: ev.amountCents, paid: true });
+    } else if (ev.type === "order_captured") {
+      const status = log.filter((x) => x.event.type === "order_status" && x.event.orderId === ev.orderId).at(-1);
+      const cents = Math.max(0, ev.amountCents - (status?.event.type === "order_status" ? status.event.refundedCents : 0));
+      const proposal = proposalOf(ev.decisionSeq);
+      if (proposal && cents > 0) out.push({ at: e.at, proposal, cents, paid: true });
+    } else if (ev.type === "decision" && ev.decision.verdict === "approval" && e.seq !== exclude && !approvalExpired(e.at, now)) {
+      const settled = log.some((x) => "decisionSeq" in x.event && x.event.decisionSeq === e.seq && ["payout", "order_captured", "rejected", "payment_failed"].includes(x.event.type));
+      const p = log.find((x) => x.seq === ev.proposalSeq);
+      if (!settled && p?.event.type === "proposal" && !p.event.scenario) out.push({ at: e.at, proposal: p.event.proposal, cents: ev.decision.totalCents, paid: false });
+    }
+  }
+  return out;
+}
+
 /** Everything the policy engine needs, built from the audit log and the merchant's own offers. */
 export function policyContext(
   proposal: RecordedProposal,
   log: AuditEntry[],
   balanceCents: number | null,
-  merchant: { managed: boolean; offers: Offer[] },
+  merchant: { managed: boolean; offers: Offer[]; suppliers?: RosterEntry[] }, // suppliers: every supplier of the shop (defaults to the offers')
   now = new Date(),
   exclude?: number, // the decision being paid right now (re-check at payment time)
 ): PolicyContext {
@@ -168,6 +204,33 @@ export function policyContext(
     purchasesLast24h,
     paypalBalanceCents: balanceCents,
     payeeChangedDaysAgo: offer?.paypalEmailChangedAt ? (now.getTime() - Date.parse(offer.paypalEmailChangedAt)) / DAY_MS : null,
+    ...historyContext(proposal, log, merchant, offer, now, exclude),
+  };
+}
+
+/** Order-size history, split orders and supplier age for one proposal. */
+function historyContext(
+  proposal: RecordedProposal,
+  log: AuditEntry[],
+  merchant: { offers: Offer[]; suppliers?: RosterEntry[] },
+  offer: Offer | undefined,
+  now: Date,
+  exclude?: number,
+): Pick<PolicyContext, "recentPaidQuantities" | "sameSupplierLast24hCents" | "supplierAddedDaysAgo" | "supplierPaidBefore" | "lookalikeOf"> {
+  const sameProduct = (p: RecordedProposal) => (proposal.variantId && p.variantId ? p.variantId === proposal.variantId : p.sku === proposal.sku);
+  const all = commitments(log, now, exclude);
+  const fromSupplier = all.filter((c) => c.proposal.supplierId === proposal.supplierId);
+  const roster = merchant.suppliers ?? merchant.offers.map((o) => ({ id: o.supplierId, name: o.supplierName, addedAt: o.supplierAddedAt }));
+  const addedAt = offer?.supplierAddedAt ? Date.parse(offer.supplierAddedAt) : null;
+  const older = addedAt === null ? [] : roster.filter((r) => r.id !== proposal.supplierId && Date.parse(r.addedAt) < addedAt).map((r) => r.name);
+  return {
+    recentPaidQuantities: all.filter((c) => c.paid && sameProduct(c.proposal)).map((c) => c.proposal.quantity),
+    sameSupplierLast24hCents: fromSupplier
+      .filter((c) => sameProduct(c.proposal) && now.getTime() - Date.parse(c.at) < SPLIT_WINDOW_HOURS * 3_600_000)
+      .reduce((sum, c) => sum + c.cents, 0),
+    supplierAddedDaysAgo: addedAt === null ? null : (now.getTime() - addedAt) / DAY_MS,
+    supplierPaidBefore: fromSupplier.filter((c) => c.paid).length,
+    lookalikeOf: offer ? lookalikeOf(offer.supplierName, older) : null,
   };
 }
 
@@ -267,7 +330,7 @@ async function restock(shop: string, check: StockCheck): Promise<RestockResult> 
 
   // 2. The policy engine decides (deterministic).
   log = await auditEntries(shop);
-  const decision = evaluate(proposal, rules, policyContext(proposal, log, await paypalBalanceCents(), { managed, offers }));
+  const decision = evaluate(proposal, rules, policyContext(proposal, log, await paypalBalanceCents(), { managed, offers, suppliers: await supplierRoster(shop) }));
   const d = await appendAudit(shop, { type: "decision", proposalSeq: p.seq, decision });
   const result: RestockResult = { outcome: decision.verdict, proposalSeq: p.seq, decisionSeq: d.seq };
 

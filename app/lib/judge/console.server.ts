@@ -9,7 +9,7 @@ import { evaluate } from "../policy/engine";
 import { RuleSetSchema, type AuditEntry } from "../policy/schema";
 import { ATTACKS, attackById } from "../suppliers/attacks";
 import { OFFERS } from "../suppliers/catalog";
-import { isManaged, offersForVariant, seedDemoCatalog } from "../suppliers/directory.server";
+import { isManaged, offersForVariant, seedDemoCatalog, supplierRoster } from "../suppliers/directory.server";
 
 // The judge console (storefront, via the app proxy). The storefront is public, so a judge never
 // touches the merchant's real log, queue or suppliers: each judge gets a sandbox "shop" of their
@@ -152,7 +152,7 @@ export async function judgeWhatIf(shop: string, judgeId: string) {
   const p = await appendAudit(sandbox, { type: "proposal", proposal, stock, scenario: WHAT_IF });
   const log = await auditEntries(sandbox);
   const managed = await isManaged(sandbox, COFFEE.variantId);
-  const decision = evaluate(proposal, rules, policyContext(proposal, log, await paypalBalanceCents(), { managed, offers }));
+  const decision = evaluate(proposal, rules, policyContext(proposal, log, await paypalBalanceCents(), { managed, offers, suppliers: await supplierRoster(sandbox) }));
   await appendAudit(sandbox, { type: "decision", proposalSeq: p.seq, decision });
   return decision.verdict === "block" ? "Even with the AI fooled, the rules blocked it. See why in the feed." : `Unexpected verdict: ${decision.verdict}`;
 }
