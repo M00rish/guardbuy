@@ -7,6 +7,7 @@
 export {};
 process.loadEnvFile(".env");
 
+const { deleteAuditEntries } = await import("./lib/audit-admin");
 const { default: db } = await import("../app/db.server");
 const { auditEntries, verifyChain } = await import("../app/lib/audit/log.server");
 const { defaultRuleSet, signRuleSet } = await import("../app/lib/agent/restock.server");
@@ -19,7 +20,7 @@ const { deleteDirectory, seedDemoCatalog } = await import("../app/lib/suppliers/
 const SHOP = "attacks-check.guardbuy.test";
 let failed = 0;
 const ok = (cond: boolean, msg: string) => { console.log(`${cond ? "PASS" : "FAIL"}  ${msg}`); if (!cond) failed++; };
-const cleanup = async () => { await db.auditEntry.deleteMany({ where: { shop: SHOP } }); await deleteDirectory(SHOP); };
+const cleanup = async () => { await deleteAuditEntries({ shop: SHOP }); await deleteDirectory(SHOP); };
 
 await cleanup();
 await seedDemoCatalog(SHOP, { "COFFEE-HOUSE-1KG": "atk-coffee" }, process.env.SUPPLIER_EMAIL!);

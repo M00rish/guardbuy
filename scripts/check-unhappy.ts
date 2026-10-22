@@ -5,6 +5,8 @@
 //   npx tsx scripts/check-unhappy.ts
 export {};
 process.loadEnvFile(".env");
+
+const { deleteAuditEntries } = await import("./lib/audit-admin");
 process.env.GUARDBUY_PAYMENTS_DISABLED = "1";
 
 const { default: db } = await import("../app/db.server");
@@ -23,7 +25,7 @@ const RETURN = "https://example.com/paypal/return";
 let failed = 0;
 const ok = (cond: boolean, msg: string) => { console.log(`${cond ? "PASS" : "FAIL"}  ${msg}`); if (!cond) failed++; };
 const outcome = (p: Promise<unknown>) => p.then(() => "done", (e) => (e instanceof ExecutionRefused ? e.message : `other: ${(e as Error).message}`));
-const cleanup = async () => { await db.auditEntry.deleteMany({ where: { shop: SHOP } }); await deleteDirectory(SHOP); await db.paymentLock.deleteMany({ where: { shop: SHOP } }); };
+const cleanup = async () => { await deleteAuditEntries({ shop: SHOP }); await deleteDirectory(SHOP); await db.paymentLock.deleteMany({ where: { shop: SHOP } }); };
 
 await cleanup();
 await seedDemoCatalog(SHOP, { "COFFEE-HOUSE-1KG": "uh-coffee" }, process.env.SUPPLIER_EMAIL!);

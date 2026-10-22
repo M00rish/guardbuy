@@ -61,7 +61,10 @@ Rules are signed by a Shopify staff member: their id and the rules' SHA-256 fing
 
 ### Safety details
 
-- **Append-only audit log.** Each entry's hash covers the previous hash, so editing, deleting or reordering any past entry breaks every hash after it. Home and Activity verify the whole chain on load. The latest fingerprint of each store is published outside the database every hour (`anchors/fingerprints.jsonl`, committed by GitHub Actions).
+- **Append-only audit log, enforced in three places.**
+  - *Hash chain:* each entry's hash covers the previous hash, so editing, deleting or reordering any past entry breaks every hash after it. Home and Activity verify the whole chain on load.
+  - *Database:* the running app connects as `guardbuy_app`, a role that can read and add audit entries but has no UPDATE, DELETE or TRUNCATE privilege on them. A trigger also rejects edits and deletes from the owner role, unless the transaction explicitly opts in (only check scripts cleaning up throwaway test shops do that). `scripts/check-audit-readonly.ts` proves both.
+  - *Outside the database:* the latest fingerprint of each store is published every hour (`anchors/fingerprints.jsonl`, committed by GitHub Actions).
 - **Re-check at payment.** Approvals expire after 48 hours, and the rules and balance are checked again just before money moves.
 - **One payment per decision.** A database lock (`PaymentLock`) and PayPal idempotency keys mean a double click, a second tab or a retry can't pay twice.
 - **Approve in PayPal.** Only allow-listed PayPal payer ids can approve (`GUARDBUY_APPROVER_PAYER_IDS`). Cancelled, expired and wrong-payer orders are closed without paying.
@@ -124,6 +127,12 @@ Fill in `.env` (every variable is described there), then apply the database migr
 npx prisma migrate deploy
 ```
 
+Create the app's restricted database role. This makes `DATABASE_URL` in `.env` connect as `guardbuy_app`, which can't change the audit log; `DIRECT_URL` stays the owner, for migrations:
+
+```bash
+npx tsx scripts/create-app-role.ts --rotate
+```
+
 Start the app. This opens a tunnel and installs it on your dev store:
 
 ```bash
@@ -165,10 +174,11 @@ The other `scripts/check-*.ts` scripts use the database, the PayPal sandbox or t
 
 Secrets are set in the Render dashboard.
 
-After the first deploy:
-1. Set `application_url` in `shopify.app.toml` to the Render URL.
-2. Run `npm run deploy`.
-3. In GitHub, add the `GUARDBUY_URL` and `GUARDBUY_JOBS_SECRET` secrets (the same value as `JOBS_SECRET`) for `.github/workflows/hourly.yml`. That workflow calls `/jobs/hourly` and commits the fingerprint file.
+Steps:
+1. Set Render's `DATABASE_URL` to the `guardbuy_app` connection string from your `.env` (see *Run it locally*), and `DIRECT_URL` to the owner's direct connection.
+2. Set `application_url` in `shopify.app.toml` to the Render URL.
+3. Run `npm run deploy`.
+4. In GitHub, add the `GUARDBUY_URL` and `GUARDBUY_JOBS_SECRET` secrets (the same value as `JOBS_SECRET`) for `.github/workflows/hourly.yml`. That workflow calls `/jobs/hourly` and commits the fingerprint file.
 
 To reset the demo (stock back to the start, sandbox balance topped up):
 

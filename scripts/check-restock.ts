@@ -6,6 +6,7 @@
 export {};
 process.loadEnvFile(".env");
 
+const { deleteAuditEntries } = await import("./lib/audit-admin");
 const { default: db } = await import("../app/db.server");
 const { appendAudit, auditEntries, verifyChain } = await import("../app/lib/audit/log.server");
 const { agentOn, defaultRuleSet, policyContext, runRestock, signRuleSet, skipReason } = await import("../app/lib/agent/restock.server");
@@ -62,7 +63,7 @@ ok(agentOn([]) && !agentOn(logOf([1, { type: "agent_state", on: false, by: "staf
 // ---------- 2. Live ----------
 console.log("-- live (Gemini + PayPal sandbox)");
 const SHOP = "restock-check.guardbuy.test";
-const cleanup = async () => { await db.auditEntry.deleteMany({ where: { shop: SHOP } }); await deleteDirectory(SHOP); };
+const cleanup = async () => { await deleteAuditEntries({ shop: SHOP }); await deleteDirectory(SHOP); };
 await cleanup();
 // The merchant's products & suppliers: the demo catalog, with the dripper left switched off.
 await seedDemoCatalog(SHOP, { [SKU]: "test-coffee", "MUG-STONE": "test-mug", "DRIPPER-CERAMIC": "test-dripper" }, process.env.SUPPLIER_EMAIL!);

@@ -5,6 +5,7 @@
 export {};
 process.loadEnvFile(".env");
 
+const { deleteAuditEntries } = await import("./lib/audit-admin");
 const { default: db } = await import("../app/db.server");
 const { judgeApprove, judgeAttack, judgeDecline, judgeRestock, judgeShop, judgeState, judgeWhatIf } = await import("../app/lib/judge/console.server");
 const { deleteDirectory } = await import("../app/lib/suppliers/directory.server");
@@ -14,7 +15,7 @@ const ID = "check-judge-0001";
 const sandbox = judgeShop(SHOP, ID);
 let failed = 0;
 const ok = (cond: boolean, msg: string) => { console.log(`${cond ? "PASS" : "FAIL"}  ${msg}`); if (!cond) failed++; };
-const cleanup = async () => { await db.auditEntry.deleteMany({ where: { shop: sandbox } }); await deleteDirectory(sandbox); };
+const cleanup = async () => { await deleteAuditEntries({ shop: sandbox }); await deleteDirectory(sandbox); };
 const realLogBefore = await db.auditEntry.count({ where: { shop: SHOP } });
 
 await cleanup();

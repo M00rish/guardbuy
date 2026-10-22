@@ -5,6 +5,7 @@
 export {};
 process.loadEnvFile(".env");
 
+const { deleteAuditEntries } = await import("./lib/audit-admin");
 const { default: db } = await import("../app/db.server");
 const { appendAudit, auditEntries, verifyChain } = await import("../app/lib/audit/log.server");
 const { defaultRuleSet, paypalBalanceCents, policyContext, signRuleSet } = await import("../app/lib/agent/restock.server");
@@ -20,7 +21,7 @@ const cmd = process.argv[2];
 
 if (cmd === "create") {
   if (!process.env.APP_URL) throw new Error("Set APP_URL to the dev tunnel URL");
-  await db.auditEntry.deleteMany({ where: { shop: SHOP } });
+  await deleteAuditEntries({ shop: SHOP });
   await deleteDirectory(SHOP);
   await seedDemoCatalog(SHOP, { "COFFEE-HOUSE-1KG": "test-coffee" }, process.env.SUPPLIER_EMAIL!);
   const rules = defaultRuleSet(SHOP);
@@ -56,7 +57,7 @@ if (cmd === "create") {
   for (const e of await auditEntries(SHOP)) console.log(`  #${e.seq} ${e.event.type.padEnd(14)} ${JSON.stringify(e.event).slice(0, 200)}`);
   ok((await verifyChain(SHOP)).valid, "audit chain valid");
 } else if (cmd === "clean") {
-  await db.auditEntry.deleteMany({ where: { shop: SHOP } });
+  await deleteAuditEntries({ shop: SHOP });
   await deleteDirectory(SHOP);
   console.log("cleaned");
 }

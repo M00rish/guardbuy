@@ -6,6 +6,8 @@
 //   npx tsx scripts/check-recheck.ts
 export {};
 process.loadEnvFile(".env");
+
+const { deleteAuditEntries } = await import("./lib/audit-admin");
 // Safety net: if a check below unexpectedly passes the rules, the payment is refused instead of sent.
 process.env.GUARDBUY_PAYMENTS_DISABLED = "1";
 
@@ -26,7 +28,7 @@ const ok = (cond: boolean, msg: string) => { console.log(`${cond ? "PASS" : "FAI
 const refusal = (p: Promise<unknown>) => p.then(() => "PAID (should not happen)", (e) => (e instanceof ExecutionRefused ? e.message : `other: ${(e as Error).message}`));
 const notJustDisabled = (msg: string) => !msg.includes("GUARDBUY_PAYMENTS_DISABLED"); // refused by the rules, not by the safety net
 const cleanup = async () => {
-  await db.auditEntry.deleteMany({ where: { shop: SHOP } });
+  await deleteAuditEntries({ shop: SHOP });
   await db.paymentLock.deleteMany({ where: { shop: SHOP } });
   await deleteDirectory(SHOP);
 };
@@ -65,7 +67,7 @@ const capRefusal = await refusal(executePurchase(SHOP, second.seq));
 ok(notJustDisabled(capRefusal) && capRefusal.includes("re-checked") && capRefusal.includes("cap"), `second purchase refused at payment time: ${capRefusal}`);
 
 // A $10 purchase waiting for approval counts as committed: a $10 auto purchase now breaks the $15 cap.
-await db.auditEntry.deleteMany({ where: { shop: SHOP, seq: { gt: 0 } } }); // keep only the signed rules
+await deleteAuditEntries({ shop: SHOP, seq: { gt: 0 } }); // keep only the signed rules
 const waiting = await decided(1000, 1, fresh, RuleSetSchema.parse({ ...rules, approvalAboveCents: 500 }));
 ok(waiting.verdict === "approval", "$10 purchase waits for approval");
 ok(pendingApprovalCents(await auditEntries(SHOP)) === 1000, "pending approvals total $10");
@@ -74,7 +76,7 @@ const pendingRefusal = await refusal(executePurchase(SHOP, small.seq));
 ok(notJustDisabled(pendingRefusal) && pendingRefusal.includes("cap"), `auto purchase refused, pending approval counted: ${pendingRefusal}`);
 
 // The merchant tightens the rules after a purchase was decided: an auto purchase that now needs a person isn't paid.
-await db.auditEntry.deleteMany({ where: { shop: SHOP, seq: { gt: 0 } } });
+await deleteAuditEntries({ shop: SHOP, seq: { gt: 0 } });
 const auto = await decided(1000, 1);
 await signRuleSet(SHOP, RuleSetSchema.parse({ ...rules, approvalAboveCents: 500 }), "recheck-check"); // ask above $5 now
 const nowNeedsPerson = await refusal(executePurchase(SHOP, auto.seq));

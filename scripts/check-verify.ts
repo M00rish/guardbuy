@@ -4,6 +4,7 @@
 export {};
 process.loadEnvFile(".env");
 
+const { asAuditOwner, deleteAuditEntries } = await import("./lib/audit-admin");
 const { default: db } = await import("../app/db.server");
 const { appendAudit } = await import("../app/lib/audit/log.server");
 const { verifyPayment, setShareVerifyDetails } = await import("../app/lib/audit/verify.server");
@@ -16,7 +17,7 @@ const EMAIL = "supplier-for-verify-check@example.com";
 let failed = 0;
 const ok = (cond: boolean, msg: string) => { console.log(`${cond ? "PASS" : "FAIL"}  ${msg}`); if (!cond) failed++; };
 const cleanup = async () => {
-  await db.auditEntry.deleteMany({ where: { shop: SHOP } });
+  await deleteAuditEntries({ shop: SHOP });
   await deleteDirectory(SHOP);
   await db.shopSettings.deleteMany({ where: { shop: SHOP } });
 };
@@ -62,7 +63,7 @@ ok(!text.includes(EMAIL) && !text.includes("4,123") && !text.includes("4123"), "
 
 // Tampering with any entry shows up on the verify page.
 const victim = await db.auditEntry.findFirstOrThrow({ where: { shop: SHOP, type: "decision" }, orderBy: { seq: "asc" } });
-await db.auditEntry.update({ where: { shop_seq: { shop: SHOP, seq: victim.seq } }, data: { event: { ...(victim.event as object), proposalSeq: 999 } } });
+await asAuditOwner((tx) => tx.auditEntry.update({ where: { shop_seq: { shop: SHOP, seq: victim.seq } }, data: { event: { ...(victim.event as object), proposalSeq: 999 } } }));
 const tampered = await verifyPayment("VERIFYCHECKAPPR1");
 ok(tampered.found && !tampered.chain.valid, `tampering detected: ${tampered.found && !tampered.chain.valid ? `entry #${tampered.chain.brokenAtSeq}, ${tampered.chain.reason}` : "NOT detected"}`);
 

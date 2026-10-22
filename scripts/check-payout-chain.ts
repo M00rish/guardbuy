@@ -4,6 +4,7 @@
 export {};
 process.loadEnvFile(".env");
 
+const { asAuditOwner, deleteAuditEntries } = await import("./lib/audit-admin");
 const { default: db } = await import("../app/db.server");
 const { appendAudit, verifyChain } = await import("../app/lib/audit/log.server");
 const { executePurchase, ExecutionRefused } = await import("../app/lib/agent/execute.server");
@@ -33,7 +34,7 @@ async function propose(supplierId: string, quantity: number, unitPriceCents: num
   return { seq: d.seq, verdict: decision.verdict };
 }
 
-await db.auditEntry.deleteMany({ where: { shop: SHOP } });
+await deleteAuditEntries({ shop: SHOP });
 await deleteDirectory(SHOP);
 await saveSupplier(SHOP, { id: "atlas-roasters", name: "Atlas Roasters", paypalEmail: process.env.SUPPLIER_EMAIL! });
 await appendAudit(SHOP, { type: "ruleset_signed", ruleSet: { rules, hash: (await import("../app/lib/policy/hash")).hashOf(rules), signedBy: "chain-check", signedAt: new Date().toISOString() } });
@@ -66,13 +67,13 @@ const v1 = await verifyChain(SHOP);
 ok(v1.valid, `chain valid (${v1.valid ? v1.length : 0} entries)`);
 const victim = await db.auditEntry.findUniqueOrThrow({ where: { shop_seq: { shop: SHOP, seq: pay1.seq } } });
 const tampered = { ...(victim.event as any), amountCents: 1 };
-await db.auditEntry.update({ where: { shop_seq: { shop: SHOP, seq: pay1.seq } }, data: { event: tampered } });
+await asAuditOwner((tx) => tx.auditEntry.update({ where: { shop_seq: { shop: SHOP, seq: pay1.seq } }, data: { event: tampered } }));
 const v2 = await verifyChain(SHOP);
 ok(!v2.valid, `tampering detected: ${v2.valid ? "NOT detected" : `seq ${v2.brokenAtSeq}, ${v2.reason}`}`);
-await db.auditEntry.update({ where: { shop_seq: { shop: SHOP, seq: pay1.seq } }, data: { event: victim.event as any } });
+await asAuditOwner((tx) => tx.auditEntry.update({ where: { shop_seq: { shop: SHOP, seq: pay1.seq } }, data: { event: victim.event as any } }));
 ok((await verifyChain(SHOP)).valid, "chain valid again after restoring the row");
 
-await db.auditEntry.deleteMany({ where: { shop: SHOP } });
+await deleteAuditEntries({ shop: SHOP });
 await deleteDirectory(SHOP);
 await db.$disconnect();
 process.exit(failed ? 1 : 0);

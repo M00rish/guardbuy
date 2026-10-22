@@ -1,5 +1,6 @@
 # Render blueprint: one free web service. Secrets are set in Render's dashboard (sync: false),
-# never in this file. Database: Neon (DATABASE_URL pooled, DIRECT_URL for migrations).
+# never in this file. Database: Neon. DATABASE_URL = pooled, as the restricted guardbuy_app role
+# (scripts/create-app-role.ts: no UPDATE/DELETE on the audit log); DIRECT_URL = owner, for migrations.
 services:
   - type: web
     name: guardbuy
