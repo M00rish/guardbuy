@@ -86,6 +86,17 @@ const auto2 = await decided(1000, 1);
 await setAgentState(SHOP, false, "recheck-check");
 ok((await refusal(executePurchase(SHOP, auto2.seq))).includes("paused"), "paused agent -> automatic payment refused");
 
+// ---------- payee change: a supplier's PayPal email changed -> a person must approve ----------
+await setAgentState(SHOP, true, "recheck-check");
+const { offersForVariant, saveSupplier } = await import("../app/lib/suppliers/directory.server");
+const { policyContext } = await import("../app/lib/agent/restock.server");
+await saveSupplier(SHOP, { id: "atlas-roasters", name: "Atlas Roasters", paypalEmail: "new-billing@example.com" });
+const changedOffers = await offersForVariant(SHOP, "rc-coffee");
+const changedProposal = { sku: "COFFEE-HOUSE-1KG", variantId: "rc-coffee", supplierId: "atlas-roasters", unitPriceCents: 1000, quantity: 1, reasoning: "check", payeeEmail: "new-billing@example.com" };
+const afterChange = evaluate(changedProposal, rules, policyContext(changedProposal, await auditEntries(SHOP), 1_000_000, { managed: true, offers: changedOffers }));
+ok(afterChange.verdict === "approval" && afterChange.checks.some((c) => c.rule === "payeeChange" && c.outcome === "approval"),
+  `PayPal email changed today -> needs a person: ${afterChange.checks.find((c) => c.rule === "payeeChange")?.detail}`);
+
 // ---------- expiry (offline, synthetic times) ----------
 const NOW = new Date("2026-10-21T12:00:00Z");
 const hoursAgo = (h: number) => new Date(NOW.getTime() - h * 3_600_000).toISOString();

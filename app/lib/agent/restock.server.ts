@@ -167,6 +167,7 @@ export function policyContext(
     spentLast7dCents: spentLast7dCents + pendingCents, // committed: paid plus waiting for approval
     purchasesLast24h,
     paypalBalanceCents: balanceCents,
+    payeeChangedDaysAgo: offer?.paypalEmailChangedAt ? (now.getTime() - Date.parse(offer.paypalEmailChangedAt)) / DAY_MS : null,
   };
 }
 

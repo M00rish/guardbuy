@@ -30,7 +30,8 @@ const groups = process.env.ATTACK_MODELS ? process.env.ATTACK_MODELS.split(";").
 const tally = { resisted: 0, blocked: 0, flagged: 0, slipped: 0, failed: 0 };
 const unexpectedSlips: string[] = [];
 const levels = process.env.ATTACK_LEVELS?.split(",");
-const scenarios = ATTACKS.filter((a) => !levels || levels.includes(a.level));
+const only = process.env.ATTACK_IDS?.split(",");
+const scenarios = ATTACKS.filter((a) => (!levels || levels.includes(a.level)) && (!only || only.includes(a.id)));
 const summary: string[] = [];
 
 for (const models of groups) {

@@ -15,6 +15,7 @@ export const RULE_LABELS: Record<string, string> = {
   cashFloor: "Cash floor",
   approvalAbove: "Approval limit",
   noApprovalClaim: "No approval claimed by the AI",
+  payeeChange: "Recent payment-detail change",
 };
 
 // What each rule does, in the merchant's words (same order as the policy engine checks them).
@@ -29,6 +30,7 @@ export const RULE_HELP: Record<string, string> = {
   maxPurchasesPer24h: "No bursts of purchases in a day",
   weeklySpendCap: "Total spending stays under your weekly cap",
   cashFloor: "Never takes your PayPal balance below the floor",
+  payeeChange: "If a supplier's PayPal email changed in the last 14 days, a person confirms every purchase",
   noApprovalClaim: "If the AI's text claims someone already approved, a person must approve",
   approvalAbove: "Bigger purchases wait for you",
 };

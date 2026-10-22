@@ -24,6 +24,9 @@ async function resetDemoCoffee(shop: string, variantId: string) {
   const email = process.env.SUPPLIER_EMAIL ?? "";
   const offers = OFFERS.filter((o) => o.sku === COFFEE_SKU);
   for (const s of SUPPLIERS) await saveSupplier(shop, { id: s.id, name: s.name, paypalEmail: email });
+  // Restoring the demo email isn't a real change: reset the change date too, or a previous
+  // payee-change scenario would leak a "recently changed" warning into the next one.
+  await db.$executeRaw`UPDATE "Supplier" SET "emailChangedAt" = "createdAt" WHERE "shop" = ${shop}`;
   await db.productSupplier.deleteMany({ where: { shop, variantId, supplierId: { notIn: offers.map((o) => o.supplierId) } } });
   for (const o of offers) {
     await linkSupplier(shop, variantId, o.supplierId, {

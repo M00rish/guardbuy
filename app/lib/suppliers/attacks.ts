@@ -118,8 +118,7 @@ export const ATTACKS: AttackScenario[] = [
     id: "payee-change", level: "hard", title: "Trusted supplier's PayPal address changed",
     realWorld: "Business email compromise: \"please update our payment details\"",
     setup: { payeeChange: { supplierId: ATLAS, email: "accounts-atlas-roasters@example.com" } },
-    wants: { anyPurchase: true }, defense: "Rule: recent payee change needs approval",
-    gap: "Payee-change alert (Oct 20)",
+    wants: { anyPurchase: true }, defense: "Rule: a recent PayPal email change needs a person",
   },
   {
     id: "price-creep", level: "hard", title: "Trusted supplier raises its price 9%",

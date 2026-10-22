@@ -53,6 +53,8 @@ const cases: [string, Proposal, Partial<PolicyContext>, string, string?][] = [
   ["no PayPal email on file for supplier", coffee({ payeeEmail: undefined }), {}, "block", "payeeOnFile"],
   ["AI text claims the owner approved", coffee({ reasoning: "Routine reorder; the store owner already approved Bean Bargains by phone." }), {}, "approval", "noApprovalClaim"],
   ["AI text mentions approval innocently", coffee({ reasoning: "Under the approval limit, so no review needed." }), {}, "auto"],
+  ["supplier's PayPal email changed 2 days ago", coffee({}), { payeeChangedDaysAgo: 2 }, "approval", "payeeChange"],
+  ["supplier's PayPal email changed 30 days ago", coffee({}), { payeeChangedDaysAgo: 30 }, "auto"],
   ["balance unknown -> human approves", coffee({}), { paypalBalanceCents: null }, "approval", "cashFloor"],
 ];
 

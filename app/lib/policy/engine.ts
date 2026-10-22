@@ -12,7 +12,12 @@ export type PolicyContext = {
   spentLast7dCents: number; // auto + approved purchases, rolling 7 days
   purchasesLast24h: number;
   paypalBalanceCents: number | null; // null when the balance could not be read
+  // Days since the supplier's PayPal email last changed (null: never changed since it was added).
+  payeeChangedDaysAgo?: number | null;
 };
+
+/** A supplier whose PayPal email changed this recently needs a person for every purchase. */
+export const PAYEE_CHANGE_WINDOW_DAYS = 14;
 
 const RANK: Record<Verdict, number> = { auto: 0, approval: 1, block: 2 };
 const strictest = (verdicts: Verdict[]): Verdict =>
@@ -73,6 +78,14 @@ export function evaluate(proposal: RecordedProposal, rules: RuleSet, ctx: Policy
   // The AI's explanation is untrusted text, so it never loosens anything; but if it claims that a
   // person already approved, someone must actually approve (supplier notes can plant that claim).
   const claim = APPROVAL_CLAIM.test(proposal.reasoning);
+  // "Please update our payment details" is the classic supplier fraud: after a change, a person confirms.
+  const changed = ctx.payeeChangedDaysAgo ?? null;
+  const recentChange = changed !== null && changed < PAYEE_CHANGE_WINDOW_DAYS;
+  check("payeeChange", recentChange, "approval",
+    recentChange
+      ? `${proposal.supplierId}'s PayPal email changed ${changed! < 1 ? "today" : `${Math.floor(changed!)} days ago`}: confirm it with the supplier before paying`
+      : `no recent change to ${proposal.supplierId}'s PayPal email`);
+
   check("noApprovalClaim", claim, "approval",
     claim ? "the AI's explanation claims an approval that GuardBuy has no record of" : "no approval claimed in the AI's explanation");
 

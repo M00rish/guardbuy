@@ -11,6 +11,7 @@ export type Offer = {
   supplierId: string;
   supplierName: string;
   paypalEmail: string; // looked up by GuardBuy, never shown to or taken from the AI
+  paypalEmailChangedAt: string | null; // last change of that email (null: unchanged since added)
   unitPriceTodayCents: number;
   avgUnitPrice30dCents: number;
   usualQuantity: number;
@@ -33,6 +34,7 @@ export async function offersForVariant(shop: string, variantId: string, today = 
       supplierId: r.supplierId,
       supplierName: r.supplier.name,
       paypalEmail: r.supplier.paypalEmail,
+      paypalEmailChangedAt: r.supplier.emailChangedAt.getTime() - r.supplier.createdAt.getTime() > 1000 ? r.supplier.emailChangedAt.toISOString() : null,
       // Without a price feed the merchant's listed price is today's price and its own average.
       // (The rule comparing against what was actually paid replaces this average on Oct 20.)
       unitPriceTodayCents: r.simulatedPrices ? simulatedPrice(key, r.unitPriceCents, today) : r.unitPriceCents,
