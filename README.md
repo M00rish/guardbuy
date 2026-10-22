@@ -1,237 +1,214 @@
-# Shopify App Template - React Router
+# GuardBuy
 
-This is a template for building a [Shopify app](https://shopify.dev/docs/apps/getting-started) using [React Router](https://reactrouter.com/). It was forked from the [Shopify Remix app template](https://github.com/Shopify/shopify-app-template-remix) and converted to React Router.
+**An AI restocking agent for Shopify that can't overspend.** The AI proposes what to reorder. A deterministic policy engine, running rules the merchant signed, decides. PayPal pays the supplier. Every step is written to a hash-chained audit log that anyone can verify.
 
-Rather than cloning this repo, follow the [Quick Start steps](https://github.com/Shopify/shopify-app-template-react-router#quick-start).
+Built for the PayPal AI Hackathon (Devpost, 2026). MIT licensed.
 
-Visit the [`shopify.dev` documentation](https://shopify.dev/docs/api/shopify-app-react-router) for more details on the React Router app package.
+---
 
-## Upgrading from Remix
+## Why
 
-If you have an existing Remix app that you want to upgrade to React Router, please follow the [upgrade guide](https://github.com/Shopify/shopify-app-template-react-router/wiki/Upgrading-from-Remix). Otherwise, please follow the quick start guide below.
+Small Shopify merchants reorder stock by hand: watch inventory, guess quantities, email the supplier, pay. AI agents can do this, but nobody should hand an LLM their PayPal account. A supplier's message can carry a prompt injection, an inflated price, or a changed payout address, and the model may go along with it.
 
-## Quick start
+GuardBuy's answer is to keep the AI away from the decision:
 
-### Prerequisites
+- **The AI only proposes.** It reads stock, sales speed and supplier offers, and suggests a purchase with its reasoning.
+- **Signed rules decide.** A plain TypeScript policy engine checks every proposal against limits the merchant signed. The AI can't change them, and its output is treated as untrusted.
+- **One executor moves money**, and only after the rules allow it. It re-checks the rules at the moment of payment.
+- **Everything is logged** in an append-only, hash-chained audit log. A public page lets anyone check a PayPal payment against it.
 
-Before you begin, you'll need to [download and install the Shopify CLI](https://shopify.dev/docs/apps/tools/cli/getting-started) if you haven't already.
+## How it works
 
-### Setup
-
-```shell
-shopify app init --template=https://github.com/Shopify/shopify-app-template-react-router
+```mermaid
+flowchart LR
+  S["Shopify<br>stock + sales"] --> T["Low stock<br>(webhook / hourly sweep)"]
+  T --> A["AI proposes<br>(Gemini, fallback models)"]
+  A --> P{"Policy engine<br>signed rules"}
+  P -->|allow| X["Executor<br>PayPal Payouts"]
+  P -->|needs a person| Q["Approvals<br>in-app or in PayPal (Orders)"]
+  P -->|block| B["Blocked + reason"]
+  Q --> X
+  X --> L["Hash-chained audit log"]
+  B --> L
+  Q --> L
+  L --> V["Public verify page"]
 ```
 
-### Local Development
+1. **Trigger.** Shopify's `inventory_levels/update` and `orders/create` webhooks keep stock and daily sales current. An hourly job also sweeps every managed product, so a missed webhook never means a missed restock.
+2. **Proposal.** When a switched-on product drops below the merchant's restock point (days of stock left), the AI picks a supplier and quantity from the suppliers the merchant linked, with its reasoning. The model that answered is recorded.
+3. **Decision.** The policy engine runs every rule. The strictest result wins: `allow`, `approval` (a person decides) or `block`.
+4. **Payment.**
+   - Allowed purchases are paid by PayPal Payout to the supplier's PayPal email on file.
+   - Purchases that need a person wait in **Approvals**. The merchant approves in GuardBuy, or in PayPal itself through a PayPal order with the supplier as payee.
+   - At payment time the rules are checked again against fresh numbers.
+5. **Reconciliation.** The hourly job checks payout status, confirms payments in PayPal's transaction search, captures orders approved in PayPal (even if the merchant never came back to the return page), closes expired or cancelled orders, and records refunds.
 
-```shell
-shopify app dev
+### The rules
+
+| Rule | What it does |
+| --- | --- |
+| Product switched on / supplier linked / supplier approved | Only products and suppliers the merchant chose, ever |
+| PayPal email on file | The AI never chooses who gets paid |
+| Price vs 30-day average, price cap | No sudden price jumps |
+| Quantity limit | No orders many times larger than usual |
+| Purchases per 24 h, weekly spending cap | Limits how often and how much; the weekly cap also counts purchases still waiting for approval |
+| Cash floor | Never takes the PayPal balance below a set amount |
+| Recent payee change | A supplier's PayPal email changed in the last 14 days → a person confirms |
+| "No approval needed" claims | Supplier text claiming pre-approval or urgency → a person confirms |
+| Approval limit | Purchases above the limit wait for the merchant |
+
+Rules are signed by a Shopify staff member: their id and the rules' SHA-256 fingerprint are written to the audit log, and every decision records which rule set it used.
+
+### Safety details
+
+- **Append-only audit log.** Each entry's hash covers the previous hash, so editing, deleting or reordering any past entry breaks every hash after it. Home and Activity verify the whole chain on load. The latest fingerprint of each store is published outside the database every hour (`anchors/fingerprints.jsonl`, committed by GitHub Actions).
+- **Re-check at payment.** Approvals expire after 48 hours, and the rules and balance are checked again just before money moves.
+- **One payment per decision.** A database lock (`PaymentLock`) and PayPal idempotency keys mean a double click, a second tab or a retry can't pay twice.
+- **Approve in PayPal.** Only allow-listed PayPal payer ids can approve (`GUARDBUY_APPROVER_PAYER_IDS`). Cancelled, expired and wrong-payer orders are closed without paying.
+- **Kill switch.** `GUARDBUY_PAYMENTS_DISABLED=1` refuses every payout and capture.
+- **Least privilege.**
+  - Shopify scopes: `read_products`, `read_orders`, `write_inventory`. Write access is only used to reset demo stock.
+  - PayPal Agent Toolkit: only the read-only `get_order` and `list_transactions` tools are loaded.
+- **Untrusted text stays labelled.** Supplier notes and the AI's explanation are shown as "not verified" and never drive a payment on their own.
+
+## PayPal
+
+| What | How GuardBuy uses it |
+| --- | --- |
+| **Payouts API** (`/v1/payments/payouts`) | Pays suppliers for purchases the rules allow, or that a staff member approved in GuardBuy |
+| **Orders API v2** (`/v2/checkout/orders`) | "Approve in PayPal": an order with the supplier as payee, approved by the merchant in PayPal, then captured |
+| **Balances** (`/v1/reporting/balances`) | Cash-floor rule, adjusted for PayPal's reporting lag |
+| **Agent Toolkit: `get_order`** | Checks order status on return from PayPal and in the background sweep |
+| **Agent Toolkit: `list_transactions`** | Confirms each payout in PayPal's own transaction records |
+
+**Sandbox note.** The demo runs on the PayPal sandbox. One sandbox business account plays both GuardBuy and the merchant, and pays the supplier's sandbox account. Purchases approved in PayPal already come from the merchant's own account. In production, each merchant connects their own PayPal.
+
+## Try it
+
+**Judges:** the private Devpost notes have the demo store link, its password and three steps. On the storefront, the judge console at `/apps/guardbuy` lets you:
+- simulate a sale
+- watch the agent react
+- approve your own purchases
+- send a dishonest supplier (16 attack scenarios, easy to hard) against the real AI and rules
+
+Each judge gets their own sandbox, so nothing you do affects anyone else.
+
+**Merchant admin:** Home, Products & suppliers, Suppliers, Rules, Approvals, Activity (audit log) and Protection (rules at work, attack results, public verification settings).
+
+**Public verify page:** `/verify?id=<PayPal payout or order id>` shows whether a payment is on a store's audit log, which signed rules allowed it, and whether the log is intact.
+
+## Run it locally
+
+Requirements:
+- Node 22.12+
+- [Shopify CLI](https://shopify.dev/docs/apps/tools/cli) and a Shopify Partner account with a development store
+- A Postgres database (Neon works)
+- A PayPal developer account with sandbox apps
+- A Gemini API key (an OpenRouter key is optional, for fallback models)
+
+```bash
+git clone https://github.com/M00rish/guardbuy.git
 ```
 
-Press P to open the URL to your app. Once you click install, you can start development.
-
-Local development is powered by [the Shopify CLI](https://shopify.dev/docs/apps/tools/cli). It logs into your account, connects to an app, provides environment variables, updates remote config, creates a tunnel and provides commands to generate extensions.
-
-### Authenticating and querying data
-
-To authenticate and query data you can use the `shopify` const that is exported from `/app/shopify.server.js`:
-
-```js
-export async function loader({ request }) {
-  const { admin } = await shopify.authenticate.admin(request);
-
-  const response = await admin.graphql(`
-    {
-      products(first: 25) {
-        nodes {
-          title
-          description
-        }
-      }
-    }`);
-
-  const {
-    data: {
-      products: { nodes },
-    },
-  } = await response.json();
-
-  return nodes;
-}
+```bash
+cd guardbuy && npm ci
 ```
 
-This template comes pre-configured with examples of:
-
-1. Setting up your Shopify app in [/app/shopify.server.ts](https://github.com/Shopify/shopify-app-template-react-router/blob/main/app/shopify.server.ts)
-2. Querying data using Graphql. Please see: [/app/routes/app.\_index.tsx](https://github.com/Shopify/shopify-app-template-react-router/blob/main/app/routes/app._index.tsx).
-3. Responding to webhooks. Please see [/app/routes/webhooks.tsx](https://github.com/Shopify/shopify-app-template-react-router/blob/main/app/routes/webhooks.app.uninstalled.tsx).
-4. Using metafields, metaobjects, and declarative custom data definitions. Please see [/app/routes/app.\_index.tsx](https://github.com/Shopify/shopify-app-template-react-router/blob/main/app/routes/app._index.tsx) and [shopify.app.toml](https://github.com/Shopify/shopify-app-template-react-router/blob/main/shopify.app.toml).
-
-Please read the [documentation for @shopify/shopify-app-react-router](https://shopify.dev/docs/api/shopify-app-react-router) to see what other API's are available.
-
-## Shopify Dev MCP
-
-This template is configured with the Shopify Dev MCP. This instructs [Cursor](https://cursor.com/), [GitHub Copilot](https://github.com/features/copilot) and [Claude Code](https://claude.com/product/claude-code) and [Google Gemini CLI](https://github.com/google-gemini/gemini-cli) to use the Shopify Dev MCP.
-
-For more information on the Shopify Dev MCP please read [the documentation](https://shopify.dev/docs/apps/build/devmcp).
-
-## Deployment
-
-### Application Storage
-
-This template uses [Prisma](https://www.prisma.io/) to store session data, by default using an [SQLite](https://www.sqlite.org/index.html) database.
-The database is defined as a Prisma schema in `prisma/schema.prisma`.
-
-This use of SQLite works in production if your app runs as a single instance.
-The database that works best for you depends on the data your app needs and how it is queried.
-Here’s a short list of databases providers that provide a free tier to get started:
-
-| Database   | Type             | Hosters                                                                                                                                                                                                                                    |
-| ---------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| MySQL      | SQL              | [Digital Ocean](https://www.digitalocean.com/products/managed-databases-mysql), [Planet Scale](https://planetscale.com/), [Amazon Aurora](https://aws.amazon.com/rds/aurora/), [Google Cloud SQL](https://cloud.google.com/sql/docs/mysql) |
-| PostgreSQL | SQL              | [Digital Ocean](https://www.digitalocean.com/products/managed-databases-postgresql), [Amazon Aurora](https://aws.amazon.com/rds/aurora/), [Google Cloud SQL](https://cloud.google.com/sql/docs/postgres)                                   |
-| Redis      | Key-value        | [Digital Ocean](https://www.digitalocean.com/products/managed-databases-redis), [Amazon MemoryDB](https://aws.amazon.com/memorydb/)                                                                                                        |
-| MongoDB    | NoSQL / Document | [Digital Ocean](https://www.digitalocean.com/products/managed-databases-mongodb), [MongoDB Atlas](https://www.mongodb.com/atlas/database)                                                                                                  |
-
-To use one of these, you can use a different [datasource provider](https://www.prisma.io/docs/reference/api-reference/prisma-schema-reference#datasource) in your `schema.prisma` file, or a different [SessionStorage adapter package](https://github.com/Shopify/shopify-api-js/blob/main/packages/shopify-api/docs/guides/session-storage.md).
-
-### Build
-
-Build the app by running the command below with the package manager of your choice:
-
-Using yarn:
-
-```shell
-yarn build
+```bash
+cp .env.example .env
 ```
 
-Using npm:
+Fill in `.env` (every variable is described there), then apply the database migrations:
 
-```shell
-npm run build
+```bash
+npx prisma migrate deploy
 ```
 
-Using pnpm:
+Start the app. This opens a tunnel and installs it on your dev store:
 
-```shell
-pnpm run build
+```bash
+npm run dev
 ```
 
-## Hosting
+Optional demo data, with `shopify app dev` running. The CLI prints the GraphiQL URL:
+- `scripts/seed-dev-store.ts` creates the demo products and 30 days of test orders. It needs write scopes added temporarily; see the comment at the top of the script.
+- `scripts/seed-demo-suppliers.ts` adds the demo suppliers and links them.
 
-When you're ready to set up your app in production, you can follow [our deployment documentation](https://shopify.dev/docs/apps/launch/deployment) to host it externally. From there, you have a few options:
+Then in the app:
+1. Switch on products.
+2. Add suppliers with their PayPal emails.
+3. Link suppliers to products.
+4. Sign your rules.
 
-- [Google Cloud Run](https://shopify.dev/docs/apps/launch/deployment/deploy-to-google-cloud-run): This tutorial is written specifically for this example repo, and is compatible with the extended steps included in the subsequent [**Build your app**](tutorial) in the **Getting started** docs. It is the most detailed tutorial for taking a React Router-based Shopify app and deploying it to production. It includes configuring permissions and secrets, setting up a production database, and even hosting your apps behind a load balancer across multiple regions.
-- [Fly.io](https://fly.io/docs/js/shopify/): Leverages the Fly.io CLI to quickly launch Shopify apps to a single machine.
-- [Render](https://render.com/docs/deploy-shopify-app): This tutorial guides you through using Docker to deploy and install apps on a Dev store.
-- [Manual deployment guide](https://shopify.dev/docs/apps/launch/deployment/deploy-to-hosting-service): This resource provides general guidance on the requirements of deployment including environment variables, secrets, and persistent data.
+Home walks you through these steps.
 
-When you reach the step for [setting up environment variables](https://shopify.dev/docs/apps/deployment/web#set-env-vars), you also need to set the variable `NODE_ENV=production`.
+### Checks
 
-## Gotchas / Troubleshooting
+Offline and deterministic (they run in CI):
 
-### Database tables don't exist
-
-If you get an error like:
-
-```
-The table `main.Session` does not exist in the current database.
-```
-
-Create the database for Prisma. Run the `setup` script in `package.json` using `npm`, `yarn` or `pnpm`.
-
-### Navigating/redirecting breaks an embedded app
-
-Embedded apps must maintain the user session, which can be tricky inside an iFrame. To avoid issues:
-
-1. Use `Link` from `react-router` or `@shopify/polaris`. Do not use `<a>`.
-2. Use `redirect` returned from `authenticate.admin`. Do not use `redirect` from `react-router`
-3. Use `useSubmit` from `react-router`.
-
-This only applies if your app is embedded, which it will be by default.
-
-### Webhooks: shop-specific webhook subscriptions aren't updated
-
-If you are registering webhooks in the `afterAuth` hook, using `shopify.registerWebhooks`, you may find that your subscriptions aren't being updated.
-
-Instead of using the `afterAuth` hook declare app-specific webhooks in the `shopify.app.toml` file. This approach is easier since Shopify will automatically sync changes every time you run `deploy` (e.g: `npm run deploy`). Please read these guides to understand more:
-
-1. [app-specific vs shop-specific webhooks](https://shopify.dev/docs/apps/build/webhooks/subscribe#app-specific-subscriptions)
-2. [Create a subscription tutorial](https://shopify.dev/docs/apps/build/webhooks/subscribe/get-started?deliveryMethod=https)
-
-If you do need shop-specific webhooks, keep in mind that the package calls `afterAuth` in 2 scenarios:
-
-- After installing the app
-- When an access token expires
-
-During normal development, the app won't need to re-authenticate most of the time, so shop-specific subscriptions aren't updated. To force your app to update the subscriptions, uninstall and reinstall the app. Revisiting the app will call the `afterAuth` hook.
-
-### Webhooks: Admin created webhook failing HMAC validation
-
-Webhooks subscriptions created in the [Shopify admin](https://help.shopify.com/en/manual/orders/notifications/webhooks) will fail HMAC validation. This is because the webhook payload is not signed with your app's secret key.
-
-The recommended solution is to use [app-specific webhooks](https://shopify.dev/docs/apps/build/webhooks/subscribe#app-specific-subscriptions) defined in your toml file instead. Test your webhooks by triggering events manually in the Shopify admin(e.g. Updating the product title to trigger a `PRODUCTS_UPDATE`).
-
-### Webhooks: Admin object undefined on webhook events triggered by the CLI
-
-When you trigger a webhook event using the Shopify CLI, the `admin` object will be `undefined`. This is because the CLI triggers an event with a valid, but non-existent, shop. The `admin` object is only available when the webhook is triggered by a shop that has installed the app. This is expected.
-
-Webhooks triggered by the CLI are intended for initial experimentation testing of your webhook configuration. For more information on how to test your webhooks, see the [Shopify CLI documentation](https://shopify.dev/docs/apps/tools/cli/commands#webhook-trigger).
-
-### Incorrect GraphQL Hints
-
-By default the [graphql.vscode-graphql](https://marketplace.visualstudio.com/items?itemName=GraphQL.vscode-graphql) extension for will assume that GraphQL queries or mutations are for the [Shopify Admin API](https://shopify.dev/docs/api/admin). This is a sensible default, but it may not be true if:
-
-1. You use another Shopify API such as the storefront API.
-2. You use a third party GraphQL API.
-
-If so, please update [.graphqlrc.ts](https://github.com/Shopify/shopify-app-template-react-router/blob/main/.graphqlrc.ts).
-
-### Using Defer & await for streaming responses
-
-By default the CLI uses a cloudflare tunnel. Unfortunately cloudflare tunnels wait for the Response stream to finish, then sends one chunk. This will not affect production.
-
-To test [streaming using await](https://reactrouter.com/api/components/Await#await) during local development we recommend [localhost based development](https://shopify.dev/docs/apps/build/cli-for-apps/networking-options#localhost-based-development).
-
-### "nbf" claim timestamp check failed
-
-This is because a JWT token is expired. If you are consistently getting this error, it could be that the clock on your machine is not in sync with the server. To fix this ensure you have enabled "Set time and date automatically" in the "Date and Time" settings on your computer.
-
-### Using MongoDB and Prisma
-
-If you choose to use MongoDB with Prisma, there are some gotchas in Prisma's MongoDB support to be aware of. Please see the [Prisma SessionStorage README](https://www.npmjs.com/package/@shopify/shopify-app-session-storage-prisma#mongodb).
-
-### Unable to require(`C:\...\query_engine-windows.dll.node`).
-
-Unable to require(`C:\...\query_engine-windows.dll.node`).
-The Prisma engines do not seem to be compatible with your system.
-
-query_engine-windows.dll.node is not a valid Win32 application.
-
-**Fix:** Set the environment variable:
-
-```shell
-PRISMA_CLIENT_ENGINE_TYPE=binary
+```bash
+npx tsx scripts/check-policy.ts
 ```
 
-This forces Prisma to use the binary engine mode, which runs the query engine as a separate process and can work via emulation on Windows ARM64.
+```bash
+npx tsx scripts/check-scoreboard.ts
+```
 
-## Resources
+The other `scripts/check-*.ts` scripts use the database, the PayPal sandbox or the AI: `check-verify`, `check-recheck`, `check-unhappy`, `check-paypal-errors`, `check-approvals`, `check-attacks`, `check-judge`. Read each script's header before running it: some move sandbox money. `check-recheck` and `check-unhappy` turn on the kill switch themselves.
 
-React Router:
+## Deploy
 
-- [React Router docs](https://reactrouter.com/home)
+`render.yaml` describes a Render web service:
+- **Build:** `npm ci`, `prisma generate`, `react-router build`
+- **Start:** `prisma migrate deploy`, then the server
+- **Health check:** `/healthz`
 
-Shopify:
+Secrets are set in the Render dashboard.
 
-- [Intro to Shopify apps](https://shopify.dev/docs/apps/getting-started)
-- [Shopify App React Router docs](https://shopify.dev/docs/api/shopify-app-react-router)
-- [Shopify CLI](https://shopify.dev/docs/apps/tools/cli)
-- [Shopify App Bridge](https://shopify.dev/docs/api/app-bridge-library).
-- [Polaris Web Components](https://shopify.dev/docs/api/app-home/polaris-web-components).
-- [App extensions](https://shopify.dev/docs/apps/app-extensions/list)
-- [Shopify Functions](https://shopify.dev/docs/api/functions)
+After the first deploy:
+1. Set `application_url` in `shopify.app.toml` to the Render URL.
+2. Run `npm run deploy`.
+3. In GitHub, add the `GUARDBUY_URL` and `GUARDBUY_JOBS_SECRET` secrets (the same value as `JOBS_SECRET`) for `.github/workflows/hourly.yml`. That workflow calls `/jobs/hourly` and commits the fingerprint file.
 
-Internationalization:
+To reset the demo (stock back to the start, sandbox balance topped up):
 
-- [Internationalizing your app](https://shopify.dev/docs/apps/best-practices/internationalization/getting-started)
+```bash
+npx tsx scripts/reset-demo.ts
+```
+
+## Project layout
+
+```
+app/
+  lib/agent/       restock loop, AI proposer, executor, approvals, attack tests, payment lock
+  lib/policy/      rule schema, policy engine, rule labels, rules form checks
+  lib/audit/       hash-chained log, activity feed, public verification
+  lib/paypal/      REST client, Agent Toolkit wrapper, reconciliation, orders sweep
+  lib/inventory/   sales rates, days of cover, stock trigger
+  lib/suppliers/   supplier directory, demo catalog, attack scenarios
+  lib/judge/       judge console sandboxes and limits
+  lib/jobs/        hourly job, demo reset
+  routes/          admin pages (app.*), webhooks, app proxy (judge console), verify page, jobs
+prisma/            schema and hand-written migrations
+scripts/           checks, seeding, demo reset, sandbox refill
+anchors/           published audit-log fingerprints (created by the first hourly run)
+```
+
+## Stack
+
+- Shopify React Router app template
+- Polaris web components and App Bridge
+- Prisma on Neon Postgres
+- AI SDK with Gemini, plus OpenRouter free models as fallbacks
+- PayPal REST APIs and the PayPal Agent Toolkit
+- Render, and GitHub Actions for the hourly job and CI
+
+## Known limits
+
+- **Price creep:** a trusted supplier raising prices in small steps under the "% above average" limit isn't caught yet. The fix compares against what the merchant actually paid, from PayPal's records, and is planned.
+- **Sandbox:** the demo uses the PayPal sandbox and a Shopify development store.
+- **Signing:** rule signing uses the Shopify staff session. Passkey signing is planned.
+
+## License
+
+MIT. See [LICENSE.md](LICENSE.md). Portions are from Shopify's app template (MIT).
