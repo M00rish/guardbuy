@@ -21,7 +21,9 @@ export const RuleSetSchema = z.object({
   targetDaysOfCover: z.number().positive(), // buy enough to reach this many days of stock
 
   // Price guards
-  maxPriceAboveAvgPct: z.number().min(0).max(100), // unit price may exceed its 30-day average by at most this %
+  // Retired Oct 22 (replaced by priceToleranceCents): still parsed so rule sets signed earlier keep
+  // their fingerprint, but no rule reads it.
+  maxPriceAboveAvgPct: z.number().min(0).max(100).optional(),
   // A quote may exceed the price the merchant accepted (entered or approved) by at most this much per
   // unit before a person approves. Optional so rule sets signed before Oct 22 keep their fingerprint;
   // missing means DEFAULT_PRICE_TOLERANCE_CENTS.

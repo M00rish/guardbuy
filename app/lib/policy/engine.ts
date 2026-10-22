@@ -8,7 +8,6 @@ import { DEFAULT_PRICE_TOLERANCE_CENTS } from "./rules";
 export type PolicyContext = {
   productManaged: boolean; // the merchant switched this product on for GuardBuy
   supplierLinked: boolean; // the supplier is one the merchant linked to this product
-  avgUnitPrice30dCents: number; // this SKU at this supplier
   usualQuantity: number; // this SKU at this supplier
   spentLast7dCents: number; // auto + approved purchases, rolling 7 days
   purchasesLast24h: number;
@@ -81,10 +80,6 @@ export function evaluate(proposal: RecordedProposal, rules: RuleSet, ctx: Policy
     check("maxUnitPrice", proposal.unitPriceCents > cap, "block",
       `unit price ${usd(proposal.unitPriceCents)} vs cap ${usd(cap)}`);
   }
-
-  const priceLimit = Math.floor(ctx.avgUnitPrice30dCents * (1 + rules.maxPriceAboveAvgPct / 100));
-  check("maxPriceAboveAvg", proposal.unitPriceCents > priceLimit, "block",
-    `unit price ${usd(proposal.unitPriceCents)} vs 30-day avg ${usd(ctx.avgUnitPrice30dCents)} (limit +${rules.maxPriceAboveAvgPct}% = ${usd(priceLimit)})`);
 
   // Price creep: every increase beyond the tolerance needs a person once; their approval becomes the
   // new accepted price, so the next increase asks again. Small automatic steps never move it.

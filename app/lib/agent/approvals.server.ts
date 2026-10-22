@@ -2,10 +2,10 @@ import { appendAudit, auditEntries } from "../audit/log.server";
 import type { AuditEntry, RuleCheck } from "../policy/schema";
 import { offersForVariant, supplierNames } from "../suppliers/directory.server";
 import { createApprovalOrder, ExecutionRefused, executePurchase, openOrder } from "./execute.server";
-import { APPROVAL_TTL_MS, approvalExpired } from "./restock.server";
+import { acceptedUnitPrice, APPROVAL_TTL_MS, approvalExpired } from "./restock.server";
 
 // The approval queue: purchases the policy engine sent to a person ("approval" verdict).
-// Cards lead with facts GuardBuy computed itself (price vs history, quantity vs usual, who gets
+// Cards lead with facts GuardBuy computed itself (price vs the price you accepted, quantity vs usual, who gets
 // paid, which rules asked for approval). The AI's explanation comes last and is labelled as such,
 // because a dishonest supplier's note can steer what the AI writes.
 
@@ -21,7 +21,7 @@ export type ApprovalCard = {
   payeeEmail: string | null;
   unitPriceCents: number;
   totalCents: number;
-  avgUnitPrice30dCents: number | null; // null if the supplier is no longer linked to the product
+  acceptedUnitPriceCents: number | null; // the price the merchant accepted; null if the supplier is no longer linked
   usualQuantity: number | null;
   needsApprovalBecause: RuleCheck[]; // the checks that asked for a person
   otherChecks: RuleCheck[];
@@ -73,7 +73,7 @@ export async function approvalQueue(shop: string): Promise<ApprovalCard[]> {
       payeeEmail: proposal.payeeEmail ?? null,
       unitPriceCents: proposal.unitPriceCents,
       totalCents: decision.totalCents,
-      avgUnitPrice30dCents: offer?.avgUnitPrice30dCents ?? null,
+      acceptedUnitPriceCents: offer ? acceptedUnitPrice(proposal, log, offer, d.seq) : null,
       usualQuantity: offer?.usualQuantity ?? null,
       needsApprovalBecause: decision.checks.filter((c) => c.outcome === "approval"),
       otherChecks: decision.checks.filter((c) => c.outcome !== "approval"),

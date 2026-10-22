@@ -11,7 +11,7 @@ export const RULE_LABELS: Record<string, string> = {
   payeeOnFile: "PayPal email on file",
   supplierAllowlist: "Approved suppliers",
   maxUnitPrice: "Price cap",
-  maxPriceAboveAvg: "Price vs 30-day average",
+  maxPriceAboveAvg: "Price vs 30-day average", // retired Oct 22; kept so older log entries still read well
   priceAboveAccepted: "Price you accepted",
   maxQuantityMultiple: "Quantity limit",
   maxPurchasesPer24h: "Purchases per day",
@@ -32,7 +32,6 @@ export const RULE_HELP: Record<string, string> = {
   supplierAllowlist: "Only suppliers approved in your rules",
   payeeOnFile: "The supplier must have a PayPal email on file; the AI never chooses who gets paid",
   maxUnitPrice: "Hard price cap per product (when set)",
-  maxPriceAboveAvg: "No sudden price jumps above the 30-day average",
   priceAboveAccepted: "A price higher than the one you entered or last approved (beyond your tolerance) needs you once; approving makes it the new accepted price",
   maxQuantityMultiple: "No orders many times larger than usual",
   maxPurchasesPer24h: "No bursts of purchases in a day",

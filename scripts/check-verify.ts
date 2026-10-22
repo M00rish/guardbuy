@@ -26,7 +26,7 @@ await cleanup();
 await seedDemoCatalog(SHOP, { "COFFEE-HOUSE-1KG": "verify-coffee" }, EMAIL);
 const rules = defaultRuleSet(SHOP);
 await signRuleSet(SHOP, rules, "shopify-staff:1");
-const ctx = { productManaged: true, supplierLinked: true, avgUnitPrice30dCents: 1150, usualQuantity: 40, spentLast7dCents: 0, purchasesLast24h: 0, paypalBalanceCents: 412_345 };
+const ctx = { productManaged: true, supplierLinked: true, usualQuantity: 40, spentLast7dCents: 0, purchasesLast24h: 0, paypalBalanceCents: 412_345 };
 
 /** proposal -> decision -> (approved) -> payout, with a made-up PayPal batch id. */
 async function payment(quantity: number, batchId: string, approve = false) {

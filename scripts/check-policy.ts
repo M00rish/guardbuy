@@ -10,7 +10,6 @@ const rules = RuleSetSchema.parse({
   currency: "USD",
   reorderBelowDaysOfCover: 7,
   targetDaysOfCover: 30,
-  maxPriceAboveAvgPct: 10,
   maxUnitPriceCents: { "COFFEE-HOUSE-1KG": 1400 },
   approvalAboveCents: 50_000, // $500
   weeklySpendCapCents: 200_000, // $2,000
@@ -23,7 +22,6 @@ const rules = RuleSetSchema.parse({
 const base: PolicyContext = {
   productManaged: true,
   supplierLinked: true,
-  avgUnitPrice30dCents: 1148,
   usualQuantity: 40,
   spentLast7dCents: 0,
   purchasesLast24h: 0,
@@ -43,7 +41,6 @@ const cases: [string, Proposal, Partial<PolicyContext>, string, string?][] = [
   ["normal restock under $500", coffee({}), {}, "auto"],
   ["107 units (= $1,197) needs approval", coffee({ quantity: 107 }), {}, "approval", "approvalAbove"],
   ["price above hard cap", coffee({ unitPriceCents: 1450 }), {}, "block", "maxUnitPrice"],
-  ["price >10% above 30-day avg", coffee({ unitPriceCents: 1290 }), {}, "block", "maxPriceAboveAvg"],
   ["supplier not allowlisted (Bean Bargains)", coffee({ supplierId: "bean-bargains", unitPriceCents: 690 }), {}, "block", "supplierAllowlist"],
   ["500 units instead of ~40", coffee({ quantity: 500 }), {}, "block", "maxQuantityMultiple"],
   ["6th purchase in 24h", coffee({}), { purchasesLast24h: 5 }, "block", "maxPurchasesPer24h"],
@@ -73,7 +70,7 @@ const cases: [string, Proposal, Partial<PolicyContext>, string, string?][] = [
   ["quote $0.40 above the accepted price", coffee({ unitPriceCents: 1159 }), { acceptedUnitPriceCents: 1119 }, "auto"],
   ["quote $1.04 above (supplier's 9% rise)", coffee({ unitPriceCents: 1223 }), { acceptedUnitPriceCents: 1119 }, "approval", "priceAboveAccepted"],
   ["after approving $12.23, the same price passes", coffee({ unitPriceCents: 1223 }), { acceptedUnitPriceCents: 1223 }, "auto"],
-  ["next rise above the approved $12.23", coffee({ unitPriceCents: 1290 }), { acceptedUnitPriceCents: 1223, avgUnitPrice30dCents: 1223 }, "approval", "priceAboveAccepted"],
+  ["next rise above the approved $12.23", coffee({ unitPriceCents: 1290 }), { acceptedUnitPriceCents: 1223 }, "approval", "priceAboveAccepted"],
   ["price drop never asks", coffee({ unitPriceCents: 990 }), { acceptedUnitPriceCents: 1119 }, "auto"],
   ["accepted price unknown: rule doesn't run", coffee({ unitPriceCents: 1223 }), {}, "auto"],
   ["lookalike name, even after being paid", coffee({}), { supplierAddedDaysAgo: 90, supplierPaidBefore: 4, lookalikeOf: "Atlas Roasters" }, "approval", "newSupplier"],

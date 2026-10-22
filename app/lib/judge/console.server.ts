@@ -88,7 +88,7 @@ export async function judgeState(shop: string, judgeId: string) {
       title: `${c.quantity} × ${c.sku} from ${c.supplierName}`,
       total: usd(c.totalCents),
       facts: [
-        `Price ${usd(c.unitPriceCents)}${c.avgUnitPrice30dCents ? ` vs 30-day average ${usd(c.avgUnitPrice30dCents)}` : ""}`,
+        `Price ${usd(c.unitPriceCents)}${c.acceptedUnitPriceCents ? ` (accepted price ${usd(c.acceptedUnitPriceCents)})` : ""}`,
         `Quantity ${c.quantity}${c.usualQuantity ? ` (usual ${c.usualQuantity})` : ""}`,
         `Pays the supplier's PayPal account on file`, // the email itself stays private
         ...c.needsApprovalBecause.map((r) => `Needs you: ${r.detail}`),

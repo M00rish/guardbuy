@@ -49,7 +49,7 @@ flowchart LR
 | --- | --- |
 | Product switched on / supplier linked / supplier approved | Only products and suppliers the merchant chose, ever |
 | PayPal email on file | The AI never chooses who gets paid |
-| Price vs 30-day average, price cap | No sudden price jumps |
+| Price cap | An optional hard maximum price per product |
 | Price you accepted | A price more than your tolerance (default $0.50 per unit) above the one you entered or last approved → a person approves once, and that becomes the new accepted price. Small automatic increases can't add up |
 | Quantity limit, order size vs your history | No orders many times larger than usual; more than 1.5× what you usually buy of a product → a person confirms |
 | Split orders | Purchases of the same product from the same supplier within 24 h count together against the approval limit |

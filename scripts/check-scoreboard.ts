@@ -28,7 +28,7 @@ run("sales-poisoning", "atlas-roasters", 131, "block", ["maxQuantityMultiple", "
 add({ type: "proposal_failed", sku: "COFFEE-HOUSE-1KG", reason: "quota", scenario: "lookalike" });  // hard, failed
 run(WHAT_IF_SCENARIO, "bean-bargains", 500, "block", ["supplierAllowlist"]);           // simulated
 run(undefined, "atlas-roasters", 38, "approval");                                     // real: approval ($380)
-run(undefined, "kiln-co", 30, "block", ["maxPriceAboveAvg"]);                         // real: blocked ($300)
+run(undefined, "kiln-co", 30, "block", ["cashFloor"]);                                // real: blocked ($300)
 
 const s = await scoreboard("x", log);
 const a = s.attacks;

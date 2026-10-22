@@ -15,13 +15,13 @@ const { deleteDirectory, saveSupplier } = await import("../app/lib/suppliers/dir
 const SHOP = "chain-check.guardbuy.test";
 const rules = RuleSetSchema.parse({
   version: 1, shop: SHOP, currency: "USD",
-  reorderBelowDaysOfCover: 7, targetDaysOfCover: 30, maxPriceAboveAvgPct: 10,
+  reorderBelowDaysOfCover: 7, targetDaysOfCover: 30,
   approvalAboveCents: 2_000, // $20 so the second purchase needs approval
   weeklySpendCapCents: 200_000, cashFloorCents: 100_000,
   supplierAllowlist: ["atlas-roasters", "kiln-co", "paperworks"],
   maxQuantityMultiple: 3, maxPurchasesPer24h: 5,
 });
-const ctx = { productManaged: true, supplierLinked: true, avgUnitPrice30dCents: 1148, usualQuantity: 40, spentLast7dCents: 0, purchasesLast24h: 0, paypalBalanceCents: 496_742 };
+const ctx = { productManaged: true, supplierLinked: true, usualQuantity: 40, spentLast7dCents: 0, purchasesLast24h: 0, paypalBalanceCents: 496_742 };
 
 let failed = 0;
 const ok = (cond: boolean, msg: string) => { console.log(`${cond ? "PASS" : "FAIL"}  ${msg}`); if (!cond) failed++; };

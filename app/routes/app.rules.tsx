@@ -51,7 +51,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     currency: "USD",
     reorderBelowDaysOfCover: num("reorderBelowDaysOfCover"),
     targetDaysOfCover: num("targetDaysOfCover"),
-    maxPriceAboveAvgPct: num("maxPriceAboveAvgPct"),
     priceToleranceCents: cents("priceTolerance"),
     approvalAboveCents: cents("approvalAbove"),
     weeklySpendCapCents: cents("weeklySpendCap"),
@@ -86,7 +85,7 @@ export default function Rules() {
     reorderBelowDaysOfCover: String(rules.reorderBelowDaysOfCover), targetDaysOfCover: String(rules.targetDaysOfCover),
     maxQuantityMultiple: String(rules.maxQuantityMultiple), approvalAbove: dollars(rules.approvalAboveCents),
     weeklySpendCap: dollars(rules.weeklySpendCapCents), cashFloor: dollars(rules.cashFloorCents),
-    maxPriceAboveAvgPct: String(rules.maxPriceAboveAvgPct), maxPurchasesPer24h: String(rules.maxPurchasesPer24h),
+    maxPurchasesPer24h: String(rules.maxPurchasesPer24h),
     priceTolerance: dollars(rules.priceToleranceCents ?? DEFAULT_PRICE_TOLERANCE_CENTS),
     allow: rules.supplierAllowlist.filter((id) => suppliers.some((s) => s.id === id)),
   }), [rules, suppliers]);
@@ -137,7 +136,6 @@ export default function Rules() {
               {field("approvalAbove", "Ask me above ($)", "Bigger purchases wait in Approvals", { min: 0, step: 1 })}
               {field("weeklySpendCap", "Weekly spending cap ($)", "Rolling 7 days, all suppliers", { min: 0, step: 1 })}
               {field("cashFloor", "Keep at least this in PayPal ($)", "Purchases that would go below are blocked", { min: 0, step: 1 })}
-              {field("maxPriceAboveAvgPct", "Highest price above 30-day average (%)", "Stops sudden price jumps", { min: 0, max: 100, step: 1 })}
               {field("priceTolerance", "Price increase without asking ($ per unit)", "Above the price you entered or last approved", { min: 0, step: 0.05 })}
               {field("maxPurchasesPer24h", "Purchases per 24 hours", "Across all products", { min: 1, step: 1 })}
             </s-grid>

@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import db from "../../db.server";
-import { OFFERS, PRODUCTS, SUPPLIERS, simulatedAverage, simulatedPrice } from "./catalog";
+import { OFFERS, PRODUCTS, SUPPLIERS, simulatedPrice } from "./catalog";
 
 // The merchant's own products and suppliers: what GuardBuy may restock, from whom, and on what terms.
 // The merchant chooses what and from whom; the agent decides when and how much; the rules decide if.
@@ -15,7 +15,6 @@ export type Offer = {
   supplierAddedAt: string; // when the merchant added this supplier (re-adding resets it)
   acceptedUnitPriceCents: number; // the price the merchant entered when linking (quotes above it need a person)
   unitPriceTodayCents: number;
-  avgUnitPrice30dCents: number;
   usualQuantity: number;
   leadTimeDays: number;
   preferred: boolean;
@@ -27,7 +26,7 @@ export async function isManaged(shop: string, variantId: string) {
   return product?.managed ?? false;
 }
 
-/** The merchant's suppliers for one product, with today's price and the 30-day average. */
+/** The merchant's suppliers for one product, with today's price and the price the merchant accepted. */
 export async function offersForVariant(shop: string, variantId: string, today = new Date()): Promise<Offer[]> {
   const rows = await db.productSupplier.findMany({ where: { shop, variantId }, include: { supplier: true } });
   return rows.map((r) => {
@@ -39,10 +38,8 @@ export async function offersForVariant(shop: string, variantId: string, today = 
       paypalEmailChangedAt: r.supplier.emailChangedAt.getTime() - r.supplier.createdAt.getTime() > 1000 ? r.supplier.emailChangedAt.toISOString() : null,
       supplierAddedAt: r.supplier.createdAt.toISOString(),
       acceptedUnitPriceCents: r.acceptedUnitPriceCents ?? r.unitPriceCents,
-      // Without a price feed the merchant's listed price is today's price and its own average.
-      // (The rule comparing against what was actually paid replaces this average on Oct 20.)
+      // The supplier's current quote (simulated daily drift only for links that ask for it).
       unitPriceTodayCents: r.simulatedPrices ? simulatedPrice(key, r.unitPriceCents, today) : r.unitPriceCents,
-      avgUnitPrice30dCents: r.simulatedPrices ? simulatedAverage(key, r.unitPriceCents, today) : r.unitPriceCents,
       usualQuantity: r.usualQuantity,
       leadTimeDays: r.leadTimeDays,
       preferred: r.preferred,

@@ -42,7 +42,7 @@ const card = queue[0];
 ok(queue.length === 1 && card.decisionSeq === first, `queue shows the purchase (#${first})`);
 ok(card.needsApprovalBecause.some((c) => c.rule === "approvalAbove"), `reason: ${card.needsApprovalBecause.map((c) => c.detail).join("; ")}`);
 ok(card.supplierName === "Atlas Roasters" && card.payeeEmail === process.env.SUPPLIER_EMAIL, "card names the supplier and who gets paid");
-ok(card.avgUnitPrice30dCents !== null && card.usualQuantity === 40, `facts: ${card.unitPriceCents}c vs avg ${card.avgUnitPrice30dCents}c, qty ${card.quantity} vs usual ${card.usualQuantity}`);
+ok(card.acceptedUnitPriceCents !== null && card.usualQuantity === 40, `facts: ${card.unitPriceCents}c vs accepted ${card.acceptedUnitPriceCents}c, qty ${card.quantity} vs usual ${card.usualQuantity}`);
 
 // 2. Double click on Approve: paid once
 const [a, b] = await Promise.all([outcome(approvePurchase(SHOP, first, "shopify-staff:staff-1")), outcome(approvePurchase(SHOP, first, "shopify-staff:staff-1"))]);

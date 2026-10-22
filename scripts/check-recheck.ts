@@ -47,7 +47,7 @@ ok(Date.now() - t < 2000, "a lock left by a crashed server expires and is taken 
 await seedDemoCatalog(SHOP, { "COFFEE-HOUSE-1KG": "rc-coffee" }, process.env.SUPPLIER_EMAIL!);
 const rules = RuleSetSchema.parse({ ...defaultRuleSet(SHOP), weeklySpendCapCents: 1_500, cashFloorCents: 0 }); // $15 weekly cap
 await signRuleSet(SHOP, rules, "recheck-check");
-const fresh = { productManaged: true, supplierLinked: true, avgUnitPrice30dCents: 1000, usualQuantity: 40, spentLast7dCents: 0, purchasesLast24h: 0, paypalBalanceCents: 1_000_000 };
+const fresh = { productManaged: true, supplierLinked: true, usualQuantity: 40, spentLast7dCents: 0, purchasesLast24h: 0, paypalBalanceCents: 1_000_000 };
 
 /** A purchase decided against a clean slate (as if decided before the others happened). */
 async function decided(unitPriceCents: number, quantity: number, ctx = fresh, r = rules) {

@@ -98,7 +98,7 @@ function CardView({ card }: { card: Card }) {
   }, [fetcher.state, fetcher.data, shopify]);
 
   const submit = (intent: string) => fetcher.submit({ intent, decisionSeq: card.decisionSeq }, { method: "POST" });
-  const priceDelta = card.avgUnitPrice30dCents ? (card.unitPriceCents / card.avgUnitPrice30dCents - 1) * 100 : null;
+  const priceDelta = card.acceptedUnitPriceCents ? (card.unitPriceCents / card.acceptedUnitPriceCents - 1) * 100 : null;
   const qtyMultiple = card.usualQuantity ? card.quantity / card.usualQuantity : null;
   const passed = card.otherChecks.filter((c) => c.outcome === "auto").length;
 
@@ -119,7 +119,7 @@ function CardView({ card }: { card: Card }) {
 
         <s-stack gap="small-200">
           <Row label="Price per unit">
-            <s-text>{usd(card.unitPriceCents)}{priceDelta !== null && ` · ${pct(priceDelta)} vs 30-day average ${usd(card.avgUnitPrice30dCents!)}`}</s-text>
+            <s-text>{usd(card.unitPriceCents)}{priceDelta !== null && ` · ${pct(priceDelta)} vs the ${usd(card.acceptedUnitPriceCents!)} you accepted`}</s-text>
           </Row>
           <Row label="Quantity">
             <s-text>{card.quantity}{qtyMultiple !== null && ` · ${qtyMultiple.toFixed(1)}× the usual ${card.usualQuantity}`}</s-text>

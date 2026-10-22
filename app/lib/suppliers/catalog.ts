@@ -82,13 +82,6 @@ export function simulatedPrice(key: string, baseCents: number, day: Date): numbe
   return Math.round(baseCents * (1 + noise));
 }
 
-/** Average simulated price over the `days` days before `today` (excluding today). */
-export function simulatedAverage(key: string, baseCents: number, today: Date, days = 30): number {
-  let sum = 0;
-  for (let i = days; i >= 1; i--) sum += simulatedPrice(key, baseCents, new Date(today.getTime() - i * 86_400_000));
-  return Math.round(sum / days);
-}
-
 export function offersFor(sku: string): Offer[] {
   return OFFERS.filter((o) => o.sku === sku);
 }

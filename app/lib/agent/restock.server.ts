@@ -36,7 +36,6 @@ export function defaultRuleSet(shop: string): RuleSet {
     currency: "USD",
     reorderBelowDaysOfCover: 7,
     targetDaysOfCover: 14,
-    maxPriceAboveAvgPct: 10,
     priceToleranceCents: 50, // $0.50 per unit
     approvalAboveCents: 50_000, // $500
     weeklySpendCapCents: 150_000, // $1,500
@@ -198,8 +197,6 @@ export function policyContext(
   return {
     productManaged: merchant.managed,
     supplierLinked: !!offer,
-    // An offer the merchant never linked has no history: 0 makes the price check block it too.
-    avgUnitPrice30dCents: offer?.avgUnitPrice30dCents ?? 0,
     usualQuantity: offer?.usualQuantity ?? 0,
     spentLast7dCents: spentLast7dCents + pendingCents, // committed: paid plus waiting for approval
     purchasesLast24h,
@@ -232,13 +229,18 @@ function historyContext(
     supplierAddedDaysAgo: addedAt === null ? null : (now.getTime() - addedAt) / DAY_MS,
     supplierPaidBefore: fromSupplier.filter((c) => c.paid).length,
     lookalikeOf: offer ? lookalikeOf(offer.supplierName, older) : null,
-    // The merchant's price for this product from this supplier: what they entered when linking, raised
-    // only by purchases a person approved (in GuardBuy or in PayPal), never by automatic ones, so
-    // small automatic increases can't add up.
-    acceptedUnitPriceCents: offer
-      ? Math.max(offer.acceptedUnitPriceCents, ...approvedPrices(log, exclude).filter((a) => sameProduct(a) && a.supplierId === proposal.supplierId).map((a) => a.unitPriceCents))
-      : null,
+    acceptedUnitPriceCents: offer ? acceptedUnitPrice(proposal, log, offer, exclude) : null,
   };
+}
+
+/**
+ * The merchant's price for this product from this supplier: what they entered when linking, raised
+ * only by purchases a person approved (in GuardBuy or in PayPal), never by automatic ones.
+ */
+export function acceptedUnitPrice(proposal: RecordedProposal, log: AuditEntry[], offer: Offer, exclude?: number) {
+  const sameProduct = (p: RecordedProposal) => (proposal.variantId && p.variantId ? p.variantId === proposal.variantId : p.sku === proposal.sku);
+  const approved = approvedPrices(log, exclude).filter((a) => sameProduct(a) && a.supplierId === proposal.supplierId);
+  return Math.max(offer.acceptedUnitPriceCents, ...approved.map((a) => a.unitPriceCents));
 }
 
 /** Proposals a person approved: approved in GuardBuy (then paid or not) or paid through a PayPal order they approved. */
