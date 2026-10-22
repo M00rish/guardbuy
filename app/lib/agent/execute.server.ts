@@ -18,7 +18,7 @@ import { agentOn, approvalExpired, currentRuleSet, paypalBalanceCents, policyCon
 
 type PayoutResponse = { batch_header: { payout_batch_id: string; batch_status: string } };
 
-type PayPalOrder = {
+export type PayPalOrder = {
   id: string;
   status: string; // CREATED, APPROVED, COMPLETED, ...
   links?: { rel: string; href: string }[];
@@ -46,6 +46,47 @@ async function payeeFor(shop: string, proposal: RecordedProposal): Promise<strin
 }
 
 const toCents = (value: string) => Math.round(Number(value) * 100);
+
+/**
+ * The PayPal order still in play for a decision: the latest one created that wasn't closed
+ * (cancelled, expired, wrong payer). A closed order frees the purchase for a new order or an
+ * in-app approval.
+ */
+export function openOrder(log: AuditEntry[], decisionSeq: number) {
+  const created = log.filter((e) => e.event.type === "order_created" && e.event.decisionSeq === decisionSeq).at(-1);
+  if (created?.event.type !== "order_created") return undefined;
+  const orderId = created.event.orderId;
+  const closed = log.some((e) => e.event.type === "order_closed" && e.event.orderId === orderId);
+  return closed ? undefined : created;
+}
+
+/** The capture must pay the recorded supplier the recorded amount; anything else is an error. */
+export function checkCapture(order: PayPalOrder, amountCents: number, payeeEmail: string | undefined) {
+  const unit = order.purchase_units?.[0];
+  const cap = unit?.payments?.captures?.[0];
+  if (!cap) throw new Error(`PayPal order ${order.id} has no capture`);
+  if (toCents(cap.amount.value) !== amountCents) throw new Error(`Captured ${cap.amount.value}, expected ${(amountCents / 100).toFixed(2)}`);
+  const payee = unit?.payee?.email_address;
+  if (payee && payee.toLowerCase() !== payeeEmail?.toLowerCase()) throw new Error(`PayPal order ${order.id} pays an unexpected payee`);
+  return cap;
+}
+
+export async function closeOrder(shop: string, decisionSeq: number, orderId: string, reason: "cancelled" | "expired" | "wrong_payer") {
+  const log = await auditEntries(shop);
+  const already = log.find((e) => e.event.type === "order_closed" && e.event.orderId === orderId);
+  return already ?? appendAudit(shop, { type: "order_closed", decisionSeq, orderId, reason });
+}
+
+/**
+ * PayPal accounts allowed to approve purchases in PayPal (the merchant's own). Until each merchant
+ * connects their PayPal (Phase B), it's configured: GUARDBUY_APPROVER_PAYER_IDS (comma-separated
+ * PayPal payer ids). Empty list = any approver is accepted and recorded (dev only).
+ */
+export function allowedApprover(payerId: string | undefined) {
+  const list = (process.env.GUARDBUY_APPROVER_PAYER_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+  if (list.length === 0) return true;
+  return !!payerId && list.includes(payerId);
+}
 const forDecision = (log: AuditEntry[], type: AuditEntry["event"]["type"], decisionSeq: number) =>
   log.find((e) => e.event.type === type && "decisionSeq" in e.event && e.event.decisionSeq === decisionSeq);
 
@@ -76,7 +117,7 @@ async function payableDecision(shop: string, decisionSeq: number) {
  *   - an automatic purchase that now needs a person (e.g. its price rose): refused
  *   - an approval older than 48 hours: refused (re-proposed with fresh numbers instead)
  */
-/** Emergency stop (and test safety): with GUARDBUY_PAYMENTS_DISABLED=1 no payment reaches PayPal. */
+/** Emergency stop (and test safety): with GUARDBUY_PAYMENTS_DISABLED=1 no payout is sent and no order is captured. */
 function assertPaymentsEnabled() {
   if (process.env.GUARDBUY_PAYMENTS_DISABLED === "1") throw new ExecutionRefused("Payments are disabled on this server (GUARDBUY_PAYMENTS_DISABLED)");
 }
@@ -104,7 +145,6 @@ async function recheckAtPayment(shop: string, decisionSeq: number, opts: { appro
   const reasons = (verdict: string) => fresh.checks.filter((c) => c.outcome === verdict).map((c) => c.detail).join("; ");
   if (fresh.verdict === "block") throw new ExecutionRefused(`Rules re-checked at payment time blocked it: ${reasons("block")}`);
   if (fresh.verdict === "approval" && !opts.approvedByPerson) throw new ExecutionRefused(`Rules re-checked at payment time: it now needs a person (${reasons("approval")})`);
-  assertPaymentsEnabled(); // last thing before money can move
   return fresh;
 }
 
@@ -115,7 +155,7 @@ export async function executePurchase(shop: string, decisionSeq: number): Promis
 
   const existing = forDecision(log, "payout", decisionSeq);
   if (existing) return existing; // already paid: never pay twice
-  if (forDecision(log, "order_created", decisionSeq)) {
+  if (openOrder(log, decisionSeq)) {
     throw new ExecutionRefused(`Decision ${decisionSeq} is being paid through a PayPal order`);
   }
   const approved = !!forDecision(log, "approved", decisionSeq);
@@ -128,6 +168,7 @@ export async function executePurchase(shop: string, decisionSeq: number): Promis
   const paidMeanwhile = forDecision(await auditEntries(shop), "payout", decisionSeq);
   if (paidMeanwhile) return paidMeanwhile;
   await recheckAtPayment(shop, decisionSeq, { approvedByPerson: approved });
+  assertPaymentsEnabled(); // last thing before money moves
 
   // Deterministic id per decision: PayPal treats a repeated id as the same payout.
   const batchId = `gb-${decisionSeq}-${decisionEntry.hash.slice(0, 16)}`;
@@ -172,14 +213,17 @@ export async function executePurchase(shop: string, decisionSeq: number): Promis
 export async function createApprovalOrder(shop: string, decisionSeq: number, returnUrl: string): Promise<AuditEntry> {
   const { log, decisionEntry, decision, proposal } = await payableDecision(shop, decisionSeq);
 
-  const existing = forDecision(log, "order_created", decisionSeq);
+  const existing = openOrder(log, decisionSeq);
   if (existing) return existing;
+  if (forDecision(log, "order_captured", decisionSeq)) throw new ExecutionRefused(`Decision ${decisionSeq} was already paid`);
   if (decision.verdict !== "approval") throw new ExecutionRefused(`Decision ${decisionSeq} does not need approval`);
   if (forDecision(log, "payout", decisionSeq)) throw new ExecutionRefused(`Decision ${decisionSeq} was already paid`);
   // A person approves inside PayPal next; the rules (caps, floor, expiry) are re-checked first.
   await withPaymentLock(shop, () => recheckAtPayment(shop, decisionSeq, { approvedByPerson: true }));
 
-  const requestId = `gb-order-${decisionSeq}-${decisionEntry.hash.slice(0, 16)}`;
+  // One request id per attempt: a new order after a cancelled/expired one must not reuse the old id.
+  const attempt = log.filter((e) => e.event.type === "order_created" && e.event.decisionSeq === decisionSeq).length;
+  const requestId = `gb-order-${decisionSeq}-${decisionEntry.hash.slice(0, 16)}${attempt ? `-${attempt + 1}` : ""}`;
   const order = await paypal<PayPalOrder>("/v2/checkout/orders", {
     method: "POST",
     requestId,
@@ -230,8 +274,8 @@ async function capture(shop: string, decisionSeq: number): Promise<AuditEntry> {
   const { log, proposal } = await payableDecision(shop, decisionSeq);
   const done = forDecision(log, "order_captured", decisionSeq);
   if (done) return done;
-  const created = forDecision(log, "order_created", decisionSeq);
-  if (created?.event.type !== "order_created") throw new ExecutionRefused(`Decision ${decisionSeq} has no PayPal order`);
+  const created = openOrder(log, decisionSeq);
+  if (created?.event.type !== "order_created") throw new ExecutionRefused(`Decision ${decisionSeq} has no open PayPal order`);
   const { orderId, amountCents } = created.event;
 
   return withPaymentLock(shop, async () => {
@@ -239,22 +283,20 @@ async function capture(shop: string, decisionSeq: number): Promise<AuditEntry> {
   if (again) return again;
   let order = await runPayPalTool<PayPalOrder>("get_order", { id: orderId });
   if (order.status === "APPROVED") {
+    // Only the merchant's own PayPal account may approve; anyone else holding the link can't pay.
+    if (!allowedApprover(order.payer?.payer_id)) {
+      await closeOrder(shop, decisionSeq, orderId, "wrong_payer");
+      throw new ExecutionRefused("This PayPal order was approved by an account that isn't the store's; nothing was captured");
+    }
     // The merchant approved inside PayPal; the rules still get the final word before capture.
     await recheckAtPayment(shop, decisionSeq, { approvedByPerson: true });
+    assertPaymentsEnabled(); // last thing before money moves
     order = await paypal<PayPalOrder>(`/v2/checkout/orders/${orderId}/capture`, { method: "POST", requestId: `gb-capture-${orderId}` });
   } else if (order.status !== "COMPLETED") {
     throw new ExecutionRefused(`PayPal order ${orderId} is ${order.status}, not approved yet`);
   }
 
-  const unit = order.purchase_units?.[0];
-  const cap = unit?.payments?.captures?.[0];
-  if (!cap) throw new Error(`PayPal order ${orderId} has no capture`);
-  // The order must still pay the right supplier the right amount.
-  if (toCents(cap.amount.value) !== amountCents) throw new Error(`Captured ${cap.amount.value}, expected ${amountCents / 100}`);
-  const payee = unit?.payee?.email_address;
-  if (payee && payee.toLowerCase() !== proposal.payeeEmail?.toLowerCase()) {
-    throw new Error(`PayPal order ${orderId} pays an unexpected payee`);
-  }
+  const cap = checkCapture(order, amountCents, proposal.payeeEmail);
 
   // Independent read-back through PayPal's Agent Toolkit.
   const confirmed = await runPayPalTool<PayPalOrder>("get_order", { id: orderId }).then(

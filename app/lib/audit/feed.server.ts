@@ -116,6 +116,14 @@ export function toFeed(log: AuditEntry[], you?: string, names: FeedNames = {}): 
       case "order_created":
         items.push({ ...base, kind: "paypal", title: `PayPal order ${ev.orderId} created`, detail: "Waiting for approval in PayPal" });
         break;
+      case "order_closed":
+        items.push({ ...base, kind: ev.reason === "wrong_payer" ? "block" : "declined",
+          title: ev.reason === "cancelled" ? `PayPal order ${ev.orderId} cancelled in PayPal` : ev.reason === "expired" ? `PayPal order ${ev.orderId} expired without approval` : `PayPal order ${ev.orderId} approved by an account that isn't the store's: not captured`,
+          detail: "Nothing was paid. The purchase can be approved again." });
+        break;
+      case "order_status":
+        items.push({ ...base, kind: ev.status.includes("REFUND") ? "paypal" : "status", title: `PayPal order ${ev.orderId}: ${ev.status}`, detail: ev.refundedCents ? `${usd(ev.refundedCents)} refunded by the supplier` : undefined });
+        break;
       case "order_captured":
         items.push({ ...base, kind: "paid", title: `Paid ${usd(ev.amountCents)} via PayPal Orders${purchaseOf(ev.decisionSeq) ? ` for ${purchaseOf(ev.decisionSeq)}` : ""}`, detail: `Capture ${ev.captureId} (${ev.status})`, verifyId: ev.orderId });
         break;

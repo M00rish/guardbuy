@@ -1,7 +1,7 @@
 import { appendAudit, auditEntries } from "../audit/log.server";
 import type { AuditEntry, RuleCheck } from "../policy/schema";
 import { offersForVariant, supplierNames } from "../suppliers/directory.server";
-import { createApprovalOrder, ExecutionRefused, executePurchase } from "./execute.server";
+import { createApprovalOrder, ExecutionRefused, executePurchase, openOrder } from "./execute.server";
 import { APPROVAL_TTL_MS, approvalExpired } from "./restock.server";
 
 // The approval queue: purchases the policy engine sent to a person ("approval" verdict).
@@ -59,7 +59,7 @@ export async function approvalQueue(shop: string): Promise<ApprovalCard[]> {
     const offer = proposal.variantId
       ? (await offersForVariant(shop, proposal.variantId)).find((o) => o.supplierId === proposal.supplierId)
       : undefined;
-    const order = ofDecision(log, "order_created", d.seq).at(-1);
+    const order = openOrder(log, d.seq);
 
     cards.push({
       decisionSeq: d.seq,
@@ -115,7 +115,7 @@ export type ApprovalResult = { paid: boolean; message: string };
 export function approvePurchase(shop: string, decisionSeq: number, actor: string): Promise<ApprovalResult> {
   return oncePerDecision(shop, decisionSeq, async () => {
     const log = await assertPending(shop, decisionSeq);
-    if (ofDecision(log, "order_created", decisionSeq).length) {
+    if (openOrder(log, decisionSeq)) {
       throw new ExecutionRefused("This purchase is already being approved in PayPal");
     }
     await appendAudit(shop, { type: "approved", decisionSeq, approvedBy: actor });

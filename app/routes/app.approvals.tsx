@@ -8,6 +8,7 @@ import { authenticate } from "../shopify.server";
 import { approvalQueue, approveInPayPal, approvePurchase, rejectPurchase, type ApprovalCard } from "../lib/agent/approvals.server";
 import { ExecutionRefused } from "../lib/agent/execute.server";
 import { feedNames } from "../lib/merchant/dashboard.server";
+import { sweepPayPalOrders } from "../lib/paypal/orders-sweep.server";
 import { usd } from "../lib/format";
 import { ago, plural, Row } from "../components/ui";
 
@@ -16,6 +17,8 @@ import { ago, plural, Row } from "../components/ui";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
+  // Settle PayPal orders first (capture approved ones, close expired or cancelled ones), so the queue is current.
+  await sweepPayPalOrders(session.shop).catch((e) => console.warn(`[approvals] PayPal sweep failed: ${(e as Error).message}`));
   const [cards, names] = await Promise.all([approvalQueue(session.shop), feedNames(session.shop)]);
   return { cards: cards.map((c) => ({ ...c, productTitle: names.product(c.sku) ?? c.sku })) };
 };

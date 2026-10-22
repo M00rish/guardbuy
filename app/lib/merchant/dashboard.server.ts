@@ -44,7 +44,9 @@ export function productStatus(
     if (paid) return { label: `Ordered · ${total}`, tone: "success", at: paid.at };
     if (of("rejected")) return { label: "You declined the restock", tone: "neutral", at: of("rejected")!.at };
     if (of("payment_failed")) return { label: "Payment failed · retrying", tone: "critical", at: of("payment_failed")!.at };
-    if (of("order_created")) return { label: "Waiting for PayPal approval", tone: "warning", at: last.at };
+    const created = of("order_created");
+    const closed = created?.event.type === "order_created" && log.some((e) => e.event.type === "order_closed" && created.event.type === "order_created" && e.event.orderId === created.event.orderId);
+    if (created && !closed) return { label: "Waiting for PayPal approval", tone: "warning", at: last.at };
     if (d?.event.type === "decision" && d.event.decision.verdict === "approval") return { label: `Waiting for your approval · ${total}`, tone: "warning", at: last.at };
     if (d?.event.type === "decision" && d.event.decision.verdict === "block") return { label: "Blocked by your rules", tone: "critical", at: last.at };
   }

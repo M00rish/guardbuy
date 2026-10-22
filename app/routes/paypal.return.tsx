@@ -1,6 +1,7 @@
 import type { LoaderFunctionArgs } from "react-router";
 
-import { captureApprovalOrder, ExecutionRefused, findOrder } from "../lib/agent/execute.server";
+import { captureApprovalOrder, closeOrder, ExecutionRefused, findOrder } from "../lib/agent/execute.server";
+import { runPayPalTool } from "../lib/paypal/toolkit.server";
 
 // PayPal sends the merchant here after they approve (or cancel) a purchase order in PayPal.
 // Public on purpose: PayPal's redirect carries no Shopify session. That's safe because capture
@@ -27,7 +28,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (!found) return page("Unknown order", "GuardBuy has no purchase order with this PayPal id.", 404);
 
   if (url.searchParams.has("cancelled")) {
-    return page("Not approved", "You cancelled in PayPal, so nothing was paid. The purchase is still waiting for approval.");
+    // Close the order only if PayPal agrees it wasn't approved (this page is public).
+    const status = await runPayPalTool<{ status: string }>("get_order", { id: orderId }).then((o) => o.status, () => "UNKNOWN");
+    if (["CREATED", "PAYER_ACTION_REQUIRED", "VOIDED"].includes(status)) await closeOrder(found.shop, found.decisionSeq, orderId, "cancelled");
+    return page("Not approved", "You cancelled in PayPal, so nothing was paid. The purchase is back in GuardBuy's Approvals, where you can approve, decline or try PayPal again.");
   }
 
   try {

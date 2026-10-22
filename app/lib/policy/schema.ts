@@ -135,6 +135,22 @@ export const AuditEventSchema = z.discriminatedUnion("type", [
     payerId: z.string().optional(), // the PayPal account that approved the order
     confirmedByGetOrder: z.boolean().default(false), // re-read through the Agent Toolkit after capture
   }),
+  // A PayPal order that will never be paid: cancelled in PayPal, expired unapproved, or approved by
+  // a PayPal account that isn't the merchant's. The purchase is free again (new order or in-app approval).
+  z.object({
+    type: z.literal("order_closed"),
+    decisionSeq: z.number().int(),
+    orderId: z.string(),
+    reason: z.enum(["cancelled", "expired", "wrong_payer"]),
+  }),
+  // Later status of a captured PayPal order (e.g. the supplier refunded it).
+  z.object({
+    type: z.literal("order_status"),
+    decisionSeq: z.number().int(),
+    orderId: z.string(),
+    status: z.string(), // capture status: COMPLETED, REFUNDED, PARTIALLY_REFUNDED, DECLINED, ...
+    refundedCents: cents.default(0),
+  }),
   // Later status changes for a payout (reconciliation); never edits the original payout entry.
   z.object({
     type: z.literal("payout_status"),

@@ -111,12 +111,18 @@ function payoutFailedAt(payout: AuditEntry, log: AuditEntry[]): string | null {
  * decision being paid right now, so it doesn't count against itself.
  */
 export function spending(log: AuditEntry[], now = new Date(), exclude?: number) {
-  const paid = log.flatMap((e) =>
-    (e.event.type === "payout" && !payoutFailedAt(e, log) && e.event.decisionSeq !== exclude) ||
-    (e.event.type === "order_captured" && e.event.decisionSeq !== exclude)
-      ? [{ at: e.at, cents: e.event.amountCents }]
-      : [],
-  );
+  const paid = log.flatMap((e) => {
+    if (e.event.type === "payout" && !payoutFailedAt(e, log) && e.event.decisionSeq !== exclude) return [{ at: e.at, cents: e.event.amountCents }];
+    if (e.event.type === "order_captured" && e.event.decisionSeq !== exclude) {
+      // Refunded money no longer counts as spent.
+      const orderId = e.event.orderId;
+      const status = log.filter((x) => x.event.type === "order_status" && x.event.orderId === orderId).at(-1);
+      const refunded = status?.event.type === "order_status" ? status.event.refundedCents : 0;
+      const cents = Math.max(0, e.event.amountCents - refunded);
+      return cents > 0 ? [{ at: e.at, cents }] : [];
+    }
+    return [];
+  });
   const since = (ms: number) => paid.filter((s) => now.getTime() - Date.parse(s.at) < ms);
   return {
     spentLast7dCents: since(7 * DAY_MS).reduce((sum, s) => sum + s.cents, 0),

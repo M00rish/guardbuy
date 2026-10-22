@@ -34,7 +34,7 @@ if (cmd === "create") {
   ok(decision.verdict === "approval", `$${(decision.totalCents / 100).toFixed(2)} -> ${decision.verdict}`);
 
   ok((await refused(() => executePurchase(SHOP, d.seq))).includes("waiting for approval"), "payout refused before approval");
-  ok((await refused(() => captureApprovalOrder(SHOP, d.seq))).includes("no PayPal order"), "capture refused before an order exists");
+  ok((await refused(() => captureApprovalOrder(SHOP, d.seq))).includes("no open PayPal order"), "capture refused before an order exists");
 
   const order = await createApprovalOrder(SHOP, d.seq, `${process.env.APP_URL}/paypal/return`);
   const again = await createApprovalOrder(SHOP, d.seq, `${process.env.APP_URL}/paypal/return`);

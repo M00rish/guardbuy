@@ -64,3 +64,9 @@ export async function reconcilePayouts(shop: string) {
   }
   return results;
 }
+
+/** Everything the hourly job checks for a shop: payout statuses and PayPal orders. */
+export async function reconcileShop(shop: string) {
+  const { sweepPayPalOrders } = await import("./orders-sweep.server");
+  return [...(await reconcilePayouts(shop)), ...(await sweepPayPalOrders(shop))];
+}

@@ -1,0 +1,75 @@
+import { appendAudit, auditEntries } from "../audit/log.server";
+import { captureApprovalOrder, closeOrder, ExecutionRefused, openOrder } from "../agent/execute.server";
+import { runPayPalTool } from "./toolkit.server";
+
+// Background check of PayPal orders (approval in PayPal), so nothing depends on PayPal's redirect
+// reaching GuardBuy:
+//   approved in PayPal -> captured (payer check + rules re-check happen inside capture)
+//   cancelled / expired / unknown to PayPal -> closed, which frees the purchase
+//   already captured -> watched for refunds (spending stops counting refunded money)
+// Runs when Approvals loads and from the reconcile job.
+
+// PayPal stops accepting approval of an unapproved order after a few hours; after this we treat it as expired.
+const UNAPPROVED_ORDER_TTL_MS = 3 * 60 * 60_000;
+
+type Order = {
+  status: string;
+  purchase_units?: { payments?: { captures?: { status: string }[]; refunds?: { amount?: { value: string } }[] } }[];
+};
+
+const notFound = (e: unknown) => /RESOURCE_NOT_FOUND|404/.test(String(e instanceof Error ? e.message : e));
+
+export async function sweepPayPalOrders(shop: string): Promise<string[]> {
+  const notes: string[] = [];
+  const log = await auditEntries(shop);
+  const decisions = [...new Set(log.flatMap((e) => (e.event.type === "order_created" ? [e.event.decisionSeq] : [])))];
+
+  for (const decisionSeq of decisions) {
+    const open = openOrder(log, decisionSeq);
+    const captured = log.find((e) => e.event.type === "order_captured" && e.event.decisionSeq === decisionSeq);
+
+    // 1. Orders still waiting: capture, close or leave.
+    if (open?.event.type === "order_created" && !captured) {
+      const { orderId } = open.event;
+      let order: Order;
+      try {
+        order = await runPayPalTool<Order>("get_order", { id: orderId });
+      } catch (e) {
+        if (notFound(e)) { await closeOrder(shop, decisionSeq, orderId, "expired"); notes.push(`#${decisionSeq} ${orderId}: unknown to PayPal, closed`); }
+        else notes.push(`#${decisionSeq} ${orderId}: PayPal unavailable, will retry`);
+        continue;
+      }
+      if (order.status === "APPROVED" || order.status === "COMPLETED") {
+        try {
+          const entry = await captureApprovalOrder(shop, decisionSeq);
+          notes.push(`#${decisionSeq} ${orderId}: captured (entry #${entry.seq})`);
+        } catch (e) {
+          notes.push(`#${decisionSeq} ${orderId}: not captured: ${e instanceof ExecutionRefused ? e.message : "PayPal error, will retry"}`);
+        }
+      } else if (order.status === "VOIDED" || Date.now() - Date.parse(open.at) > UNAPPROVED_ORDER_TTL_MS) {
+        await closeOrder(shop, decisionSeq, orderId, "expired");
+        notes.push(`#${decisionSeq} ${orderId}: expired without approval, closed`);
+      }
+      continue;
+    }
+
+    // 2. Captured orders: record status changes (refunds).
+    if (captured?.event.type === "order_captured") {
+      const { orderId } = captured.event;
+      const last = log.filter((e) => e.event.type === "order_status" && e.event.orderId === orderId).at(-1);
+      const known = last?.event.type === "order_status" ? last.event.status : captured.event.status;
+      if (known === "REFUNDED") continue;
+      const order = await runPayPalTool<Order>("get_order", { id: orderId }).catch(() => null);
+      const unit = order?.purchase_units?.[0];
+      const status = unit?.payments?.captures?.[0]?.status;
+      if (!status || status === known) continue;
+      const refundedCents = Math.round((unit?.payments?.refunds ?? []).reduce((sum, r) => sum + Number(r.amount?.value ?? 0), 0) * 100);
+      await appendAudit(shop, {
+        type: "order_status", decisionSeq, orderId, status,
+        refundedCents: status === "REFUNDED" ? captured.event.amountCents : refundedCents,
+      });
+      notes.push(`#${decisionSeq} ${orderId}: ${known} -> ${status}`);
+    }
+  }
+  return notes;
+}
