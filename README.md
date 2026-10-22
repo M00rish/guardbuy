@@ -216,7 +216,6 @@ anchors/           published audit-log fingerprints (created by the first hourly
 ## Known limits
 
 - **Price creep:** a trusted supplier raising prices in small steps under the "% above average" limit isn't caught yet. The fix compares against what the merchant actually paid, from PayPal's records, and is planned.
-- **Sandbox:** the demo uses the PayPal sandbox and a Shopify development store.
 - **Signing:** rule signing uses the Shopify staff session. Passkey signing is planned.
 
 ## License
