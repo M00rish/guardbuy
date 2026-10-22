@@ -90,3 +90,28 @@ export function Filters<T extends string>({ options, value, onChange }: { option
     </s-stack>
   );
 }
+
+/** Empty state: what will show up here, and the one thing to do next. */
+export function Empty({ heading, children, action }: { heading: string; children: React.ReactNode; action?: { label: string; href: string } }) {
+  return (
+    <s-box padding="large-200" background="subdued" borderRadius="base">
+      <s-stack gap="small-200" alignItems="center">
+        <s-heading>{heading}</s-heading>
+        <s-text tone="neutral">{children}</s-text>
+        {action && <s-button href={action.href}>{action.label}</s-button>}
+      </s-stack>
+    </s-box>
+  );
+}
+
+/** A section that couldn't load (Shopify or PayPal didn't answer): the rest of the page still works. */
+export function Unavailable({ what }: { what: string }) {
+  return (
+    <s-banner tone="warning" heading={`Couldn't load ${what}`}>
+      <s-stack gap="small-200">
+        <s-text>Shopify or PayPal didn't answer in time. Nothing was bought or paid.</s-text>
+        <s-box><s-button onClick={() => window.location.reload()}>Try again</s-button></s-box>
+      </s-stack>
+    </s-banner>
+  );
+}

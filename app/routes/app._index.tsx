@@ -13,7 +13,7 @@ import { scoreboard } from "../lib/agent/scoreboard.server";
 import { cachedBalanceCents, feedNames, productOverview, productStatus } from "../lib/merchant/dashboard.server";
 import { adminWithStaff } from "../lib/merchant/staff.server";
 import { setManaged, setupStatus } from "../lib/suppliers/directory.server";
-import { ago, FEED_LABEL, FEED_TONE, Metric, plural, Row, type Tone } from "../components/ui";
+import { ago, Empty, FEED_LABEL, FEED_TONE, Metric, plural, Row, Unavailable, type Tone } from "../components/ui";
 
 // Home: what the agent is doing, what it spent, which products need attention, and what changed.
 // While setup isn't finished, the setup checklist takes the place of the numbers.
@@ -24,11 +24,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const log = await auditEntries(shop);
   const rules = currentRuleSet(log);
   const [setup, queue, chain, score, balanceCents, products, names] = await Promise.all([
-    setupStatus(shop), approvalQueue(shop), verifyChain(shop), scoreboard(shop, log), cachedBalanceCents(), productOverview(admin, shop), feedNames(shop),
+    setupStatus(shop), approvalQueue(shop), verifyChain(shop), scoreboard(shop, log), cachedBalanceCents(),
+    // Shopify's API can be briefly unreachable: show the rest of Home and a retry for the product list.
+    productOverview(admin, shop).catch((e) => { console.warn(`[home] products unavailable: ${(e as Error).message}`); return null; }),
+    feedNames(shop),
   ]);
   const ready = setup.managedProducts > 0 && setup.suppliers > 0 && setup.managedWithSuppliers > 0 && !!rules;
   const running = ready && agentOn(log);
   const signed = log.filter((e) => e.event.type === "ruleset_signed").at(-1);
+  const firstPurchase = log.some((e) => e.event.type === "payout" || e.event.type === "order_captured");
   const recentFailure = log.filter((e) => e.event.type === "payment_failed" || e.event.type === "proposal_failed").filter((e) => Date.now() - Date.parse(e.at) < 86_400_000 && !("scenario" in e.event && e.event.scenario));
 
   return {
@@ -52,7 +56,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     chain,
     head: log.at(-1)?.hash ?? null,
     failures: recentFailure.length,
-    products: products.map((p) => ({ ...p, cover: Number.isFinite(p.cover) ? Number(p.cover.toFixed(1)) : null, status: productStatus(log, p, rules, running) })),
+    firstPurchase,
+    products: products && products.map((p) => ({ ...p, cover: Number.isFinite(p.cover) ? Number(p.cover.toFixed(1)) : null, status: productStatus(log, p, rules, running) })),
     recent: toFeed(log, actor, names).filter((f) => f.kind !== "status").slice(0, 6),
   };
 };
@@ -87,12 +92,13 @@ export default function Home() {
 
   const busy = fetcher.state !== "idle";
   const steps = [
-    { done: d.setup.managedProducts > 0, label: "Switch on the products GuardBuy may restock", href: "/app/products" },
-    { done: d.setup.suppliers > 0, label: "Add your suppliers and their PayPal emails", href: "/app/suppliers" },
-    { done: d.setup.managedWithSuppliers > 0, label: "Link suppliers to those products", href: "/app/products" },
-    { done: !!d.rules, label: "Set and sign your spending rules", href: "/app/rules" },
+    { done: d.setup.managedProducts > 0, label: "Switch on the products GuardBuy may restock", why: "GuardBuy only ever buys products you switch on.", action: "Choose products", href: "/app/products" },
+    { done: d.setup.suppliers > 0, label: "Add your suppliers", why: "GuardBuy only pays suppliers you add, at the PayPal email you enter.", action: "Add a supplier", href: "/app/suppliers" },
+    { done: d.setup.managedWithSuppliers > 0, label: "Link a supplier to each product", why: "Tells the agent who sells each product, and at what price.", action: "Link suppliers", href: "/app/products?view=managed" },
+    { done: !!d.rules, label: "Sign your spending rules", why: "Your limits: when to ask you, the weekly cap, and how much stays in PayPal.", action: "Review and sign rules", href: "/app/rules" },
   ];
   const doneSteps = steps.filter((s) => s.done).length;
+  const next = steps.findIndex((s) => !s.done);
   const capCents = d.rules?.weeklyCapCents ?? 0;
   const lowBalance = d.balanceCents !== null && d.rules !== null && d.balanceCents < d.rules.cashFloorCents * 1.5;
 
@@ -160,12 +166,37 @@ export default function Home() {
             <s-paragraph>
               You choose what to restock and from whom. The agent decides when and how much. Your rules decide whether money moves.
             </s-paragraph>
-            {steps.map((s, i) => (
-              <s-stack key={s.label} direction="inline" gap="small-200" alignItems="center">
-                <s-badge tone={s.done ? "success" : "neutral"}>{s.done ? "Done" : `Step ${i + 1}`}</s-badge>
-                <s-link href={s.href}>{s.label}</s-link>
-              </s-stack>
-            ))}
+            <s-progress value={doneSteps} max={4} accessibilityLabel="Setup progress" />
+            {steps.map((s, i) =>
+              i === next ? (
+                <s-box key={s.label} padding="base" background="subdued" borderRadius="base">
+                  <s-stack gap="small-200">
+                    <s-stack direction="inline" gap="small-200" alignItems="center">
+                      <s-badge tone="info">{`Next · step ${i + 1}`}</s-badge>
+                      <s-text type="strong">{s.label}</s-text>
+                    </s-stack>
+                    <s-text tone="neutral">{s.why}</s-text>
+                    <s-box><s-button variant="primary" href={s.href}>{s.action}</s-button></s-box>
+                  </s-stack>
+                </s-box>
+              ) : (
+                <s-stack key={s.label} direction="inline" gap="small-200" alignItems="center">
+                  <s-badge tone={s.done ? "success" : "neutral"}>{s.done ? "Done" : `Step ${i + 1}`}</s-badge>
+                  {s.done ? <s-text tone="neutral">{s.label}</s-text> : <s-link href={s.href}>{s.label}</s-link>}
+                </s-stack>
+              ),
+            )}
+          </s-stack>
+        </s-section>
+      )}
+
+      {d.running && !d.firstPurchase && d.rules && (
+        <s-section heading="You're live">
+          <s-stack gap="small-200">
+            <s-text>
+              {`When a switched-on product has less than ${plural(d.rules.reorderBelow, "day")} of stock left, the agent proposes a restock. Up to ${d.rules.approvalAbove} it buys right away and pays the supplier through PayPal; above that it waits for you in Approvals.`}
+            </s-text>
+            <s-text tone="neutral">Stock is checked on every sale and once an hour. Every step is written to the audit log, which you can verify in Activity.</s-text>
           </s-stack>
         </s-section>
       )}
@@ -212,6 +243,11 @@ export default function Home() {
       )}
 
       <s-section heading="Products">
+        {d.products === null ? (
+          <Unavailable what="your products" />
+        ) : d.products.length === 0 ? (
+          <Empty heading="No products in your store yet">Products you add in Shopify show up here, ready to switch on for GuardBuy.</Empty>
+        ) : (
         <s-table>
           <s-table-header-row>
             <s-table-header listSlot="primary">Product</s-table-header>
@@ -232,7 +268,7 @@ export default function Home() {
                 </s-table-cell>
                 <s-table-cell>{p.stock}</s-table-cell>
                 <s-table-cell>{p.cover === null ? "–" : p.cover}</s-table-cell>
-                <s-table-cell>{p.supplier ?? <s-link href="/app/products">Link a supplier</s-link>}</s-table-cell>
+                <s-table-cell>{p.supplier ?? <s-link href={`/app/products/${p.variantId}`}>Link a supplier</s-link>}</s-table-cell>
                 <s-table-cell>
                   <s-stack direction="inline" gap="small-200" alignItems="center">
                     <s-badge tone={STATUS_TONE[p.status.tone]}>{p.status.label}</s-badge>
@@ -247,11 +283,12 @@ export default function Home() {
             ))}
           </s-table-body>
         </s-table>
+        )}
       </s-section>
 
       <s-section heading="Recent activity">
         {d.recent.length === 0 ? (
-          <s-text tone="neutral">Nothing yet. The agent's work shows up here.</s-text>
+          <Empty heading="No activity yet">Low stock, the agent's proposals, your rules' decisions and payments show up here as they happen.</Empty>
         ) : (
           <s-table>
             <s-table-header-row>
@@ -277,3 +314,5 @@ export default function Home() {
 }
 
 export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);
+
+export { PageError as ErrorBoundary } from "../components/page-error";

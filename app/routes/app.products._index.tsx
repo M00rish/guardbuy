@@ -11,6 +11,7 @@ import { auditEntries } from "../lib/audit/log.server";
 import { currentRuleSet } from "../lib/agent/restock.server";
 import { setManaged } from "../lib/suppliers/directory.server";
 import { usd } from "../lib/format";
+import { Empty, Unavailable } from "../components/ui";
 
 // Products & suppliers (index): every product, whether GuardBuy restocks it, and from whom.
 // "Manage" opens the product's page to link suppliers and set the preferred one.
@@ -19,7 +20,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await authenticate.admin(request);
   const shop = session.shop;
   const [products, links, supplierCount, log] = await Promise.all([
-    productOverview(admin, shop),
+    productOverview(admin, shop).catch((e) => { console.warn(`[products] Shopify unavailable: ${(e as Error).message}`); return null; }),
     db.productSupplier.findMany({ where: { shop }, include: { supplier: true }, orderBy: [{ preferred: "desc" }, { unitPriceCents: "asc" }] }),
     db.supplier.count({ where: { shop } }),
     auditEntries(shop),
@@ -27,7 +28,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const allow = currentRuleSet(log)?.supplierAllowlist ?? null; // null: no rules signed yet
   return {
     supplierCount,
-    products: products.map((p) => ({
+    unavailable: products === null,
+    products: (products ?? []).map((p) => ({
       variantId: p.variantId,
       title: p.title,
       sku: p.sku,
@@ -60,7 +62,7 @@ const VIEWS: { id: View; label: string }[] = [
 ];
 
 export default function Products() {
-  const { products, supplierCount } = useLoaderData<typeof loader>();
+  const { products, supplierCount, unavailable } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
   const [params, setParams] = useSearchParams();
@@ -98,10 +100,14 @@ export default function Products() {
             ))}
           </s-stack>
 
-          {shown.length === 0 ? (
-            <s-text tone="neutral">
-              {products.length === 0 ? "Your Shopify products appear here automatically." : "No products in this view."}
-            </s-text>
+          {unavailable ? (
+            <Unavailable what="your products" />
+          ) : products.length === 0 ? (
+            <Empty heading="No products in your store yet">Products you add in Shopify show up here automatically, ready to switch on for GuardBuy.</Empty>
+          ) : shown.length === 0 ? (
+            <Empty heading={view === "managed" ? "No products switched on yet" : "Every product has a supplier"}>
+              {view === "managed" ? "Switch on a product in All to let GuardBuy restock it." : "Nothing to link here."}
+            </Empty>
           ) : (
             <s-table>
               <s-table-header-row>
@@ -160,3 +166,5 @@ export default function Products() {
 }
 
 export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);
+
+export { PageError as ErrorBoundary } from "../components/page-error";

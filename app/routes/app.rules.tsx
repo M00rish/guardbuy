@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
@@ -9,16 +9,12 @@ import { auditEntries } from "../lib/audit/log.server";
 import { currentRuleSet, defaultRuleSet, signRuleSet } from "../lib/agent/restock.server";
 import { adminWithStaff } from "../lib/merchant/staff.server";
 import { RuleSetSchema } from "../lib/policy/schema";
+import { Empty } from "../components/ui";
 import { usd } from "../lib/format";
+import { readRulesForm, rulesFormErrors, rulesSummary, sameForm, type FormErrors, type NumberField, type RulesForm } from "../lib/policy/rules-form";
 
 // The merchant's spending rules. Signing writes the rules and their fingerprint (hash) to the
 // audit log with the staff member who signed; every decision records which rule set it used.
-
-const FIELD_NAMES: Record<string, string> = {
-  reorderBelowDaysOfCover: "Restock when stock lasts fewer than", targetDaysOfCover: "Buy enough for",
-  maxQuantityMultiple: "Largest order", approvalAboveCents: "Ask me above", weeklySpendCapCents: "Weekly spending cap",
-  cashFloorCents: "Keep at least this in PayPal", maxPriceAboveAvgPct: "Highest price above average", maxPurchasesPer24h: "Purchases per 24 hours",
-};
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, actor } = await adminWithStaff(request);
@@ -42,10 +38,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session, actor } = await adminWithStaff(request);
-  const f = await request.formData();
-  const num = (k: string) => Number(f.get(k));
-  const cents = (k: string) => Math.round(num(k) * 100);
+  const { session, actor, redirect } = await adminWithStaff(request);
+  const form = readRulesForm(await request.formData());
+  const errors = rulesFormErrors(form);
+  if (Object.keys(errors).length > 0) return { ok: false, message: "Check the highlighted rules", errors };
+  const num = (k: NumberField) => Number(form[k]);
+  const cents = (k: NumberField) => Math.round(num(k) * 100);
   const parsed = RuleSetSchema.safeParse({
     version: 1,
     shop: session.shop,
@@ -56,17 +54,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     approvalAboveCents: cents("approvalAbove"),
     weeklySpendCapCents: cents("weeklySpendCap"),
     cashFloorCents: cents("cashFloor"),
-    supplierAllowlist: f.getAll("allow").map(String),
+    supplierAllowlist: form.allow,
     maxQuantityMultiple: num("maxQuantityMultiple"),
     maxPurchasesPer24h: num("maxPurchasesPer24h"),
   });
-  if (!parsed.success) {
-    const issue = parsed.error.issues[0];
-    const field = String(issue.path[0]);
-    return { ok: false, message: field === "supplierAllowlist" ? "Approve at least one supplier" : `Check "${FIELD_NAMES[field] ?? field}"` };
-  }
+  if (!parsed.success) return { ok: false, message: "Check the highlighted rules", errors: {} as FormErrors };
+  const firstSigning = currentRuleSet(await auditEntries(session.shop)) === null;
   const entry = await signRuleSet(session.shop, parsed.data, actor);
-  return { ok: true, message: `Rules signed (audit log entry #${entry.seq})` };
+  // The first signing finishes setup: go to Home, where the agent is now running.
+  if (firstSigning) throw redirect("/app");
+  return { ok: true, message: `Rules signed (audit log entry #${entry.seq})`, errors: {} as FormErrors };
 };
 
 const dollars = (cents: number) => (cents / 100).toFixed(2);
@@ -82,6 +79,29 @@ export default function Rules() {
   }, [fetcher.state, fetcher.data, shopify]);
   const current = history[0];
 
+  // The form's values as last saved, and as the merchant is typing them (read from the form on every input).
+  const saved = useMemo<RulesForm>(() => ({
+    reorderBelowDaysOfCover: String(rules.reorderBelowDaysOfCover), targetDaysOfCover: String(rules.targetDaysOfCover),
+    maxQuantityMultiple: String(rules.maxQuantityMultiple), approvalAbove: dollars(rules.approvalAboveCents),
+    weeklySpendCap: dollars(rules.weeklySpendCapCents), cashFloor: dollars(rules.cashFloorCents),
+    maxPriceAboveAvgPct: String(rules.maxPriceAboveAvgPct), maxPurchasesPer24h: String(rules.maxPurchasesPer24h),
+    allow: rules.supplierAllowlist.filter((id) => suppliers.some((s) => s.id === id)),
+  }), [rules, suppliers]);
+  const formRef = useRef<HTMLFormElement>(null);
+  const [form, setForm] = useState(saved);
+  const [formKey, setFormKey] = useState(0); // bumped to put the fields back to the saved values
+  useEffect(() => setForm(saved), [saved]);
+  const reread = () => formRef.current && setForm(readRulesForm(new FormData(formRef.current)));
+
+  const errors: FormErrors = { ...rulesFormErrors(form), ...(fetcher.data?.ok === false ? fetcher.data.errors : {}) };
+  const changed = !sameForm(form, saved);
+  const canSign = Object.keys(rulesFormErrors(form)).length === 0 && (changed || !signed);
+  const names = suppliers.filter((s) => form.allow.includes(s.id)).map((s) => s.name);
+
+  const field = (name: NumberField, label: string, details: string, props: { min?: number; max?: number; step: number }) => (
+    <s-number-field label={label} name={name} value={saved[name]} details={details} {...props} {...(errors[name] ? { error: errors[name] } : {})} />
+  );
+
   return (
     <s-page heading="Spending rules" inlineSize="large">
       <s-section>
@@ -93,20 +113,17 @@ export default function Rules() {
             </s-text>
           </s-stack>
         ) : (
-          <s-banner tone="info" heading="These are suggested starting rules">Nothing is bought until you sign rules.</s-banner>
+          <s-banner tone="info" heading="These are suggested starting rules">Nothing is bought until you sign rules. Adjust them, then sign at the bottom.</s-banner>
         )}
       </s-section>
 
-      <fetcher.Form method="post">
+      <fetcher.Form key={formKey} method="post" ref={formRef} onInput={reread} onChange={reread}>
         <s-section heading="When to buy, and how much">
           <s-query-container>
             <s-grid gridTemplateColumns="@container (inline-size <= 640px) 1fr, 1fr 1fr 1fr" gap="base">
-              <s-number-field label="Restock when stock lasts fewer than (days)" name="reorderBelowDaysOfCover" value={String(rules.reorderBelowDaysOfCover)} min={1} step={1}
-                details="Based on each product's recent sales" />
-              <s-number-field label="Buy enough for (days)" name="targetDaysOfCover" value={String(rules.targetDaysOfCover)} min={1} step={1}
-                details="The agent's suggested quantity aims for this" />
-              <s-number-field label="Largest order (times the usual)" name="maxQuantityMultiple" value={String(rules.maxQuantityMultiple)} min={1} step={0.5}
-                details="Blocks orders this many times above a supplier's usual order" />
+              {field("reorderBelowDaysOfCover", "Restock when stock lasts fewer than (days)", "Based on each product's recent sales", { min: 1, step: 1 })}
+              {field("targetDaysOfCover", "Buy enough for (days)", "The agent's suggested quantity aims for this", { min: 1, step: 1 })}
+              {field("maxQuantityMultiple", "Largest order (times the usual)", "Blocks orders this many times above a supplier's usual order", { min: 1, step: 0.5 })}
             </s-grid>
           </s-query-container>
         </s-section>
@@ -114,16 +131,11 @@ export default function Rules() {
         <s-section heading="Money">
           <s-query-container>
             <s-grid gridTemplateColumns="@container (inline-size <= 640px) 1fr, 1fr 1fr 1fr" gap="base">
-              <s-number-field label="Ask me above ($)" name="approvalAbove" value={dollars(rules.approvalAboveCents)} min={0} step={1}
-                details="Bigger purchases wait in Approvals" />
-              <s-number-field label="Weekly spending cap ($)" name="weeklySpendCap" value={dollars(rules.weeklySpendCapCents)} min={0} step={1}
-                details="Rolling 7 days, all suppliers" />
-              <s-number-field label="Keep at least this in PayPal ($)" name="cashFloor" value={dollars(rules.cashFloorCents)} min={0} step={1}
-                details="Purchases that would go below are blocked" />
-              <s-number-field label="Highest price above 30-day average (%)" name="maxPriceAboveAvgPct" value={String(rules.maxPriceAboveAvgPct)} min={0} max={100} step={1}
-                details="Stops sudden price jumps" />
-              <s-number-field label="Purchases per 24 hours" name="maxPurchasesPer24h" value={String(rules.maxPurchasesPer24h)} min={1} step={1}
-                details="Across all products" />
+              {field("approvalAbove", "Ask me above ($)", "Bigger purchases wait in Approvals", { min: 0, step: 1 })}
+              {field("weeklySpendCap", "Weekly spending cap ($)", "Rolling 7 days, all suppliers", { min: 0, step: 1 })}
+              {field("cashFloor", "Keep at least this in PayPal ($)", "Purchases that would go below are blocked", { min: 0, step: 1 })}
+              {field("maxPriceAboveAvgPct", "Highest price above 30-day average (%)", "Stops sudden price jumps", { min: 0, max: 100, step: 1 })}
+              {field("maxPurchasesPer24h", "Purchases per 24 hours", "Across all products", { min: 1, step: 1 })}
             </s-grid>
           </s-query-container>
         </s-section>
@@ -131,21 +143,34 @@ export default function Rules() {
         <s-section heading="Approved suppliers">
           <s-stack gap="small-200">
             {suppliers.length === 0 ? (
-              <s-text tone="neutral">Add suppliers first. <s-link href="/app/suppliers">Add a supplier</s-link></s-text>
+              <Empty heading="No suppliers yet" action={{ label: "Add a supplier", href: "/app/suppliers" }}>
+                GuardBuy can only buy from suppliers you add and approve here.
+              </Empty>
             ) : (
               suppliers.map((s) => (
                 <s-checkbox key={s.id} name="allow" value={s.id} label={s.name}
                   details={s.products ? `Linked to ${s.products} ${s.products === 1 ? "product" : "products"}` : "Not linked to any product yet"}
-                  {...(rules.supplierAllowlist.includes(s.id) ? { checked: true } : {})} />
+                  {...(saved.allow.includes(s.id) ? { checked: true } : {})} />
               ))
             )}
-            <s-text tone="neutral">Purchases from any supplier you don't tick are blocked, even if it's linked to a product.</s-text>
+            {errors.allow && suppliers.length > 0 ? (
+              <s-text tone="critical">{errors.allow}</s-text>
+            ) : (
+              <s-text tone="neutral">Purchases from any supplier you don't tick are blocked, even if it's linked to a product.</s-text>
+            )}
           </s-stack>
         </s-section>
 
-        <s-section>
-          <s-stack direction="inline" gap="base" alignItems="center">
-            <s-button type="submit" variant="primary" disabled={busy}>{signed ? "Sign updated rules" : "Sign these rules"}</s-button>
+        <s-section heading="In plain words">
+          <s-stack gap="base">
+            <s-text>{rulesSummary(form, names)}</s-text>
+            <s-stack direction="inline" gap="base" alignItems="center">
+              <s-button type="submit" variant="primary" disabled={busy || !canSign} {...(busy ? { loading: true } : {})}>
+                {signed ? "Sign updated rules" : "Sign these rules"}
+              </s-button>
+              {changed && signed && <s-badge tone="caution">Unsaved changes</s-badge>}
+              {signed && changed && <s-button variant="tertiary" disabled={busy} onClick={() => { setFormKey((k) => k + 1); setForm(saved); }}>Discard</s-button>}
+            </s-stack>
             <s-text tone="neutral">Signing records these rules, their fingerprint and your name in the audit log. They apply from the next purchase.</s-text>
           </s-stack>
         </s-section>
@@ -185,3 +210,5 @@ export default function Rules() {
 }
 
 export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);
+
+export { PageError as ErrorBoundary } from "../components/page-error";

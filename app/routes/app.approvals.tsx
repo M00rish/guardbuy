@@ -10,7 +10,7 @@ import { ExecutionRefused } from "../lib/agent/execute.server";
 import { feedNames } from "../lib/merchant/dashboard.server";
 import { sweepPayPalOrders } from "../lib/paypal/orders-sweep.server";
 import { usd } from "../lib/format";
-import { ago, plural, Row } from "../components/ui";
+import { ago, Empty, plural, Row } from "../components/ui";
 
 // Purchases waiting for a person. Only a signed-in staff member (verified Shopify session token)
 // can act, and their staff id is written to the audit log with the decision.
@@ -69,10 +69,9 @@ export default function Approvals() {
     <s-page heading="Approvals" inlineSize="large">
       {cards.length === 0 ? (
         <s-section>
-          <s-stack gap="small-200">
-            <s-heading>Nothing is waiting for you</s-heading>
-            <s-text tone="neutral">Purchases above your approval limit, or that a rule flags, wait here until you decide.</s-text>
-          </s-stack>
+          <Empty heading="Nothing is waiting for you">
+            Purchases above your approval limit, or that a rule flags, wait here until you decide. Each one expires after 48 hours.
+          </Empty>
         </s-section>
       ) : (
         <>
@@ -160,3 +159,5 @@ function CardView({ card }: { card: Card }) {
 }
 
 export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);
+
+export { PageError as ErrorBoundary } from "../components/page-error";

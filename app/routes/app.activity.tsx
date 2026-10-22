@@ -7,7 +7,7 @@ import { auditEntries, verifyChain } from "../lib/audit/log.server";
 import { toFeed } from "../lib/audit/feed.server";
 import { feedNames } from "../lib/merchant/dashboard.server";
 import { adminWithStaff } from "../lib/merchant/staff.server";
-import { ago, FEED_LABEL, FEED_TONE, Filters } from "../components/ui";
+import { ago, Empty, FEED_LABEL, FEED_TONE, Filters } from "../components/ui";
 
 // Everything the agent did, from the hash-chained log. "Verify the log" recomputes every hash from
 // the first entry, so an edited, deleted or reordered row shows up as broken.
@@ -72,7 +72,9 @@ export default function Activity() {
             ]}
           />
           {shown.length === 0 ? (
-            <s-text tone="neutral">Nothing here yet.</s-text>
+            <Empty heading={view === "all" ? "No activity yet" : "Nothing in this view yet"}>
+              {view === "all" ? "Low stock, the agent's proposals, your rules' decisions and payments show up here as they happen." : "Try All to see everything that happened."}
+            </Empty>
           ) : (
             <s-table>
               <s-table-header-row>
@@ -112,3 +114,5 @@ export default function Activity() {
 }
 
 export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);
+
+export { PageError as ErrorBoundary } from "../components/page-error";

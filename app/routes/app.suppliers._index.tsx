@@ -10,7 +10,7 @@ import { authenticate } from "../shopify.server";
 import { auditEntries } from "../lib/audit/log.server";
 import { currentRuleSet } from "../lib/agent/restock.server";
 import { saveSupplier } from "../lib/suppliers/directory.server";
-import { ago } from "../components/ui";
+import { ago, Empty } from "../components/ui";
 
 // Suppliers (index): who GuardBuy may pay, at which PayPal address, for how many products, and
 // whether the merchant's rules approve them. Editing happens on each supplier's page.
@@ -79,12 +79,11 @@ export default function Suppliers() {
 
       <s-section heading="Your suppliers">
         {suppliers.length === 0 ? (
-          <s-text tone="neutral">No suppliers yet. Add the ones you buy from, then link them to products.</s-text>
+          <Empty heading="No suppliers yet">Add the suppliers you buy from above, with the PayPal email they get paid at. Then link them to products.</Empty>
         ) : (
           <s-table>
             <s-table-header-row>
-              <s-table-header listSlot="primary">Supplier</s-table-header>
-              <s-table-header>Paid at (PayPal)</s-table-header>
+              <s-table-header listSlot="primary">Supplier · paid at (PayPal)</s-table-header>
               <s-table-header format="numeric">Products</s-table-header>
               <s-table-header listSlot="secondary">Status</s-table-header>
               <s-table-header>Actions</s-table-header>
@@ -92,8 +91,12 @@ export default function Suppliers() {
             <s-table-body>
               {suppliers.map((s) => (
                 <s-table-row key={s.id}>
-                  <s-table-cell><s-text type="strong">{s.name}</s-text></s-table-cell>
-                  <s-table-cell><s-text tone="neutral">{s.paypalEmail}</s-text></s-table-cell>
+                  <s-table-cell>
+                    <s-stack gap="none">
+                      <s-text type="strong">{s.name}</s-text>
+                      <s-text tone="neutral">{s.paypalEmail}</s-text>
+                    </s-stack>
+                  </s-table-cell>
                   <s-table-cell>{s.products}</s-table-cell>
                   <s-table-cell>
                     <s-stack direction="inline" gap="small-200">
@@ -114,3 +117,5 @@ export default function Suppliers() {
 }
 
 export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);
+
+export { PageError as ErrorBoundary } from "../components/page-error";

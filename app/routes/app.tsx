@@ -1,7 +1,9 @@
+import { useEffect } from "react";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Outlet, useLoaderData, useRouteError } from "react-router";
+import { Outlet, useLoaderData, useNavigation, useRouteError } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
+import { useAppBridge } from "@shopify/app-bridge-react";
 
 import { authenticate } from "../shopify.server";
 
@@ -11,6 +13,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   // eslint-disable-next-line no-undef
   return { apiKey: process.env.SHOPIFY_API_KEY || "" };
 };
+
+/** Shows Shopify's loading bar at the top of the admin while a page or action is loading. */
+function LoadingBar() {
+  const navigation = useNavigation();
+  const shopify = useAppBridge();
+  const loading = navigation.state !== "idle";
+  useEffect(() => {
+    shopify.loading(loading);
+  }, [loading, shopify]);
+  return null;
+}
 
 export default function App() {
   const { apiKey } = useLoaderData<typeof loader>();
@@ -26,12 +39,14 @@ export default function App() {
         <s-link href="/app/activity">Activity</s-link>
         <s-link href="/app/protection">Protection</s-link>
       </s-app-nav>
+      <LoadingBar />
       <Outlet />
     </AppProvider>
   );
 }
 
 // Shopify needs React Router to catch some thrown responses, so that their headers are included in the response.
+// Other errors are caught by each page's own ErrorBoundary (components/page-error.tsx).
 export function ErrorBoundary() {
   return boundary.error(useRouteError());
 }

@@ -8,7 +8,7 @@ import { scoreboard } from "../lib/agent/scoreboard.server";
 import { RULE_HELP, RULE_LABELS } from "../lib/policy/rules";
 import { usd } from "../lib/format";
 import { setShareVerifyDetails, shareVerifyDetails } from "../lib/audit/verify.server";
-import { Metric, Metrics } from "../components/ui";
+import { Empty, Metric, Metrics } from "../components/ui";
 
 // What protects the merchant's money: every rule and how often it fired, what was blocked or sent
 // to a person, and the results of attack tests. Computed from the hash-chained log only.
@@ -91,10 +91,10 @@ export default function Protection() {
 
       <s-section heading="Attack tests">
         {attacks.tried + attacks.simulated.tried === 0 ? (
-          <s-text tone="neutral">
-            No attack tests on this store. They run in the demo console, where a dishonest supplier tries prompt injection,
-            fake urgency, a changed payee and more against the real AI and these rules.
-          </s-text>
+          <Empty heading="No attack tests on this store">
+            They run in the demo console, where a dishonest supplier tries prompt injection, fake urgency, a changed payee
+            and more against the real AI and these rules.
+          </Empty>
         ) : (
           <s-stack gap="base">
             <Metrics>
@@ -139,3 +139,5 @@ export default function Protection() {
 }
 
 export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);
+
+export { PageError as ErrorBoundary } from "../components/page-error";

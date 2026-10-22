@@ -11,6 +11,7 @@ import { usd } from "../lib/format";
 import { auditEntries } from "../lib/audit/log.server";
 import { currentRuleSet } from "../lib/agent/restock.server";
 import { daysOfCover, salesPerDay } from "../lib/inventory/sales.server";
+import { Empty } from "../components/ui";
 
 // One product: whether GuardBuy restocks it, which suppliers it may buy it from, on what terms,
 // and which one is preferred.
@@ -138,7 +139,7 @@ export default function ProductSuppliers() {
           </s-box>
         )}
         {p.links.length === 0 ? (
-          <s-text tone="neutral">No suppliers linked yet. The agent only ever sees the suppliers you link here.</s-text>
+          <Empty heading="No suppliers linked yet">The agent only ever sees the suppliers you link below, at the prices you enter.</Empty>
         ) : (
           <s-table>
             <s-table-header-row>
@@ -209,3 +210,5 @@ export default function ProductSuppliers() {
 }
 
 export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);
+
+export { PageError as ErrorBoundary } from "../components/page-error";

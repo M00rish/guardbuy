@@ -11,7 +11,7 @@ import { auditEntries } from "../lib/audit/log.server";
 import { currentRuleSet } from "../lib/agent/restock.server";
 import { removeSupplier, saveSupplier } from "../lib/suppliers/directory.server";
 import { usd } from "../lib/format";
-import { Row } from "../components/ui";
+import { Empty, Row } from "../components/ui";
 
 // One supplier: where it's paid, which products it supplies, and whether the rules approve it.
 // Changing the PayPal email is the sensitive edit here, so the page says what it does.
@@ -107,7 +107,9 @@ export default function Supplier() {
 
       <s-section heading="Products they supply">
         {s.products.length === 0 ? (
-          <s-text tone="neutral">Not linked to any product yet. <s-link href="/app/products">Link them on Products & suppliers</s-link></s-text>
+          <Empty heading="Not linked to any product yet" action={{ label: "Link to a product", href: "/app/products" }}>
+            The agent only buys from this supplier for products you link it to, at the price you enter.
+          </Empty>
         ) : (
           <s-table>
             <s-table-header-row>
@@ -151,3 +153,5 @@ export default function Supplier() {
 }
 
 export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);
+
+export { PageError as ErrorBoundary } from "../components/page-error";
