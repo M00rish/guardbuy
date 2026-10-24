@@ -1,7 +1,7 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "dce5dc4798076e593ee92fdb94304477"
-application_url = "https://example.com"
+application_url = "https://guardbuy.onrender.com"
 embedded = true
 name = "GuardBuy"
 
@@ -41,7 +41,10 @@ api_version = "2026-10" # keep in step with apiVersion in app/shopify.server.ts
   topics = [ "refunds/create" ]
 
 [auth]
-redirect_urls = [ ]
+redirect_urls = [
+  "https://guardbuy.onrender.com/auth/callback",
+  "https://guardbuy.onrender.com/auth/shopify/callback",
+]
 
 # Judges reach GuardBuy on the storefront at https://<shop>/apps/guardbuy (no Shopify login needed)
 [app_proxy]
