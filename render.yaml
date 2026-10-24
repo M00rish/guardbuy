@@ -6,7 +6,8 @@ services:
     name: guardbuy
     runtime: node
     plan: free
-    region: oregon
+    # Same region as the Neon database (us-east-2); oregon would add ~70 ms to every query.
+    region: ohio
     buildCommand: npm ci && npx prisma generate && npm run build
     startCommand: npx prisma migrate deploy && npm run start
     healthCheckPath: /healthz
