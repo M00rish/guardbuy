@@ -1,45 +1,45 @@
-name: Hourly job
+# name: Hourly job
 
-# Calls GuardBuy's hourly job (reconcile PayPal, sweep managed products) and publishes each
-# store's latest audit-log fingerprint in this repo, outside GuardBuy's database: a later rewrite
-# of the log can't match fingerprints already committed here.
-# Needs repository secrets GUARDBUY_URL (e.g. https://guardbuy.onrender.com) and GUARDBUY_JOBS_SECRET.
+# # Calls GuardBuy's hourly job (reconcile PayPal, sweep managed products) and publishes each
+# # store's latest audit-log fingerprint in this repo, outside GuardBuy's database: a later rewrite
+# # of the log can't match fingerprints already committed here.
+# # Needs repository secrets GUARDBUY_URL (e.g. https://guardbuy.onrender.com) and GUARDBUY_JOBS_SECRET.
 
-on:
-  schedule:
-    - cron: "7 * * * *"
-  workflow_dispatch:
+# on:
+#   schedule:
+#     - cron: "7 * * * *"
+#   workflow_dispatch:
 
-permissions:
-  contents: write
+# permissions:
+#   contents: write
 
-concurrency: hourly-job
+# concurrency: hourly-job
 
-jobs:
-  run:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      - name: Run the hourly job
-        env:
-          URL: ${{ secrets.GUARDBUY_URL }}
-          SECRET: ${{ secrets.GUARDBUY_JOBS_SECRET }}
-        run: |
-          # The free server sleeps; the first request wakes it (up to ~1 min).
-          curl -fsS --retry 3 --retry-delay 20 --max-time 90 "$URL/healthz" > /dev/null
-          curl -fsS --max-time 600 -X POST -H "Authorization: Bearer $SECRET" "$URL/jobs/hourly" > job.json
-          python3 -c "import json; d = json.load(open('job.json')); print(json.dumps(d['report'], indent=1))"
-      - name: Publish fingerprints
-        run: |
-          mkdir -p anchors
-          python3 - <<'PY'
-          import json
-          d = json.load(open("job.json"))
-          with open("anchors/fingerprints.jsonl", "a") as f:
-              for fp in d["fingerprints"]:
-                  f.write(json.dumps({"published": d["at"], **fp}) + "\n")
-          PY
-          git config user.name "guardbuy-bot"
-          git config user.email "guardbuy-bot@users.noreply.github.com"
-          git add anchors/fingerprints.jsonl
-          git diff --cached --quiet || (git commit -m "Publish audit-log fingerprints $(date -u +%FT%H:%MZ)" && git push)
+# jobs:
+#   run:
+#     runs-on: ubuntu-latest
+#     steps:
+#       - uses: actions/checkout@v5
+#       - name: Run the hourly job
+#         env:
+#           URL: ${{ secrets.GUARDBUY_URL }}
+#           SECRET: ${{ secrets.GUARDBUY_JOBS_SECRET }}
+#         run: |
+#           # The free server sleeps; the first request wakes it (up to ~1 min).
+#           curl -fsS --retry 3 --retry-delay 20 --max-time 90 "$URL/healthz" > /dev/null
+#           curl -fsS --max-time 600 -X POST -H "Authorization: Bearer $SECRET" "$URL/jobs/hourly" > job.json
+#           python3 -c "import json; d = json.load(open('job.json')); print(json.dumps(d['report'], indent=1))"
+#       - name: Publish fingerprints
+#         run: |
+#           mkdir -p anchors
+#           python3 - <<'PY'
+#           import json
+#           d = json.load(open("job.json"))
+#           with open("anchors/fingerprints.jsonl", "a") as f:
+#               for fp in d["fingerprints"]:
+#                   f.write(json.dumps({"published": d["at"], **fp}) + "\n")
+#           PY
+#           git config user.name "guardbuy-bot"
+#           git config user.email "guardbuy-bot@users.noreply.github.com"
+#           git add anchors/fingerprints.jsonl
+#           git diff --cached --quiet || (git commit -m "Publish audit-log fingerprints $(date -u +%FT%H:%MZ)" && git push)
