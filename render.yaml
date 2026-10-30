@@ -17,7 +17,7 @@ services:
       - key: NODE_VERSION
         value: "22"
       - key: SCOPES
-        value: read_products,read_orders,write_inventory
+        value: read_products,read_orders,write_inventory,write_app_proxy
       - key: SHOPIFY_APP_URL # the Render URL, e.g. https://guardbuy.onrender.com
         sync: false
       - key: SHOPIFY_API_KEY

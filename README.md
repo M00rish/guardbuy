@@ -179,9 +179,11 @@ Secrets are set in the Render dashboard.
 
 Steps:
 1. Set Render's `DATABASE_URL` to the `guardbuy_app` connection string from your `.env` (see *Run it locally*), and `DIRECT_URL` to the owner's direct connection.
-2. Set `application_url` in `shopify.app.toml` to the Render URL.
-3. Run `npm run deploy`.
+2. Set `application_url` in `shopify.app.toml` to the Render URL and `[app_proxy].url` to that URL plus `/proxy`. Keep `write_app_proxy` in the required scopes.
+3. Run `npm run deploy` to release the Shopify configuration. Reopen GuardBuy in Shopify admin and approve any requested permission update. This is separate from deploying the web server to Render.
 4. In GitHub, add the `GUARDBUY_URL` and `GUARDBUY_JOBS_SECRET` secrets (the same value as `JOBS_SECRET`) for `.github/workflows/hourly.yml`. That workflow calls `/jobs/hourly` and commits the fingerprint file.
+
+The shared demo config disables automatic URL updates during `shopify app dev`. Use a separate app/config for tunnel development so local sessions cannot replace the judge console's hosted destination. After deployment, verify the active Shopify app version points `/apps/guardbuy` to `https://guardbuy.onrender.com/proxy`. Test through the storefront: opening `/proxy` directly without Shopify's signature correctly returns 400.
 
 To reset the demo (stock back to the start, sandbox balance topped up):
 

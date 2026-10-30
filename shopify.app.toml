@@ -8,9 +8,10 @@ name = "GuardBuy"
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 # Least privilege: read products and orders (daily sales totals, refunds); write_inventory only so the
-# demo can reset stock (judge mode). Seeding a new dev store needs write_products, write_orders and
+# demo can reset stock (judge mode); write_app_proxy configures the storefront judge console.
+# Seeding a new dev store needs write_products, write_orders and
 # write_publications added temporarily (scripts/seed-dev-store.ts).
-scopes = "read_products,read_orders,write_inventory"
+scopes = "read_products,read_orders,write_inventory,write_app_proxy"
 optional_scopes = [ ]
 use_legacy_install_flow = false
 
@@ -48,10 +49,10 @@ redirect_urls = [
 
 # Judges reach GuardBuy on the storefront at https://<shop>/apps/guardbuy (no Shopify login needed)
 [app_proxy]
-url = "/proxy"
+url = "https://guardbuy.onrender.com/proxy"
 prefix = "apps"
 subpath = "guardbuy"
 
 [build]
-# Point the app URL and redirect URLs at the current dev tunnel on every `shopify app dev`
-automatically_update_urls_on_dev = true
+# Keep the shared hosted demo stable. Use a separate app/config for a development tunnel.
+automatically_update_urls_on_dev = false
