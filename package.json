@@ -46,6 +46,7 @@
     "zod": "^4.6.6"
   },
   "devDependencies": {
+    "@aws-sdk/client-s3": "^3.1161.0",
     "@shopify/api-codegen-preset": "^1.2.0",
     "@shopify/polaris-types": "^1.0.1",
     "@types/eslint": "^9.6.1",

@@ -67,7 +67,7 @@ Rules are signed by a Shopify staff member: their id and the rules' SHA-256 fing
 - **Append-only audit log, enforced in three places.**
   - *Hash chain:* each entry's hash covers the previous hash, so editing, deleting or reordering any past entry breaks every hash after it. Home and Activity verify the whole chain on load.
   - *Database:* the running app connects as `guardbuy_app`, a role that can read and add audit entries but has no UPDATE, DELETE or TRUNCATE privilege on them. A trigger also rejects edits and deletes from the owner role, unless the transaction explicitly opts in (only check scripts cleaning up throwaway test shops do that). `scripts/check-audit-readonly.ts` proves both.
-  - *Outside the database:* the latest fingerprint of each store is published every hour (`anchors/fingerprints.jsonl`, committed by GitHub Actions).
+  - *Outside the database:* historical fingerprints are in `anchors/fingerprints.jsonl`. The independent R2 checkpoint workflow is prepared but disabled until storage, retention and credentials are configured. It checks database history against existing external checkpoints before publishing changes. The app's Home/Activity checks currently verify internal consistency only; they do not establish external verification. See [checkpoint setup](anchors/README.md).
 - **Re-check at payment.** Approvals expire after 48 hours, and the rules and balance are checked again just before money moves.
 - **One payment per decision.** A database lock (`PaymentLock`) and PayPal idempotency keys mean a double click, a second tab or a retry can't pay twice.
 - **Approve in PayPal.** Only allow-listed PayPal payer ids can approve (`GUARDBUY_APPROVER_PAYER_IDS`). Cancelled, expired and wrong-payer orders are closed without paying.
@@ -181,7 +181,7 @@ Steps:
 1. Set Render's `DATABASE_URL` to the `guardbuy_app` connection string from your `.env` (see *Run it locally*), and `DIRECT_URL` to the owner's direct connection.
 2. Set `application_url` in `shopify.app.toml` to the Render URL and `[app_proxy].url` to that URL plus `/proxy`. Keep `write_app_proxy` in the required scopes.
 3. Run `npm run deploy` to release the Shopify configuration. Reopen GuardBuy in Shopify admin and approve any requested permission update. This is separate from deploying the web server to Render.
-4. In GitHub, add the `GUARDBUY_URL` and `GUARDBUY_JOBS_SECRET` secrets (the same value as `JOBS_SECRET`) for `.github/workflows/hourly.yml`. That workflow calls `/jobs/hourly` and commits the fingerprint file.
+4. Configure the optional independent audit workflow following [checkpoint setup](anchors/README.md). It connects directly to Neon and R2, never calls Render or payment/stock actions, and does not commit fingerprints to `main`. Keep it disabled until setup and bootstrap verification are complete.
 
 The shared demo config disables automatic URL updates during `shopify app dev`. Use a separate app/config for tunnel development so local sessions cannot replace the judge console's hosted destination. After deployment, verify the active Shopify app version points `/apps/guardbuy` to `https://guardbuy.onrender.com/proxy`. Test through the storefront: opening `/proxy` directly without Shopify's signature correctly returns 400.
 

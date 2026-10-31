@@ -1,0 +1,47 @@
+name: External audit checkpoints
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"
+  workflow_dispatch:
+    inputs:
+      bootstrap:
+        description: "Explicitly initialize missing R2 streams after reviewing the pinned baselines"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: external-audit-checkpoints
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    # Enable only after R2 retention and dedicated credentials have been configured.
+    if: vars.AUDIT_CHECKPOINTS_ENABLED == 'true' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - name: Verify external history and publish changes
+        env:
+          AUDIT_DATABASE_URL: ${{ secrets.AUDIT_DATABASE_URL }}
+          AUDIT_R2_ACCOUNT_ID: ${{ vars.AUDIT_R2_ACCOUNT_ID || secrets.AUDIT_R2_ACCOUNT_ID }}
+          AUDIT_R2_BUCKET: ${{ vars.AUDIT_R2_BUCKET || secrets.AUDIT_R2_BUCKET }}
+          AUDIT_R2_ACCESS_KEY_ID: ${{ secrets.AUDIT_R2_ACCESS_KEY_ID }}
+          AUDIT_R2_SECRET_ACCESS_KEY: ${{ secrets.AUDIT_R2_SECRET_ACCESS_KEY }}
+          AUDIT_BOOTSTRAP: ${{ github.event_name == 'workflow_dispatch' && inputs.bootstrap }}
+        run: |
+          if [ "$AUDIT_BOOTSTRAP" = "true" ]; then
+            node --import tsx scripts/publish-checkpoints.ts --bootstrap
+          else
+            node --import tsx scripts/publish-checkpoints.ts
+          fi
