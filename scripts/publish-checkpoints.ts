@@ -37,11 +37,20 @@ async function main() {
     db = new PrismaClient({ datasourceUrl: required("AUDIT_DATABASE_URL"), log: [] });
     const privileges = await db.$queryRaw<{ safe: boolean }[]>`
       SELECT current_user = 'guardbuy_auditor'
-        AND has_table_privilege(current_user, '"AuditEntry"', 'SELECT')
-        AND NOT has_table_privilege(current_user, '"AuditEntry"', 'INSERT')
-        AND NOT has_table_privilege(current_user, '"AuditEntry"', 'UPDATE')
-        AND NOT has_table_privilege(current_user, '"AuditEntry"', 'DELETE')
-        AND NOT has_table_privilege(current_user, '"AuditEntry"', 'TRUNCATE') AS safe`;
+        AND current_setting('default_transaction_read_only') = 'on'
+        AND EXISTS (SELECT 1 FROM pg_roles WHERE rolname = current_user
+          AND NOT rolsuper AND NOT rolcreatedb AND NOT rolcreaterole
+          AND NOT rolreplication AND NOT rolbypassrls)
+        AND NOT EXISTS (SELECT 1 FROM pg_auth_members m JOIN pg_roles r ON r.oid = m.member
+          WHERE r.rolname = current_user)
+        AND NOT has_database_privilege(current_user, current_database(), 'CREATE')
+        AND NOT has_schema_privilege(current_user, 'public', 'CREATE')
+        AND has_table_privilege(current_user, 'public."AuditEntry"', 'SELECT')
+        AND NOT EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public'
+          AND ((tablename <> 'AuditEntry' AND has_table_privilege(current_user,
+            format('%I.%I', schemaname, tablename), 'SELECT'))
+          OR has_table_privilege(current_user, format('%I.%I', schemaname, tablename),
+            'INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'))) AS safe`;
     if (!privileges[0]?.safe) throw new CheckpointError("Use the dedicated read-only guardbuy_auditor role");
     // One repeatable-read snapshot: concurrent appends cannot make a stream look truncated.
     phase = "database snapshot";

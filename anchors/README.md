@@ -13,6 +13,14 @@ The workflow runs at minute 17 every six hours (GitHub schedules may be delayed)
 5. Review `checkpoint-streams.json`. Each store is explicitly enrolled and pinned to an existing trusted sequence/hash from the historical repository checkpoints. New enrollment requires a separately reviewed baseline; there is no automatic discovery from a potentially compromised database. Store identifiers are hashed in R2 object paths and payloads, but this is pseudonymization, not secrecy against guessing.
 6. Leave repository variable `AUDIT_CHECKPOINTS_ENABLED` unset/false during setup. Manual dispatch works while the schedule is disabled. Manually run **External audit checkpoints** with `bootstrap=true` once, after reviewing baselines. Bootstrap still verifies all hashes and the pinned baseline. Existing checkpoints are always verified, including on bootstrap. Confirm the workflow summary, then manually run again with bootstrap false: it must report unchanged and create no new checkpoint. Only then set `AUDIT_CHECKPOINTS_ENABLED=true`. Scheduled runs never bootstrap missing state.
 
+### Credential setup without sharing passwords
+
+The production `guardbuy_auditor` role was created through SQL on 31 October 2026, with login enabled and no password assigned. Its effective permissions were checked: it reads only `AuditEntry` among app tables, cannot modify any app table or create database/schema objects, and has no inherited roles or administrative flags. Read-only transactions and a 60-second statement timeout are its defaults. The historical sequence-13 pin matches the stored audit entry; full hash recomputation still requires the workflow to pass.
+
+To finish credential setup, the account owner resets **only this role's password** in Neon: GuardBuy → production → Postgres database → Roles → `guardbuy_auditor` → Reset password. In Connect, choose `neondb`, `guardbuy_auditor`, and pooling off. Copy the connection string directly into the repository's GitHub Actions secret `AUDIT_DATABASE_URL`. Do not paste it into chat or replace Render's app connection with it. If creating a fresh role using the SQL file, also enable LOGIN when setting its password; that file deliberately starts with NOLOGIN.
+
+Create limited roles with SQL. [Neon's role documentation](https://neon.com/docs/manage/roles) explains that roles created with its Console/API/CLI inherit `neon_superuser`. A password reset is different from creating a new role. The workflow checks the reader's role flags, memberships and app-table permissions each run and rejects expanded privileges.
+
 ## Security and operation
 
 - Each object contains version, hashed stream ID, sequence, audit hash, publication time and the digest of the previous checkpoint. Conditional object creation rejects replacement; locked duplicate writes are read back and must match. No purchase contents or credentials are uploaded.
