@@ -6,7 +6,7 @@ import { R2CheckpointStore } from "./lib/r2-checkpoints";
 
 // Deliberately does not load .env, app/db.server, Shopify or payment modules.
 function required(name: string) {
-  const value = process.env[name];
+  const value = process.env[name]?.trim();
   if (!value) throw new Error(`Missing ${name}`);
   return value;
 }
@@ -17,10 +17,15 @@ async function main() {
   const streams = parseStreams(JSON.parse(await readFile("anchors/checkpoint-streams.json", "utf8")));
   const account = required("AUDIT_R2_ACCOUNT_ID");
   if (!/^[a-f0-9]{32}$/.test(account)) throw new Error("Invalid R2 account ID");
+  const accessKeyId = required("AUDIT_R2_ACCESS_KEY_ID");
+  const secretAccessKey = required("AUDIT_R2_SECRET_ACCESS_KEY");
+  if (![accessKeyId, secretAccessKey].every((v) => /^[\x21-\x7e]+$/.test(v))) {
+    throw new Error("Invalid R2 credentials: remove embedded whitespace and copy only the access key ID and secret access key");
+  }
   let db: PrismaClient | undefined;
   const s3 = new S3Client({
     region: "auto", endpoint: `https://${account}.r2.cloudflarestorage.com`,
-    credentials: { accessKeyId: required("AUDIT_R2_ACCESS_KEY_ID"), secretAccessKey: required("AUDIT_R2_SECRET_ACCESS_KEY") },
+    credentials: { accessKeyId, secretAccessKey },
     maxAttempts: 3, requestChecksumCalculation: "WHEN_REQUIRED", responseChecksumValidation: "WHEN_REQUIRED",
   });
   try {
