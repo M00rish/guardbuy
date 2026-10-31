@@ -1,5 +1,8 @@
 import { canonicalJson, sha256Hex } from "../../app/lib/policy/hash";
 
+// Only these deliberate, data-free errors may be shown in Actions logs.
+export class CheckpointError extends Error {}
+
 export type AuditRow = { shop: string; seq: number; at: string; event: unknown; prevHash: string; hash: string };
 export type Stream = { shop: string; baseline: { seq: number; hash: string } };
 export type Checkpoint = {
@@ -17,15 +20,15 @@ export const checkpointKey = (checkpoint: Pick<Checkpoint, "stream" | "seq">) =>
   `checkpoints/v1/${checkpoint.stream}/${String(checkpoint.seq).padStart(12, "0")}.json`;
 
 export function parseStreams(value: unknown): Stream[] {
-  if (!Array.isArray(value) || !value.length) throw new Error("Configure at least one trusted audit stream");
+  if (!Array.isArray(value) || !value.length) throw new CheckpointError("Configure at least one trusted audit stream");
   const streams = value as Stream[];
   for (const s of streams) {
     if (!s || !/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(s.shop) ||
         !Number.isSafeInteger(s.baseline?.seq) || s.baseline.seq < 0 || !HASH.test(s.baseline.hash)) {
-      throw new Error("Invalid audit stream or pinned baseline");
+      throw new CheckpointError("Invalid audit stream or pinned baseline");
     }
   }
-  if (new Set(streams.map((s) => s.shop)).size !== streams.length) throw new Error("Duplicate audit stream");
+  if (new Set(streams.map((s) => s.shop)).size !== streams.length) throw new CheckpointError("Duplicate audit stream");
   return streams;
 }
 
@@ -34,7 +37,7 @@ export function parseCheckpoint(value: unknown): Checkpoint {
   if (!c || c.version !== 1 || !HASH.test(c.stream) || !Number.isSafeInteger(c.seq) || c.seq < 0 ||
       !HASH.test(c.hash) || typeof c.publishedAt !== "string" ||
       !Number.isFinite(Date.parse(c.publishedAt)) || (c.previous !== null && !HASH.test(c.previous))) {
-    throw new Error("Invalid external checkpoint");
+    throw new CheckpointError("Invalid external checkpoint");
   }
   return c;
 }
@@ -42,7 +45,7 @@ export function parseCheckpoint(value: unknown): Checkpoint {
 /** Recompute content, rather than trusting hashes supplied by the database. */
 export function verifyHistory(stream: Stream, rows: AuditRow[], checkpoints: Checkpoint[], bootstrap = false) {
   const id = streamId(stream.shop);
-  const fail = (why: string): never => { throw new Error(`${id.slice(0, 12)}: ${why}`); };
+  const fail = (why: string): never => { throw new CheckpointError(`${id.slice(0, 12)}: ${why}`); };
   let previous = "0".repeat(64);
   for (const [seq, row] of rows.entries()) {
     if (row.shop !== stream.shop || row.seq !== seq) fail("missing, reordered or foreign audit entry");
@@ -92,7 +95,7 @@ export async function publishCheckpoints(
       };
       const stored = parseCheckpoint(await store.create(proposed));
       if (stored.stream !== proposed.stream || stored.seq !== proposed.seq || stored.hash !== proposed.hash || stored.previous !== proposed.previous) {
-        throw new Error("Conflicting checkpoint: refusing to replace evidence");
+        throw new CheckpointError("Conflicting checkpoint: refusing to replace evidence");
       }
     }
     results.push({ stream: plan.stream, protectedThrough: plan.seq, hash: plan.hash, published: !plan.unchanged });

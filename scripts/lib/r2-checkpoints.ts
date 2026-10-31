@@ -1,5 +1,5 @@
 import { DeleteObjectCommand, GetObjectCommand, ListObjectsV2Command, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { checkpointKey, parseCheckpoint, type Checkpoint, type CheckpointStore } from "./checkpoints";
+import { CheckpointError, checkpointKey, parseCheckpoint, type Checkpoint, type CheckpointStore } from "./checkpoints";
 
 export class R2CheckpointStore implements CheckpointStore {
   constructor(private client: S3Client, private bucket: string) {}
@@ -12,7 +12,7 @@ export class R2CheckpointStore implements CheckpointStore {
     const input = { Bucket: this.bucket, Key };
     try {
       const r = await this.client.send(new GetObjectCommand(input));
-      if (await r.Body!.transformToString() !== Body) throw new Error("Invalid R2 retention probe content");
+      if (await r.Body!.transformToString() !== Body) throw new CheckpointError("Invalid R2 retention probe content");
     } catch (error) {
       const e = error as { $metadata?: { httpStatusCode?: number } };
       if (e.$metadata?.httpStatusCode !== 404) throw error;
@@ -33,17 +33,17 @@ export class R2CheckpointStore implements CheckpointStore {
         if (!locked(deleteError)) throw deleteError;
         return;
       }
-      throw new Error("Invalid R2 retention: probe deletion was allowed");
+      throw new CheckpointError("Invalid R2 retention: probe deletion was allowed");
     }
     // Restore the non-evidence probe if an unlocked bucket allowed the overwrite.
     await this.client.send(new PutObjectCommand({ ...input, Body }));
-    throw new Error("Invalid R2 retention: probe overwrite was allowed; configure checkpoints/ bucket locks");
+    throw new CheckpointError("Invalid R2 retention: probe overwrite was allowed; configure checkpoints/ bucket locks");
   }
 
   private async get(key: string) {
     const r = await this.client.send(new GetObjectCommand({ Bucket: this.bucket, Key: key }));
     const c = parseCheckpoint(JSON.parse(await r.Body!.transformToString()));
-    if (checkpointKey(c) !== key) throw new Error("Checkpoint key disagrees with content");
+    if (checkpointKey(c) !== key) throw new CheckpointError("Checkpoint key disagrees with content");
     return c;
   }
 
@@ -55,10 +55,10 @@ export class R2CheckpointStore implements CheckpointStore {
         Bucket: this.bucket, Prefix: `checkpoints/v1/${stream}/`, ContinuationToken: token,
       }));
       for (const o of r.Contents ?? []) {
-        if (!o.Key || !/^checkpoints\/v1\/[a-f0-9]{64}\/\d{12}\.json$/.test(o.Key)) throw new Error("Unexpected checkpoint object");
+        if (!o.Key || !/^checkpoints\/v1\/[a-f0-9]{64}\/\d{12}\.json$/.test(o.Key)) throw new CheckpointError("Unexpected checkpoint object");
         keys.push(o.Key);
       }
-      if (r.IsTruncated && !r.NextContinuationToken) throw new Error("Incomplete checkpoint listing");
+      if (r.IsTruncated && !r.NextContinuationToken) throw new CheckpointError("Incomplete checkpoint listing");
       token = r.IsTruncated ? r.NextContinuationToken : undefined;
     } while (token);
     const checkpoints: Checkpoint[] = [];

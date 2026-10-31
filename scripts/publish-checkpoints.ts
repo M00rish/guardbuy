@@ -1,13 +1,13 @@
 import { readFile, appendFile } from "node:fs/promises";
 import { PrismaClient } from "@prisma/client";
 import { S3Client } from "@aws-sdk/client-s3";
-import { parseStreams, publishCheckpoints, type AuditRow } from "./lib/checkpoints";
+import { CheckpointError, parseStreams, publishCheckpoints, type AuditRow } from "./lib/checkpoints";
 import { R2CheckpointStore } from "./lib/r2-checkpoints";
 
 // Deliberately does not load .env, app/db.server, Shopify or payment modules.
 function required(name: string) {
   const value = process.env[name]?.trim();
-  if (!value) throw new Error(`Missing ${name}`);
+  if (!value) throw new CheckpointError(`Missing ${name}`);
   return value;
 }
 
@@ -16,11 +16,11 @@ let phase = "configuration";
 async function main() {
   const streams = parseStreams(JSON.parse(await readFile("anchors/checkpoint-streams.json", "utf8")));
   const account = required("AUDIT_R2_ACCOUNT_ID");
-  if (!/^[a-f0-9]{32}$/.test(account)) throw new Error("Invalid R2 account ID");
+  if (!/^[a-f0-9]{32}$/.test(account)) throw new CheckpointError("Invalid R2 account ID");
   const accessKeyId = required("AUDIT_R2_ACCESS_KEY_ID");
   const secretAccessKey = required("AUDIT_R2_SECRET_ACCESS_KEY");
   if (![accessKeyId, secretAccessKey].every((v) => /^[\x21-\x7e]+$/.test(v))) {
-    throw new Error("Invalid R2 credentials: remove embedded whitespace and copy only the access key ID and secret access key");
+    throw new CheckpointError("Invalid R2 credentials: remove embedded whitespace and copy only the access key ID and secret access key");
   }
   let db: PrismaClient | undefined;
   const s3 = new S3Client({
@@ -42,7 +42,7 @@ async function main() {
         AND NOT has_table_privilege(current_user, '"AuditEntry"', 'UPDATE')
         AND NOT has_table_privilege(current_user, '"AuditEntry"', 'DELETE')
         AND NOT has_table_privilege(current_user, '"AuditEntry"', 'TRUNCATE') AS safe`;
-    if (!privileges[0]?.safe) throw new Error("Use the dedicated read-only guardbuy_auditor role");
+    if (!privileges[0]?.safe) throw new CheckpointError("Use the dedicated read-only guardbuy_auditor role");
     // One repeatable-read snapshot: concurrent appends cannot make a stream look truncated.
     phase = "database snapshot";
     const histories = await db.$transaction(async (tx) => {
@@ -69,7 +69,7 @@ async function main() {
 
 main().catch(async (error) => {
   // SDK/Prisma error text may contain credentials or data. Never dump it into Actions logs.
-  const message = error instanceof Error && /^(Missing |Invalid |Configure |Use the dedicated|Conflicting checkpoint|[a-f0-9]{12}:)/.test(error.message)
+  const message = error instanceof CheckpointError
     ? error.message : "Verification or publication failed; no successful external verification is claimed. Check credentials, connectivity and checkpoint integrity.";
   const status = error?.$metadata?.httpStatusCode;
   const diagnostic = Number.isInteger(status) ? ` (HTTP ${status})` : "";
