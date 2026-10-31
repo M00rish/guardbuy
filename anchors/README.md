@@ -1,8 +1,12 @@
 # Independent audit checkpoints
 
-Status: implementation prepared; scheduled execution requires explicit activation after provisioning and live verification. The app's internal chain check is distinct from this external verification. Historical GitHub fingerprints remain in `fingerprints.jsonl`.
+Status: enabled on 31 October 2026 after successful live bootstrap and an unchanged repeat run. Repository variable `AUDIT_CHECKPOINTS_ENABLED=true` activates the six-hour schedule. The app's internal chain check is distinct from this external verification. Historical GitHub fingerprints remain in `fingerprints.jsonl`.
+
+At activation, all 14 entries (sequences 0–13) for the enrolled stream were verified, and the sequence-13 checkpoint was published with hash `2a8681b72f33ab8082722c5c8ddaa3554065c490c12e2a472fda30f3d098bb75`. [Bootstrap](https://github.com/M00rish/guardbuy/actions/runs/41226303443) reported `published: true`; the [repeat run](https://github.com/M00rish/guardbuy/actions/runs/41226464888) read the retained checkpoint and reported `published: false`. Both passed the live reader privilege checks and R2 overwrite/deletion lock probe. Current protection status is recorded in subsequent Actions run summaries; this paragraph records activation.
 
 The workflow runs at minute 17 every six hours (GitHub schedules may be delayed), or manually. It reads Neon directly, recomputes each enrolled store's hash chain, verifies pinned baselines and all retained R2 checkpoints, and publishes only when verified history advances. It does not wake Render, use Shopify/PayPal/AI credentials, reconcile payments, sweep inventory, or commit to the repository. Runner installation and full-history verification consume Actions minutes; measure actual usage as history grows.
+
+The successful bootstrap took 44 seconds and the unchanged run 54 seconds at activation. Earlier setup without cached dependencies took about 3 minutes 20 seconds. A conservative four-minute budget for 124 scheduled runs in a 31-day month is about 496 runner minutes, plus normal CI and retries. Account-wide remaining allowance was not inspected; verification time grows with retained history.
 
 ## Provision before enabling
 
@@ -15,7 +19,7 @@ The workflow runs at minute 17 every six hours (GitHub schedules may be delayed)
 
 ### Credential setup without sharing passwords
 
-The production `guardbuy_auditor` role was created through SQL on 31 October 2026. An initial random password was generated inside PostgreSQL without returning its value; a direct MCP login as this role then verified read-only mode, the one-minute statement timeout, audit read access, and denial of audit writes, session reads and Neon administrator membership. Its effective permissions were also checked: it reads only `AuditEntry` among app tables, cannot modify any app table or create database/schema objects, and has no inherited roles or administrative flags. The historical sequence-13 pin matches the stored audit entry; full hash recomputation still requires the workflow to pass.
+The production `guardbuy_auditor` role was created through SQL on 31 October 2026. An initial random password was generated inside PostgreSQL without returning its value; a direct MCP login as this role then verified read-only mode, the one-minute statement timeout, audit read access, and denial of audit writes, session reads and Neon administrator membership. Its effective permissions were also checked: it reads only `AuditEntry` among app tables, cannot modify any app table or create database/schema objects, and has no inherited roles or administrative flags. The account owner saved the dedicated URL directly into GitHub Actions. Both live workflow runs authenticated as this role, recomputed the complete enrolled history and verified the historical sequence-13 pin.
 
 To finish credential setup, the account owner resets **only this role's password** in Neon: GuardBuy → production → Postgres database → Roles → `guardbuy_auditor` → Reset password. In Connect, choose `neondb`, `guardbuy_auditor`, and pooling off. Copy the connection string directly into the repository's GitHub Actions secret `AUDIT_DATABASE_URL`. Do not paste it into chat or replace Render's app connection with it. Initial password assignment is required before this dashboard reset: a passwordless role produced `cannot update password for role without password` during provisioning. The SQL file includes that initialization.
 
