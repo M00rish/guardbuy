@@ -41,7 +41,9 @@ flowchart LR
    - Allowed purchases are paid by PayPal Payout to the supplier's PayPal email on file.
    - Purchases that need a person wait in **Approvals**. The merchant approves in GuardBuy, or in PayPal itself through a PayPal order with the supplier as payee.
    - At payment time the rules are checked again against fresh numbers.
-5. **Reconciliation.** The hourly job checks payout status, confirms payments in PayPal's transaction search, captures orders approved in PayPal (even if the merchant never came back to the return page), closes expired or cancelled orders, and records refunds.
+5. **Reconciliation.** Visiting Activity or Approvals checks existing supplier payouts with PayPal and confirms transaction IDs through the Agent Toolkit. Checks append status evidence without sending payments. The refresh button and its polling skip the Approvals page's existing order-capture sweep; a normal Approvals visit retains that sweep. No scheduled payment or stock job is enabled.
+
+   Payout checks run at most once per minute per shop, in rotating groups of five. Page loads wait up to 1.5 seconds, then show progress while the shared check continues; failures preserve the last recorded status. Confirmed payouts remain eligible for checks so later returns/refunds can be discovered. Checks only start while the app is used, and transaction-search confirmation can lag. The throttle and concurrent-request coordination are in memory for the current single app process: restarting resets them. Before deploying multiple workers/replicas, replace this coordination with a database-backed lease and atomic status deduplication. The independent audit checkpoint workflow remains unchanged.
 
 ### The rules
 

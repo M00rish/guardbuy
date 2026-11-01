@@ -108,7 +108,7 @@ export function toFeed(log: AuditEntry[], you?: string, names: FeedNames = {}): 
         items.push({ ...base, kind: "failed", title: "Payment failed", detail: ev.reason });
         break;
       case "payout":
-        items.push({ ...base, kind: "paid", title: `Paid ${usd(ev.amountCents)} via PayPal Payouts${purchaseOf(ev.decisionSeq) ? ` for ${purchaseOf(ev.decisionSeq)}` : ""}`, detail: `PayPal payout batch ${ev.payoutBatchId} (${ev.status})`, verifyId: ev.payoutBatchId });
+        items.push({ ...base, kind: "paid", title: `Submitted ${usd(ev.amountCents)} via PayPal Payouts${purchaseOf(ev.decisionSeq) ? ` for ${purchaseOf(ev.decisionSeq)}` : ""}`, detail: `PayPal payout batch ${ev.payoutBatchId} (${ev.status})`, verifyId: ev.payoutBatchId });
         break;
       case "payout_status":
         items.push({ ...base, kind: "status", title: `Payout status: ${ev.status}`, detail: ev.confirmedByTransactionSearch ? "Confirmed in PayPal's transaction records" : undefined });

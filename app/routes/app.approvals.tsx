@@ -1,3 +1,5 @@
+import { refreshPayouts } from "../lib/paypal/reconcile.server";
+import { PayoutRefresh } from "../components/payout-refresh";
 import { useEffect } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
@@ -18,9 +20,13 @@ import { ago, Empty, plural, Row } from "../components/ui";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   // Settle PayPal orders first (capture approved ones, close expired or cancelled ones), so the queue is current.
-  await sweepPayPalOrders(session.shop).catch((e) => console.warn(`[approvals] PayPal sweep failed: ${(e as Error).message}`));
+  // A status-only refresh must not capture an approved Order.
+  if (new URL(request.url).searchParams.get("payoutRefresh") !== "1") {
+    await sweepPayPalOrders(session.shop).catch(() => console.warn("[approvals] PayPal sweep failed"));
+  }
+  const payoutRefresh = await refreshPayouts(session.shop);
   const [cards, names] = await Promise.all([approvalQueue(session.shop), feedNames(session.shop)]);
-  return { cards: cards.map((c) => ({ ...c, productTitle: names.product(c.sku) ?? c.sku })) };
+  return { payoutRefresh, cards: cards.map((c) => ({ ...c, productTitle: names.product(c.sku) ?? c.sku })) };
 };
 
 type ActionResult = { ok: boolean; message: string; approveUrl?: string };
@@ -64,9 +70,10 @@ const pct = (n: number) => `${n >= 0 ? "+" : ""}${Math.round(n)}%`;
 type Card = ApprovalCard & { productTitle: string };
 
 export default function Approvals() {
-  const { cards } = useLoaderData<typeof loader>();
+  const { cards, payoutRefresh } = useLoaderData<typeof loader>();
   return (
     <s-page heading="Approvals" inlineSize="large">
+      <PayoutRefresh state={payoutRefresh} />
       {cards.length === 0 ? (
         <s-section>
           <Empty heading="Nothing is waiting for you">
@@ -77,7 +84,7 @@ export default function Approvals() {
         <>
           <s-section>
             <s-text tone="neutral">
-              {plural(cards.length, "purchase")} waiting. GuardBuy computed the facts below itself; the AI's explanation comes last and isn't verified.
+              {plural(cards.length, "purchase")} waiting. GuardBuy computed the facts below itself; the AI’s explanation comes last and isn’t verified.
             </s-text>
           </s-section>
           {cards.map((card) => <CardView key={card.decisionSeq} card={card} />)}
@@ -134,7 +141,7 @@ function CardView({ card }: { card: Card }) {
 
         <s-box padding="base" background="subdued" borderRadius="base">
           <s-stack gap="small-200">
-            <s-text type="strong">The AI's explanation (not verified)</s-text>
+            <s-text type="strong">The AI’s explanation (not verified)</s-text>
             <s-text>{card.aiExplanation}</s-text>
           </s-stack>
         </s-box>

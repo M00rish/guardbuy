@@ -1,3 +1,5 @@
+import { refreshPayouts } from "../lib/paypal/reconcile.server";
+import { PayoutRefresh } from "../components/payout-refresh";
 import { useState } from "react";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useLoaderData, useRevalidator } from "react-router";
@@ -14,8 +16,10 @@ import { ago, Empty, FEED_LABEL, FEED_TONE, Filters } from "../components/ui";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, actor } = await adminWithStaff(request);
+  const payoutRefresh = await refreshPayouts(session.shop);
   const [log, names] = await Promise.all([auditEntries(session.shop), feedNames(session.shop)]);
   return {
+    payoutRefresh,
     feed: toFeed(log, actor, names),
     chain: await verifyChain(session.shop),
     head: log.at(-1)?.hash ?? null,
@@ -34,7 +38,7 @@ const IN_VIEW: Record<View, (kind: string) => boolean> = {
 };
 
 export default function Activity() {
-  const { feed, chain, head, checkedAt, verifyBase } = useLoaderData<typeof loader>();
+  const { feed, chain, head, checkedAt, verifyBase, payoutRefresh } = useLoaderData<typeof loader>();
   const revalidator = useRevalidator();
   const [view, setView] = useState<View>("all");
   const now = Date.now();
@@ -42,6 +46,7 @@ export default function Activity() {
 
   return (
     <s-page heading="Activity" inlineSize="large">
+      <PayoutRefresh state={payoutRefresh} />
       <s-section>
         <s-stack gap="base">
           <s-stack direction="inline" gap="base" alignItems="center">
@@ -53,7 +58,7 @@ export default function Activity() {
           </s-stack>
           {!chain.valid && <s-banner tone="critical" heading="The audit log failed verification">{chain.reason}</s-banner>}
           <s-text tone="neutral">
-            Every entry's fingerprint includes the one before it, so changing, deleting or reordering any past entry breaks every fingerprint after it.
+            Every entry’s fingerprint includes the one before it, so changing, deleting or reordering any past entry breaks every fingerprint after it.
           </s-text>
         </s-stack>
       </s-section>
