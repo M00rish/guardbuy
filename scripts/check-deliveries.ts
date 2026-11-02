@@ -2,6 +2,7 @@
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { canAppendReceipt, createReceiveDelivery, deliveries, incomingFor } from "../app/lib/inventory/deliveries";
+import { inDeliveryView } from "../app/lib/inventory/delivery-view";
 import { AuditEventSchema, type AuditEntry, type AuditEvent } from "../app/lib/policy/schema";
 
 function fixture() {
@@ -84,8 +85,16 @@ assert.equal(deliveries(returned.log())[0].received, 10, "refund never removes p
 assert.equal(incomingFor(returned.log(), "123"), 0);
 await assert.rejects(returned.receive("a", "staff", returned.input(10, 10)), /Confirm successful payment/);
 const { skipReason } = await import("../app/lib/agent/restock.server");
+assert.equal(inDeliveryView(deliveries(f.log())[0], "received"), true);
+assert.equal(inDeliveryView(deliveries(f.log())[0], "ready"), false);
+assert.equal(inDeliveryView(deliveries(expired.log())[0], "attention"), true, "unconfirmed receipts need attention");
+assert.equal(inDeliveryView(deliveries(returned.log())[0], "attention"), true, "failed payments with outstanding stock need attention");
 const future = new Date("2026-11-10T12:00:00Z");
-const open = fixture(); open.paid();
+const open = fixture();
+assert.equal(inDeliveryView(deliveries(open.log())[0], "pending"), true);
+open.paid();
+assert.equal(inDeliveryView(deliveries(open.log())[0], "ready"), true);
+assert.equal(inDeliveryView(deliveries(open.log())[0], "received"), false);
 assert.match(skipReason({ variantId: "123", sku: "coffee" }, open.log(), future) ?? "", /awaiting delivery/, "outstanding orders do not expire after three days");
 assert.equal(skipReason({ variantId: "123", sku: "coffee" }, f.log(), future), null, "fully received orders allow future restocking");
 assert.equal(skipReason({ variantId: "456", sku: "coffee" }, open.log(), future), null, "another variant sharing the SKU is not blocked");
