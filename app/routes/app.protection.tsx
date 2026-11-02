@@ -8,6 +8,7 @@ import { scoreboard } from "../lib/agent/scoreboard.server";
 import { RULE_HELP, RULE_LABELS } from "../lib/policy/rules";
 import { usd } from "../lib/format";
 import { setShareVerifyDetails, shareVerifyDetails } from "../lib/audit/verify.server";
+import { demoEnabled } from "../lib/demo/public-dashboard";
 import { Empty, Metric, Metrics } from "../components/ui";
 
 // What protects the merchant's money: every rule and how often it fired, what was blocked or sent
@@ -19,7 +20,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const [score, chain, share] = await Promise.all([scoreboard(session.shop, log), verifyChain(session.shop), shareVerifyDetails(session.shop)]);
   const lastPayment = log.filter((e) => e.event.type === "payout" || e.event.type === "order_captured").at(-1);
   const lastId = lastPayment?.event.type === "payout" ? lastPayment.event.payoutBatchId : lastPayment?.event.type === "order_captured" ? lastPayment.event.orderId : null;
-  return { ...score, chain, share, verifyUrl: process.env.SHOPIFY_APP_URL ? `${process.env.SHOPIFY_APP_URL}/verify${lastId ? `?id=${lastId}` : ""}` : null };
+  return { demoAvailable: demoEnabled(session.shop, { enabled: process.env.GUARDBUY_PUBLIC_DEMO_ENABLED, shop: process.env.GUARDBUY_DEMO_STORE, paypalBase: process.env.PAYPAL_API_BASE }), ...score, chain, share, verifyUrl: process.env.SHOPIFY_APP_URL ? `${process.env.SHOPIFY_APP_URL}/verify${lastId ? `?id=${lastId}` : ""}` : null };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -30,7 +31,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Protection() {
-  const { real, attacks, stoppedBy, chain, share, verifyUrl } = useLoaderData<typeof loader>();
+  const { real, attacks, stoppedBy, chain, share, verifyUrl, demoAvailable } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const fired = new Map(stoppedBy.map((r) => [r.rule, r.count]));
   const answered = attacks.tried - attacks.failed;
@@ -79,7 +80,7 @@ export default function Protection() {
       <s-section heading="Public verification">
         <s-stack gap="base">
           <s-text tone="neutral">
-            Anyone with a PayPal payment ID can check it on GuardBuy's verify page: that it's on your audit log, which signed
+            Anyone with a PayPal payment ID can check it on GuardBuy’s verify page: that it’s on your audit log, which signed
             rules allowed it, and that the log is intact. By default the page shows fingerprints and outcomes only.
           </s-text>
           <s-switch label="Also show the product, supplier and amount" checked={share} disabled={fetcher.state !== "idle"}
@@ -90,10 +91,10 @@ export default function Protection() {
       </s-section>
 
       <s-section heading="Attack tests">
+        {demoAvailable && <s-link href="/app/attack-tests">Open private demo attack tests</s-link>}
         {attacks.tried + attacks.simulated.tried === 0 ? (
           <Empty heading="No attack tests on this store">
-            They run in the demo console, where a dishonest supplier tries prompt injection, fake urgency, a changed payee
-            and more against the real AI and these rules.
+            Demo-store attack tests run in a private staff sandbox. Results there are separate from this store’s history; the public dashboard shows real store activity only.
           </Empty>
         ) : (
           <s-stack gap="base">

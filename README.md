@@ -21,7 +21,7 @@ GuardBuy's answer is to keep the AI away from the decision:
 
 ```mermaid
 flowchart LR
-  S["Shopify<br>stock + sales"] --> T["Low stock<br>(webhook / hourly sweep)"]
+  S["Shopify<br>stock + sales"] --> T["Low stock<br>(inventory webhook)"]
   T --> A["AI proposes<br>(Gemini, fallback models)"]
   A --> P{"Policy engine<br>signed rules"}
   P -->|allow| X["Executor<br>PayPal Payouts"]
@@ -34,7 +34,7 @@ flowchart LR
   L --> V["Public verify page"]
 ```
 
-1. **Trigger.** Shopify's `inventory_levels/update` and `orders/create` webhooks keep stock and daily sales current. An hourly job also sweeps every managed product, so a missed webhook never means a missed restock.
+1. **Trigger.** Shopify's `inventory_levels/update` and `orders/create` webhooks keep stock and daily sales current. No scheduled stock sweep is enabled; missed webhooks do not have an automatic hourly fallback.
 2. **Proposal.** When a switched-on product drops below the merchant's restock point (days of stock left), the AI picks a supplier and quantity from the suppliers the merchant linked, with its reasoning. The model that answered is recorded.
 3. **Decision.** The policy engine runs every rule. The strictest result wins: `allow`, `approval` (a person decides) or `block`.
 4. **Payment.**
@@ -93,13 +93,25 @@ Rules are signed by a Shopify staff member: their id and the rules' SHA-256 fing
 
 ## Try it
 
-**Judges:** the private Devpost notes have the demo store link, its password and three steps. On the storefront, the judge console at `/apps/guardbuy` lets you:
-- simulate a sale
-- watch the agent react
-- approve your own purchases
-- send a dishonest supplier (16 attack scenarios, easy to hard) against the real AI and rules
+**Judges:** open the demo store in one tab and `/apps/guardbuy` in another. The public dashboard is read-only and shows actual managed stock, today’s test-order count (UTC), recorded restock decisions, and supplier payment outcomes. Place a test checkout order in the storefront and watch the stock change. All visitors see the same store; this is no longer a per-judge simulated sandbox.
 
-Each judge gets their own sandbox, so nothing you do affects anyone else.
+**Enable the dashboard:** explicitly set `GUARDBUY_PUBLIC_DEMO_ENABLED=true` and `GUARDBUY_DEMO_STORE` to the intended demo shop domain. It is disabled by default and refuses to open if PayPal’s configured API base is not the sandbox. No new API scopes or database migrations are required. Opening the page is consent to expose only aggregate activity for that store: no customer records, supplier emails, payment IDs, approval URLs, AI reasoning, staff identities, or raw provider errors are returned.
+
+The page polls every 15 seconds while visible, with a shared 15-second server cache. This polling can keep Render and Neon awake while judges watch. Test-order counts come from Shopify (only `test:true` orders created today UTC; cancelled test orders still count as orders placed). Stock shows up to 50 managed variants. Missing data is labelled unavailable rather than zero. Restock/payment totals cover recorded non-simulation history, not just today. Stock change arrows are observations in the current browser tab, not guaranteed attribution to a particular customer order.
+
+Public requests never send payments, capture orders, reconcile PayPal or change inventory. The old proxy action API returns 405. Payment outcomes are the last known audit evidence; keep the merchant Activity/Approvals page available and refresh statuses there. A batch-level payout SUCCESS alone is not shown as recipient success. A supplier payment does not replenish Shopify stock until goods are recorded as received.
+
+**Prepare and manually test the demo:**
+
+1. Configure Shopify test checkout (Bogus Gateway or a payment provider’s test mode) on the dedicated demo store, and give judges test checkout instructions. Never ask them to use a real card. Verify that a completed checkout is marked as a test order.
+2. In GuardBuy, manage a published product, link its supplier and sandbox payee, sign appropriate rules, and check the sales rate/reorder threshold. Ensure there is no unresolved restock already blocking another proposal.
+3. Pause the agent while preparing stock. Use Shopify Admin’s inventory adjustment to set available stock just above the reorder threshold, then resume the agent. Buy enough units in test checkout to cross the threshold. The existing reset script sets coffee directly to low stock and also tops up the PayPal sandbox balance: do not use it as a blind reset for this purchase-triggered scenario.
+4. Confirm the order count increases and stock decreases on the public dashboard. Allow time for Shopify webhooks, order indexing and AI processing. The timeline should show a proposal and policy decision. Outcomes can require merchant review; do not weaken rules merely to guarantee automatic payment.
+5. If review is required, approve from the merchant app. Refresh payout status in Activity and confirm the public outcome updates on its next poll. Compare with PayPal sandbox. Check that no second payment appears when the public page is refreshed.
+6. Verify a POST to the public proxy API returns 405, a non-enabled store cannot access either route, and dashboard JSON contains no personal data or payment credentials. Test stock/order API errors: show unavailable or stale data, never an invented zero.
+7. Reset stock only through Shopify Admin or the authenticated backend reset tooling. Never delete production audit history to rerun a demo. Use the isolated environment planned in ISM-137 for repeatable fixture resets.
+
+**Optional attack tests:** enabled demo-store staff can open Protection → Open private demo attack tests (`/app/attack-tests`). Tests use an authenticated staff-specific record namespace, not the real shop’s inventory or orders. The real AI attack and explicitly simulated “AI fooled” options remain separate, and neither pays suppliers. Refresh results after the background AI run finishes. These tests may consume AI API usage.
 
 **Merchant admin:** Home, Products & suppliers, Suppliers, Rules, Approvals, Activity (audit log) and Protection (rules at work, attack results, public verification settings).
 
@@ -185,7 +197,7 @@ Steps:
 3. Run `npm run deploy` to release the Shopify configuration. Reopen GuardBuy in Shopify admin and approve any requested permission update. This is separate from deploying the web server to Render.
 4. The independent audit workflow is enabled for this deployment, with its dedicated credentials stored in GitHub Actions. It connects directly to Neon and R2, never calls Render or payment/stock actions, and does not commit fingerprints to `main`. For a new deployment, follow [checkpoint setup](anchors/README.md) and keep its schedule disabled until setup and bootstrap verification are complete.
 
-The shared demo config disables automatic URL updates during `shopify app dev`. Use a separate app/config for tunnel development so local sessions cannot replace the judge console's hosted destination. After deployment, verify the active Shopify app version points `/apps/guardbuy` to `https://guardbuy.onrender.com/proxy`. Test through the storefront: opening `/proxy` directly without Shopify's signature correctly returns 400.
+The shared demo config disables automatic URL updates during `shopify app dev`. Use a separate app/config for tunnel development so local sessions cannot replace the public dashboard’s hosted destination. After deployment, verify the active Shopify app version points `/apps/guardbuy` to `https://guardbuy.onrender.com/proxy`. Test through the storefront: opening `/proxy` directly without Shopify's signature correctly returns 400.
 
 To reset the demo (stock back to the start, sandbox balance topped up):
 
@@ -205,7 +217,7 @@ app/
   lib/suppliers/   supplier directory, demo catalog, attack scenarios
   lib/judge/       judge console sandboxes and limits
   lib/jobs/        hourly job, demo reset
-  routes/          admin pages (app.*), webhooks, app proxy (judge console), verify page, jobs
+  routes/          admin pages (app.*), webhooks, app proxy (read-only demo dashboard), verify page, jobs
 prisma/            schema and hand-written migrations
 scripts/           checks, seeding, demo reset, sandbox refill
 anchors/           published audit-log fingerprints (created by the first hourly run)

@@ -19,6 +19,7 @@ jobs:
       - run: npx prisma generate
       - run: npm run typecheck
       # Offline, deterministic checks (no database, PayPal or Gemini needed)
+      - run: npx tsx scripts/check-public-demo.ts
       - run: npx tsx scripts/check-payout-refresh.ts
       - run: npx tsx scripts/check-policy.ts
       - run: npx tsx scripts/check-scoreboard.ts

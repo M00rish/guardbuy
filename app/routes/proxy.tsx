@@ -1,173 +1,106 @@
 import type { LoaderFunctionArgs } from "react-router";
-
 import { authenticate } from "../shopify.server";
+import { requirePublicDemo } from "../lib/demo/dashboard.server";
 
-// Judge console on the storefront: https://<shop>/apps/guardbuy (no Shopify login needed).
-// Shopify signs every proxied request; appProxy() rejects anything unsigned.
-// This shell is static: it contains no data, so no supplier or AI text ever passes through Liquid.
-// The page fetches its data as JSON from /apps/guardbuy/api and renders it with textContent only.
-// (Keep "{{" and "{%" out of this file: Shopify would run them as Liquid.)
-
-const SHELL = `
+// Static shell only: all remote values are rendered with textContent, never Liquid or HTML.
+export const SHELL = `
 <style>
-  .gb { max-width: 760px; margin: 32px auto; padding: 0 16px; font-family: system-ui, -apple-system, sans-serif; color: #1a1a1a; line-height: 1.5; }
-  .gb h1 { font-size: 1.8rem; margin: 0 0 4px; }
-  .gb h2 { font-size: 1.1rem; margin: 28px 0 8px; }
-  .gb .lede { color: #555; margin: 0 0 16px; }
-  .gb .actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 16px 0; }
-  .gb button { font: inherit; padding: 8px 14px; border-radius: 8px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
-  .gb button.primary { background: #1a1a1a; color: #fff; border-color: #1a1a1a; }
-  .gb button.danger { color: #b42318; }
-  .gb button:disabled { opacity: .5; cursor: default; }
-  .gb .msg { min-height: 1.5em; color: #555; }
-  .gb .card { border: 1px solid #ddd; border-radius: 10px; padding: 14px; margin: 8px 0; background: #fff; }
-  .gb .muted { color: #666; font-size: .9rem; }
-  .gb .ai { background: #f5f5f5; border-radius: 8px; padding: 10px; margin-top: 8px; font-size: .92rem; }
-  .gb .ai b { display: block; font-size: .8rem; text-transform: uppercase; letter-spacing: .03em; color: #666; }
-  .gb ul.feed { list-style: none; padding: 0; margin: 0; }
-  .gb ul.feed li { border-left: 3px solid #ddd; padding: 6px 12px; margin: 6px 0; }
-  .gb li.k-block { border-color: #d92d20; } .gb li.k-paid { border-color: #12b76a; } .gb li.k-approval { border-color: #f79009; }
-  .gb li.k-attack { border-color: #7a5af8; } .gb li.k-resisted { border-color: #12b76a; }
-  .gb li.k-flagged { border-color: #f79009; } .gb li.k-slipped { border-color: #d92d20; background: #fef3f2; }
-  .gb li.k-failed { border-color: #d92d20; } .gb li.k-stock { border-color: #2e90fa; } .gb li.k-approved { border-color: #12b76a; }
-  .gb .chain { font-weight: 600; }
-  .gb .stats { display: flex; flex-wrap: wrap; gap: 18px; margin: 6px 0 10px; }
-  .gb .stat b { display: block; font-size: 1.5rem; line-height: 1.2; }
-  .gb .stat span { color: #666; font-size: .85rem; }
-  .gb .gap { color: #b42318; }
+  .gb { max-width:1100px; margin:40px auto; padding:0 20px 40px; color:#18312c; font:16px/1.55 system-ui,sans-serif; }
+  .gb * { box-sizing:border-box; } .gb h1 { font-size:clamp(30px,5vw,48px); line-height:1.15; margin:12px 0; letter-spacing:-1px; }
+  .gb h2 { font-size:22px; margin:0 0 14px; } .gb p { margin:8px 0; } .gb .muted { color:#52665f; font-size:14px; }
+  .gb .badge { display:inline-block; background:#e6f1eb; padding:5px 10px; border-radius:20px; font-size:13px; font-weight:650; }
+  .gb .lead { max-width:750px; font-size:18px; } .gb .actions { display:flex; gap:12px; flex-wrap:wrap; margin:22px 0; align-items:center; }
+  .gb .button { font:inherit; display:inline-block; padding:11px 18px; border:1px solid #234d3f; border-radius:8px; background:#fff; color:#234d3f; text-decoration:none; cursor:pointer; }
+  .gb .primary { background:#234d3f; color:#fff; } .gb button:disabled { opacity:.5; cursor:wait; }
+  .gb .steps { border-left:3px solid #b5cdbd; padding:8px 16px; margin:22px 0; }
+  .gb .stats { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:14px; margin:24px 0; }
+  .gb .card { background:#f5f8f4; border:1px solid #dbe5dc; border-radius:12px; padding:20px; }
+  .gb .stat strong { display:block; font-size:34px; line-height:1.3; } .gb .columns { display:grid; grid-template-columns:1.2fr 1fr; gap:24px; margin-top:28px; }
+  .gb .product { border-bottom:1px solid #dbe5dc; padding:14px 0; } .gb .product:first-child { padding-top:0; } .gb a { color:#234d3f; }
+  .gb .low { color:#8b3d16; font-weight:650; } .gb ol { padding-left:22px; } .gb li { margin:0 0 16px; }
+  .gb .notice { border:1px solid #dbe5dc; border-radius:8px; padding:14px; margin-top:22px; } .gb :focus-visible { outline:3px solid #b36a20; outline-offset:3px; }
+  @media(max-width:700px) { .gb .columns { grid-template-columns:1fr; } }
 </style>
 <div class="gb">
-  <h1>GuardBuy</h1>
-  <p class="lede">An AI restocks this coffee shop, but it can only spend PayPal money inside rules the merchant signed. Try it: these buttons run the real agent, the real rules engine and real PayPal sandbox payments, in a private sandbox just for you.</p>
+  <span class="badge">Live demo store · PayPal sandbox</span>
+  <h1>Buy in the store.<br>Watch GuardBuy respond.</h1>
+  <p class="lead">Place a test order in another tab. Watch available stock change, then follow the AI restock proposal, policy decision and supplier payment here.</p>
   <div class="actions">
-    <button class="primary" data-action="restock">Simulate a sale (low stock)</button>
-    <button data-action="attack">Run the next attack (real AI)</button>
-    <button data-action="whatif">What if the AI were fooled?</button>
-    <button data-action="verify">Verify the log</button>
-    <button data-action="new">New session</button>
+    <a class="button primary" href="/collections/all" target="_blank" rel="noopener">Open the store ↗</a>
+    <button class="button" id="gb-refresh" type="button">Refresh dashboard</button>
+    <span class="muted" id="gb-updated" role="status" aria-live="polite">Loading live data…</span>
   </div>
-  <p class="msg" id="gb-msg"></p>
-  <div class="card" id="gb-score"></div>
-  <div id="gb-approvals"></div>
-  <h2>Activity</h2>
-  <p class="chain" id="gb-chain"></p>
-  <ul class="feed" id="gb-feed"><li class="muted">Loading...</li></ul>
-  <p class="muted">Your session id stays in this browser. To continue on another device, open this page with ?session=<span id="gb-id"></span></p>
+  <p class="muted">Use the test checkout configured by the demo host. Customer checkout and GuardBuy’s supplier payment are separate transactions.</p>
+  <div class="steps">Store checkout → stock change → AI proposal → policy checks → merchant review if required → supplier payment</div>
+  <div class="stats" id="gb-stats"></div>
+  <p id="gb-agent" class="muted"></p>
+  <div class="columns">
+    <section class="card"><h2>Managed store stock</h2><div id="gb-stock">Loading…</div><p class="muted">Available units across locations. Reorder levels depend on sales history and the merchant’s rules.</p></section>
+    <section class="card"><h2>Supplier payment outcomes</h2><div id="gb-payments">Loading…</div><p class="muted">Latest recorded PayPal sandbox outcomes, across this store’s restock history. They are not customer checkout payments.</p><p class="muted">The merchant checks statuses in Activity or Approvals. This public page does not refresh PayPal, approve purchases, or send money.</p></section>
+  </div>
+  <section class="card" style="margin-top:24px"><h2>Restock activity</h2><p class="muted">Latest 30 recorded steps, newest first. Attack simulations are excluded. This is a shared store view, not a private session or proof that a particular order caused a payment.</p><ol id="gb-timeline"></ol></section>
+  <div class="notice"><strong>What to expect</strong><p>Stock changes arrive through Shopify webhooks. A restock starts only when the product is managed, the agent is on, stock is below its threshold, and no existing restock blocks a new one. AI and payment processing can take time.</p><p class="muted">Paying a supplier does not immediately replenish inventory. Stock increases when the merchant records received goods. Merchant approvals and attack tests stay inside the authenticated GuardBuy app.</p></div>
 </div>
 <script>
 (function () {
   var api = location.pathname.replace(/\\/$/, "") + "/api";
-  var params = new URLSearchParams(location.search);
-  function store(k, v) { try { if (v === undefined) return localStorage.getItem(k); localStorage.setItem(k, v); } catch (e) { return null; } }
-  function newId() { return (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + "-" + Math.random().toString(36).slice(2)).toLowerCase(); }
-  var id = params.get("session") || store("gb_judge") || newId();
-  store("gb_judge", id);
-  document.getElementById("gb-id").textContent = id;
-
-  function el(tag, cls, text) { var e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
-  function say(text) { document.getElementById("gb-msg").textContent = text; }
-
+  var loading = false, lastStocks = new Map(), changes = new Map();
+  var button = document.getElementById("gb-refresh");
+  var updated = document.getElementById("gb-updated");
+  function el(tag, cls, text) { var node = document.createElement(tag); if (cls) node.className = cls; if (text != null) node.textContent = String(text); return node; }
   function render(data) {
-    var feed = document.getElementById("gb-feed");
-    feed.replaceChildren();
-    data.feed.forEach(function (item) {
-      var li = el("li", "k-" + item.kind);
-      li.appendChild(el("div", null, item.title));
-      if (item.detail) li.appendChild(el("div", "muted", item.detail));
-      if (item.untrusted) { var ai = el("div", "ai"); ai.appendChild(el("b", null, item.untrustedLabel || "Untrusted text")); ai.appendChild(el("span", null, item.untrusted)); li.appendChild(ai); }
-      if (item.verifyId && data.verifyBase) {
-        var v = el("a", null, "Verify this payment ↗"); v.href = data.verifyBase + encodeURIComponent(item.verifyId); v.target = "_blank"; v.rel = "noopener";
-        li.appendChild(v);
-      }
-      li.appendChild(el("div", "muted", "#" + item.seq + " · " + new Date(item.at).toLocaleTimeString()));
-      feed.appendChild(li);
+    var stats = document.getElementById("gb-stats"); stats.replaceChildren();
+    var orderCount = data.orders ? String(data.orders.count) + (data.orders.precision === "EXACT" ? "" : "+") : "Unavailable";
+    [[orderCount, "Test orders today · UTC"], [data.stock ? data.stock.products.length : "Unavailable", "Managed variants shown"], [data.decisions.proposals, "Restock proposals · all time"], [data.payments.total, "Supplier payments submitted · all time"]].forEach(function (pair) {
+      var card = el("div", "card stat"); card.append(el("strong", null, pair[0]), el("span", "muted", pair[1])); stats.appendChild(card);
     });
-    var box = document.getElementById("gb-approvals");
-    box.replaceChildren();
-    if (data.approvals.length) box.appendChild(el("h2", null, "Waiting for your approval"));
-    data.approvals.forEach(function (a) {
-      var card = el("div", "card");
-      card.appendChild(el("div", null, a.title + " · " + a.total));
-      var ul = el("ul", "muted");
-      a.facts.forEach(function (f) { ul.appendChild(el("li", null, f)); });
-      card.appendChild(ul);
-      var ai = el("div", "ai"); ai.appendChild(el("b", null, "The AI's explanation (not verified)")); ai.appendChild(el("span", null, a.aiExplanation)); card.appendChild(ai);
-      var row = el("div", "actions");
-      if (a.waitingForPayPal) row.appendChild(el("span", "muted", "Waiting for approval in PayPal."));
-      else {
-        var yes = el("button", "primary", "Approve and pay " + a.total); yes.onclick = function () { act("approve", a.decisionSeq); };
-        var no = el("button", "danger", "Decline"); no.onclick = function () { act("decline", a.decisionSeq); };
-        row.appendChild(yes); row.appendChild(no);
-      }
-      card.appendChild(row);
-      box.appendChild(card);
-    });
-    var sc = data.scoreboard, box2 = document.getElementById("gb-score");
-    box2.replaceChildren();
-    box2.appendChild(el("b", null, "Attack scoreboard"));
-    var stats = el("div", "stats");
-    [[sc.tried, "attacks tried"], [sc.aiFooled + " / " + sc.answered, "times the AI was fooled"], [sc.blockedDollars, "blocked by rules"],
-     [sc.flaggedDollars, "held for a person"], [sc.slippedDollars, "would have moved (known gaps)"]].forEach(function (s) {
-      var d = el("div", "stat"); d.appendChild(el("b", null, String(s[0]))); d.appendChild(el("span", null, s[1])); stats.appendChild(d);
-    });
-    box2.appendChild(stats);
-    box2.appendChild(el("div", "muted", sc.levels.map(function (l) {
-      return l.level + ": " + l.tried + " tried, " + l.resisted + " resisted, " + l.blocked + " blocked, " + l.flagged + " flagged, " + l.slipped + " slipped";
-    }).join(" · ")));
-    if (sc.simulated.tried) box2.appendChild(el("div", "muted", "Simulated 'AI fooled' runs: " + sc.simulated.blocked + " of " + sc.simulated.tried + " blocked"));
-    if (sc.stoppedBy.length) box2.appendChild(el("div", "muted", "Stopped by: " + sc.stoppedBy.map(function (r) { return r.rule + " (" + r.count + ")"; }).join(", ")));
-    sc.knownGaps.forEach(function (g) { box2.appendChild(el("div", "gap", "Known gap: " + g.title + ". Fix planned: " + g.fix)); });
-    box2.appendChild(el("div", "muted", sc.remaining > 0 ? sc.remaining + " of the attacks not tried yet in this session." : "Every attack has been tried; the button starts over."));
-
-    var c = data.chain;
-    document.getElementById("gb-chain").textContent = c.valid ? "Audit log: " + c.entries + " entries, hash chain intact" : "Audit log: BROKEN at entry #" + c.brokenAt + " (" + c.reason + ")";
+    document.getElementById("gb-agent").textContent = (data.agentRunning ? "Agent enabled." : "Agent paused or rules not configured.") + " Policy decisions so far: " + data.decisions.automatic + " automatic, " + data.decisions.review + " required review, " + data.decisions.blocked + " blocked.";
+    var stock = document.getElementById("gb-stock"); stock.replaceChildren();
+    if (!data.stock) stock.appendChild(el("p", null, "Stock is temporarily unavailable. Try refreshing."));
+    else {
+      if (!data.stock.products.length) stock.appendChild(el("p", null, "No managed products are available. The demo host needs to prepare a product."));
+      if (data.stock.truncated) stock.appendChild(el("p", "muted", "Showing the first 50 managed variants."));
+      data.stock.products.forEach(function (p) {
+        var key = p.title + p.href;
+        if (lastStocks.has(key) && lastStocks.get(key) !== p.available && lastStocks.get(key) !== null && p.available !== null) changes.set(key, lastStocks.get(key) + " → " + p.available + " units (observed in this tab)");
+        lastStocks.set(key, p.available);
+        var row = el("div", "product"), link = el("a", null, p.title);
+        if (p.href.indexOf("/products/") === 0) link.href = p.href;
+        link.target = "_blank"; link.rel = "noopener";
+        row.append(link, el("p", p.low ? "low" : "", p.available === null ? "Stock unavailable" : p.available + " units available" + (p.low ? " · Low stock" : "")));
+        row.appendChild(el("p", "muted", p.reorderBelowUnits === null ? "Reorder threshold unavailable" : "Restock below " + p.reorderBelowUnits + " units"));
+        if (changes.has(key)) row.appendChild(el("p", "muted", changes.get(key)));
+        stock.appendChild(row);
+      });
+    }
+    var payments = document.getElementById("gb-payments"); payments.replaceChildren();
+    [[data.payments.successful, "successful"], [data.payments.pending, "pending / unconfirmed"], [data.payments.failed, "failed / blocked"], [data.payments.refunded, "returned / refunded / reversed"]].forEach(function (pair) { payments.appendChild(el("p", null, pair[0] + " " + pair[1])); });
+    var timeline = document.getElementById("gb-timeline"); timeline.replaceChildren();
+    if (!data.timeline.length) timeline.appendChild(el("li", "muted", "No restock activity yet. Place a test order for a prepared product to begin."));
+    data.timeline.forEach(function (item) { var li = el("li"); li.append(el("div", null, item.text), el("span", "muted", new Date(item.at).toLocaleString())); timeline.appendChild(li); });
+    updated.textContent = "Snapshot " + new Date(data.checkedAt).toLocaleTimeString() + " · refreshes every 15 seconds";
   }
-
-  function load() {
-    return fetch(api + "?j=" + encodeURIComponent(id), { headers: { Accept: "application/json" } })
-      .then(function (r) { return r.json(); })
-      .then(function (d) { if (d.ok) render(d); else say(d.message); })
-      .catch(function () { say("Couldn't load the activity. Retrying..."); });
+  async function load() {
+    if (loading) return;
+    loading = true; button.disabled = true;
+    var controller = new AbortController(), timeout = setTimeout(function () { controller.abort(); }, 20000);
+    try {
+      var response = await fetch(api, { headers: { Accept: "application/json" }, cache: "no-store", signal: controller.signal });
+      if (!response.ok) throw new Error("Unavailable");
+      var data = await response.json(); if (!data.ok) throw new Error("Unavailable"); render(data);
+    } catch (e) { updated.textContent = "Could not refresh. Any displayed values are from the previous snapshot. Retrying…"; }
+    finally { clearTimeout(timeout); loading = false; button.disabled = false; }
   }
-
-  var buttons = document.querySelectorAll(".gb button[data-action]");
-  function busy(on) { buttons.forEach(function (b) { b.disabled = on; }); }
-
-  function act(intent, decisionSeq) {
-    busy(true); say("Working...");
-    var body = new URLSearchParams({ j: id, intent: intent });
-    if (decisionSeq != null) body.set("decisionSeq", String(decisionSeq));
-    return fetch(api, { method: "POST", body: body, headers: { Accept: "application/json" } })
-      .then(function (r) { return r.json(); })
-      .then(function (d) { say(d.message); return load(); })
-      .catch(function () { say("That didn't go through. Nothing was paid twice; try again."); })
-      .finally(function () { busy(false); });
-  }
-
-  buttons.forEach(function (b) {
-    b.onclick = function () {
-      var a = b.getAttribute("data-action");
-      if (a === "verify") { say("Recomputing every hash from the first entry..."); load().then(function () { say(document.getElementById("gb-chain").textContent); }); }
-      else if (a === "new") { id = newId(); store("gb_judge", id); document.getElementById("gb-id").textContent = id; say("New session started."); load(); }
-      else act(a);
-    };
-  });
-
-  // Poll every 3s for 90s after an action (Gemini and PayPal take a while), otherwise every 30s,
-  // so an open tab doesn't keep the database awake.
-  var fastUntil = 0, lastPoll = 0;
-  var origAct = act;
-  act = function (intent, decisionSeq) { fastUntil = Date.now() + 90000; return origAct(intent, decisionSeq); };
+  button.onclick = load;
   load();
-  setInterval(function () {
-    var gap = Date.now() < fastUntil ? 3000 : 30000;
-    if (!document.hidden && Date.now() - lastPoll >= gap) { lastPoll = Date.now(); load(); }
-  }, 1000);
+  setInterval(function () { if (!document.hidden) load(); }, 15000);
 })();
 </script>
 `;
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { liquid } = await authenticate.public.appProxy(request);
-  return liquid(SHELL);
+  const { liquid, session } = await authenticate.public.appProxy(request);
+  if (!session) throw new Response("Not found", { status: 404 });
+  requirePublicDemo(session.shop);
+  return liquid(SHELL, { headers: { "Cache-Control": "no-store" } });
 };
