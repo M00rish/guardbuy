@@ -51,7 +51,7 @@ export const SHELL = `
   function render(data) {
     var stats = document.getElementById("gb-stats"); stats.replaceChildren();
     var orderCount = data.orders ? String(data.orders.count) + (data.orders.precision === "EXACT" ? "" : "+") : "Unavailable";
-    [[orderCount, "Test orders today · UTC"], [data.stock ? data.stock.products.length : "Unavailable", "Managed variants shown"], [data.decisions.proposals, "Restock proposals · all time"], [data.payments.total, "Supplier payments submitted · all time"]].forEach(function (pair) {
+    [[orderCount, "Test orders today · UTC"], [data.stock ? data.stock.products.length : "Unavailable", "Managed variants shown"], [data.decisions.proposals, "Restock proposals · all time"], [data.payments.total, "Supplier payment records · all time"]].forEach(function (pair) {
       var card = el("div", "card stat"); card.append(el("strong", null, pair[0]), el("span", "muted", pair[1])); stats.appendChild(card);
     });
     document.getElementById("gb-agent").textContent = (data.agentRunning ? "Agent enabled." : "Agent paused or rules not configured.") + " Policy decisions so far: " + data.decisions.automatic + " automatic, " + data.decisions.review + " required review, " + data.decisions.blocked + " blocked.";

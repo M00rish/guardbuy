@@ -1,4 +1,5 @@
 import db from "../../db.server";
+import type { PaymentLease } from "../agent/payment-lock.server";
 import { canonicalJson, sha256Hex } from "../policy/hash";
 import { AuditEventSchema, type AuditEntry, type AuditEvent } from "../policy/schema";
 
@@ -18,11 +19,15 @@ export async function appendAudit(shop: string, event: AuditEvent): Promise<Audi
 }
 
 /** Conditional append checks current history under the same database lock as the write. */
-export async function appendAuditWhen(shop: string, event: AuditEvent, when?: (log: AuditEntry[]) => boolean): Promise<AuditEntry | null> {
+export async function appendAuditWhen(shop: string, event: AuditEvent, when?: (log: AuditEntry[]) => boolean, lease?: PaymentLease): Promise<AuditEntry | null> {
   const parsed = AuditEventSchema.parse(event);
 
   return db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"audit:" + shop}))`;
+    if (lease) {
+      const rows = await tx.$queryRaw<{ holder: string; lockedUntil: Date }[]>`SELECT "holder", "lockedUntil" FROM "PaymentLock" WHERE "shop" = ${lease.key} FOR UPDATE`;
+      if (rows[0]?.holder !== lease.holder || rows[0].lockedUntil.getTime() <= Date.now()) throw new Error("Payment lease lost; no new attempt may start");
+    }
     if (when) {
       const rows = await tx.auditEntry.findMany({ where: { shop }, orderBy: { seq: "asc" } });
       const log = rows.map((r) => ({ seq: r.seq, shop: r.shop, at: r.at.toISOString(), event: AuditEventSchema.parse(r.event), prevHash: r.prevHash, hash: r.hash }));

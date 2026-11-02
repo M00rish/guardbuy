@@ -22,6 +22,9 @@ jobs:
       - run: npx tsx scripts/check-deliveries.ts
       - run: npx tsx scripts/check-public-demo.ts
       - run: npx tsx scripts/check-payout-refresh.ts
+      - run: npx tsx scripts/check-payment-attempts.ts
+      - run: npx tsx scripts/check-payment-http.ts
+      - run: npx tsx scripts/check-paypal-errors.ts
       - run: npx tsx scripts/check-policy.ts
       - run: npx tsx scripts/check-scoreboard.ts
       - run: node --import tsx scripts/check-checkpoints.ts

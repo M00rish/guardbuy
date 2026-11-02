@@ -8,7 +8,8 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
 import { approvalQueue, approveInPayPal, approvePurchase, rejectPurchase, type ApprovalCard } from "../lib/agent/approvals.server";
-import { ExecutionRefused } from "../lib/agent/execute.server";
+import { PaymentPending, PaymentRouteRefused } from "../lib/payments/attempts";
+import { ExecutionRefused, resumePayment } from "../lib/agent/execute.server";
 import { feedNames } from "../lib/merchant/dashboard.server";
 import { sweepPayPalOrders } from "../lib/paypal/orders-sweep.server";
 import { usd } from "../lib/format";
@@ -42,6 +43,11 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<ActionRes
 
   try {
     switch (form.get("intent")) {
+      case "resume": {
+        const entry = await resumePayment(session.shop, decisionSeq);
+        return entry.event.type === "order_created" ? { ok: true, message: "Original PayPal Order recovered. Continue approval in PayPal.", approveUrl: entry.event.approveUrl }
+          : { ok: true, message: "Original payment outcome recorded. Refresh its status in Activity." };
+      }
       case "approve":
         return { ok: true, ...(await approvePurchase(session.shop, decisionSeq, `shopify-staff:${staffId}`)) };
       case "reject":
@@ -54,9 +60,9 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<ActionRes
         return { ok: false, message: "Unknown action" };
     }
   } catch (e) {
-    if (e instanceof ExecutionRefused) return { ok: false, message: e.message };
-    console.error(`[approvals] ${session.shop} #${decisionSeq}:`, e);
-    return { ok: false, message: "Something went wrong. Nothing was paid twice; try again." };
+    if (e instanceof ExecutionRefused || e instanceof PaymentPending || e instanceof PaymentRouteRefused) return { ok: false, message: e.message };
+    console.error("[approvals] Payment action could not be confirmed");
+    return { ok: false, message: "Payment status could not be confirmed. Refresh and check the original purchase before retrying." };
   }
 };
 
@@ -114,9 +120,9 @@ function CardView({ card }: { card: Card }) {
     <s-section heading={`${card.quantity} × ${card.productTitle}`}>
       <s-stack gap="base">
         <s-stack direction="inline" gap="small-200" alignItems="center">
-          <s-badge tone={card.status === "paypal_pending" ? "info" : "caution"}>{card.status === "paypal_pending" ? "Waiting for PayPal" : "Needs you"}</s-badge>
+          <s-badge tone={card.status === "paypal_pending" ? "info" : "caution"}>{card.status === "payment_unknown" ? "Awaiting PayPal confirmation" : card.status === "paypal_pending" ? "Waiting for PayPal" : "Needs you"}</s-badge>
           <s-heading>{usd(card.totalCents)}</s-heading>
-          <s-text tone="neutral">from {card.supplierName} · proposed {ago(card.proposedAt, Date.now())} · {expiresIn(card.expiresAt)}</s-text>
+          <s-text tone="neutral">from {card.supplierName} · proposed {ago(card.proposedAt, Date.now())} · {card.status === "payment_unknown" ? "Original payment remains reserved" : expiresIn(card.expiresAt)}</s-text>
         </s-stack>
 
         <s-stack gap="small-200">
@@ -147,7 +153,13 @@ function CardView({ card }: { card: Card }) {
           </s-stack>
         </s-box>
 
-        {card.status === "paypal_pending" && card.paypalApproveUrl ? (
+        {card.status === "payment_unknown" ? (
+          <s-stack gap="base">
+            <s-text>The original payment outcome is uncertain. Resuming may submit that original payment if PayPal has not processed it. It uses the same request ID and cannot switch payment routes.</s-text>
+            <s-button disabled={busy} loading={busy && busyWith === "resume"} onClick={() => submit("resume")}>Resume original payment</s-button>
+            {fetcher.data?.approveUrl && <s-link href={fetcher.data.approveUrl} target="_blank">Continue in PayPal</s-link>}
+          </s-stack>
+        ) : card.status === "paypal_pending" && card.paypalApproveUrl ? (
           <s-stack direction="inline" gap="base" alignItems="center">
             <s-button variant="primary" href={card.paypalApproveUrl} target="_blank">Open PayPal to approve</s-button>
             <s-text tone="neutral">GuardBuy records the payment when PayPal sends you back.</s-text>

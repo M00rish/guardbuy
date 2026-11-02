@@ -1,6 +1,6 @@
 import db from "../../db.server";
 import { deliveries } from "../inventory/deliveries";
-import { appendAudit, auditEntries } from "../audit/log.server";
+import { appendAudit, appendAuditWhen, auditEntries } from "../audit/log.server";
 import type { StockCheck } from "../inventory/trigger.server";
 import { paypal } from "../paypal/client.server";
 import { evaluate, SPLIT_WINDOW_HOURS, type PolicyContext } from "../policy/engine";
@@ -8,7 +8,9 @@ import { hashOf } from "../policy/hash";
 import { RuleSetSchema, type AuditEntry, type RecordedProposal, type RuleSet } from "../policy/schema";
 import { isManaged, offersForVariant, supplierRoster, type Offer, type RosterEntry } from "../suppliers/directory.server";
 import { lookalikeOf } from "../policy/lookalike";
-import { executePurchase } from "./execute.server";
+import { purchaseReservations, PaymentPending } from "../payments/attempts";
+import { withPaymentLock, type PaymentLease } from "./payment-lock.server";
+import { executePurchase, ExecutionRefused } from "./execute.server";
 import { proposePurchase } from "./proposer.server";
 
 // The restock loop: low stock -> LLM proposal -> policy decision -> payout (only if "auto").
@@ -27,7 +29,7 @@ export const APPROVAL_TTL_MS = 48 * 60 * 60_000;
 export const approvalExpired = (decisionAt: string, now = new Date()) => now.getTime() - Date.parse(decisionAt) >= APPROVAL_TTL_MS;
 
 // PayPal payout statuses (batch or item) meaning the supplier did not get, or did not keep, the money.
-const PAYOUT_FAILED = new Set(["DENIED", "CANCELED", "FAILED", "RETURNED", "BLOCKED", "REFUNDED", "REVERSED", "UNCLAIMED"]);
+const PAYOUT_FAILED = new Set(["DENIED", "CANCELED", "CANCELLED", "FAILED", "RETURNED", "BLOCKED", "REFUNDED", "REVERSED", "DECLINED"]);
 
 /** Demo rules, signed by a script until merchants sign their own in the app (Oct 18). */
 export function defaultRuleSet(shop: string): RuleSet {
@@ -76,24 +78,46 @@ export function signRuleSet(shop: string, rules: RuleSet, signedBy: string) {
  * report's "as of" time are subtracted; a burst of purchases can't all see the same stale balance.
  * (Demo: one PayPal account serves every shop, so payments from all shops count.)
  */
-export async function paypalBalanceCents(): Promise<number | null> {
+export async function paypalBalanceCents(exclude?: { shop: string; decisionSeq: number }): Promise<number | null> {
   try {
     const res = await paypal<{ as_of_time?: string; balances?: { currency: string; available_balance?: { value: string } }[] }>(
       "/v1/reporting/balances?currency_code=USD",
     );
     const usd = res.balances?.find((b) => b.currency === "USD")?.available_balance?.value;
     if (usd === undefined) return null;
-    return adjustForLag(Math.round(Number(usd) * 100), res.as_of_time ? new Date(res.as_of_time) : null);
+    return adjustForLag(Math.round(Number(usd) * 100), res.as_of_time ? new Date(res.as_of_time) : null, exclude);
   } catch (e) {
     console.warn(`[restock] balance unavailable: ${(e as Error).message}`);
     return null;
   }
 }
 
-async function adjustForLag(reportedCents: number, asOf: Date | null) {
-  if (!asOf || Number.isNaN(asOf.getTime())) return reportedCents;
-  const since = await db.auditEntry.findMany({ where: { type: { in: ["payout", "order_captured"] }, at: { gt: asOf } }, select: { event: true } });
-  return reportedCents - sinceTotal(since.map((r) => r.event as { amountCents?: number }));
+async function adjustForLag(reportedCents: number, asOf: Date | null, exclude?: { shop: string; decisionSeq: number }) {
+  const rows = await db.auditEntry.findMany({ where: { type: { in: ["payment_attempt", "payment_outcome", "payment_failed", "decision", "rejected", "order_created", "order_closed", "payout", "order_captured", "payout_status", "order_status"] } }, orderBy: [{ shop: "asc" }, { seq: "asc" }] });
+  const groups = new Map<string, AuditEntry[]>();
+  for (const row of rows) {
+    const list = groups.get(row.shop) ?? [];
+    list.push({ ...row, at: row.at.toISOString(), event: row.event as AuditEntry["event"] }); groups.set(row.shop, list);
+  }
+  return reportedCents - [...groups].reduce((sum, [shop, log]) => sum + balanceCommitmentCents(log, asOf, exclude?.shop === shop ? exclude.decisionSeq : undefined), 0);
+}
+
+/** First positive settlement evidence: a long-pending payment must enter current spending when it settles. */
+function settledAt(entry: AuditEntry, log: AuditEntry[]) {
+  const ev = entry.event;
+  if (ev.type === "payout") return log.find((e) => e.event.type === "payout_status" && e.event.payoutSeq === entry.seq && e.event.status === "SUCCESS")?.at ?? entry.at;
+  if (ev.type === "order_captured" && ev.status !== "COMPLETED") return log.find((e) => e.event.type === "order_status" && e.event.orderId === ev.orderId && e.event.status === "COMPLETED")?.at ?? entry.at;
+  return entry.at;
+}
+
+export function balanceCommitmentCents(log: AuditEntry[], asOf: Date | null, exclude?: number) {
+  const reservations = purchaseReservations(log);
+  const reserved = [...reservations].reduce((sum, [seq, r]) => sum + (seq === exclude ? 0 : r.amountCents), 0);
+  const paidSince = asOf && !Number.isNaN(asOf.getTime()) ? log.reduce((sum, e) => {
+    const ev = e.event;
+    return (ev.type === "payout" || ev.type === "order_captured") && !reservations.has(ev.decisionSeq) && Date.parse(settledAt(e, log)) > asOf.getTime() ? sum + ev.amountCents : sum;
+  }, 0) : 0;
+  return reserved + paidSince;
 }
 
 /** Sum of amounts paid after the balance report (exported for checks). */
@@ -113,15 +137,18 @@ function payoutFailedAt(payout: AuditEntry, log: AuditEntry[]): string | null {
  * decision being paid right now, so it doesn't count against itself.
  */
 export function spending(log: AuditEntry[], now = new Date(), exclude?: number) {
+  const reservations = purchaseReservations(log);
   const paid = log.flatMap((e) => {
-    if (e.event.type === "payout" && !payoutFailedAt(e, log) && e.event.decisionSeq !== exclude) return [{ at: e.at, cents: e.event.amountCents }];
+    if ("decisionSeq" in e.event && reservations.has(e.event.decisionSeq)) return [];
+    if (e.event.type === "payout" && !payoutFailedAt(e, log) && e.event.decisionSeq !== exclude) return [{ at: settledAt(e, log), cents: e.event.amountCents }];
     if (e.event.type === "order_captured" && e.event.decisionSeq !== exclude) {
       // Refunded money no longer counts as spent.
       const orderId = e.event.orderId;
       const status = log.filter((x) => x.event.type === "order_status" && x.event.orderId === orderId).at(-1);
+      if (PAYOUT_FAILED.has(status?.event.type === "order_status" ? status.event.status : e.event.status)) return [];
       const refunded = status?.event.type === "order_status" ? status.event.refundedCents : 0;
       const cents = Math.max(0, e.event.amountCents - refunded);
-      return cents > 0 ? [{ at: e.at, cents }] : [];
+      return cents > 0 ? [{ at: settledAt(e, log), cents }] : [];
     }
     return [];
   });
@@ -135,9 +162,10 @@ export function spending(log: AuditEntry[], now = new Date(), exclude?: number) 
 
 /** Total of purchases waiting for approval (not expired, not paid, declined or tests). */
 export function pendingApprovalCents(log: AuditEntry[], now = new Date(), exclude?: number) {
-  let total = 0;
+  const reservations = purchaseReservations(log);
+  let total = [...reservations].filter(([seq]) => seq !== exclude).reduce((sum, [, r]) => sum + r.amountCents, 0);
   for (const d of log) {
-    if (d.event.type !== "decision" || d.event.decision.verdict !== "approval" || d.seq === exclude || approvalExpired(d.at, now)) continue;
+    if (d.event.type !== "decision" || d.event.decision.verdict !== "approval" || d.seq === exclude || reservations.has(d.seq) || approvalExpired(d.at, now)) continue;
     const proposalSeq = d.event.proposalSeq;
     const p = log.find((e) => e.seq === proposalSeq);
     if (p?.event.type === "proposal" && p.event.scenario) continue;
@@ -164,22 +192,28 @@ function commitments(log: AuditEntry[], now: Date, exclude?: number): Commitment
     return p?.event.type === "proposal" && !p.event.scenario ? p.event.proposal : null;
   };
   const out: Commitment[] = [];
+  const reservations = purchaseReservations(log);
   for (const e of log) {
     const ev = e.event;
     if ("decisionSeq" in ev && ev.decisionSeq === exclude) continue;
-    if (ev.type === "payout" && !payoutFailedAt(e, log)) {
+    if (ev.type === "payout" && !reservations.has(ev.decisionSeq) && !payoutFailedAt(e, log)) {
       const proposal = proposalOf(ev.decisionSeq);
-      if (proposal) out.push({ at: e.at, proposal, cents: ev.amountCents, paid: true });
-    } else if (ev.type === "order_captured") {
+      if (proposal) out.push({ at: settledAt(e, log), proposal, cents: ev.amountCents, paid: true });
+    } else if (ev.type === "order_captured" && !reservations.has(ev.decisionSeq)) {
       const status = log.filter((x) => x.event.type === "order_status" && x.event.orderId === ev.orderId).at(-1);
+      if (PAYOUT_FAILED.has(status?.event.type === "order_status" ? status.event.status : ev.status)) continue;
       const cents = Math.max(0, ev.amountCents - (status?.event.type === "order_status" ? status.event.refundedCents : 0));
       const proposal = proposalOf(ev.decisionSeq);
-      if (proposal && cents > 0) out.push({ at: e.at, proposal, cents, paid: true });
-    } else if (ev.type === "decision" && ev.decision.verdict === "approval" && e.seq !== exclude && !approvalExpired(e.at, now)) {
+      if (proposal && cents > 0) out.push({ at: settledAt(e, log), proposal, cents, paid: true });
+    } else if (ev.type === "decision" && ev.decision.verdict === "approval" && !reservations.has(e.seq) && e.seq !== exclude && !approvalExpired(e.at, now)) {
       const settled = log.some((x) => "decisionSeq" in x.event && x.event.decisionSeq === e.seq && ["payout", "order_captured", "rejected", "payment_failed"].includes(x.event.type));
       const p = log.find((x) => x.seq === ev.proposalSeq);
       if (!settled && p?.event.type === "proposal" && !p.event.scenario) out.push({ at: e.at, proposal: p.event.proposal, cents: ev.decision.totalCents, paid: false });
     }
+  }
+  for (const [seq, reservation] of reservations) {
+    const proposal = proposalOf(seq);
+    if (seq !== exclude && proposal) out.push({ at: reservation.at, proposal, cents: reservation.amountCents, paid: false });
   }
   return out;
 }
@@ -266,6 +300,11 @@ function approvedPrices(log: AuditEntry[], exclude?: number): RecordedProposal[]
  */
 export function skipReason(item: { variantId: string; sku: string }, log: AuditEntry[], now = new Date()): string | null {
   // Matched by variant (SKUs can be shared); entries without a variant id fall back to the SKU.
+  for (const seq of purchaseReservations(log).keys()) {
+    const d = log.find((e) => e.seq === seq)?.event;
+    const p = d?.type === "decision" ? log.find((e) => e.seq === d.proposalSeq)?.event : undefined;
+    if (p?.type === "proposal" && !p.scenario && (p.proposal.variantId ? p.proposal.variantId === item.variantId : p.proposal.sku === item.sku)) return `purchase #${seq} is awaiting PayPal confirmation; its reservation has not expired`;
+  }
   const outstanding = deliveries(log).find((d) => d.variantId === item.variantId && (d.remaining > 0 || d.pending) && (d.payment !== "failed" || d.pending));
   if (outstanding) return `restock #${outstanding.decisionSeq} is already open: ${outstanding.remaining} units awaiting delivery${outstanding.pending ? " (receipt needs confirmation)" : ""}`;
   const same = (r: { variantId?: string; sku: string }) => (r.variantId ? r.variantId === item.variantId : r.sku === item.sku);
@@ -319,14 +358,14 @@ export function runRestock(shop: string, check: StockCheck): Promise<RestockResu
   const inFlight = running.get(key);
   if (inFlight) return inFlight.then(() => ({ outcome: "skipped" as const, reason: "a restock for this product was already running" }));
 
-  const job = restock(shop, check).finally(() => running.delete(key));
+  const job = withPaymentLock(`restock:${key}`, (lease) => restock(shop, check, lease)).finally(() => running.delete(key));
   running.set(key, job);
   return job;
 }
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 300);
 
-async function restock(shop: string, check: StockCheck): Promise<RestockResult> {
+async function restock(shop: string, check: StockCheck, lease: PaymentLease): Promise<RestockResult> {
   let log = await auditEntries(shop);
   const rules = currentRuleSet(log);
   if (!rules) return { outcome: "skipped", reason: "no signed rules yet, so the agent is off" };
@@ -355,12 +394,14 @@ async function restock(shop: string, check: StockCheck): Promise<RestockResult> 
     return { outcome: "failed", reason };
   }
   const stock = { available: check.available, perDay: Number(check.perDay.toFixed(2)), daysOfCover: Number(check.daysOfCover.toFixed(1)) };
-  const p = await appendAudit(shop, { type: "proposal", proposal, stock });
+  const p = await appendAuditWhen(shop, { type: "proposal", proposal, stock }, (current) => !skipReason(check, current), lease);
+  if (!p) return { outcome: "skipped", reason: "Another restock reserved this product" };
 
   // 2. The policy engine decides (deterministic).
   log = await auditEntries(shop);
   const decision = evaluate(proposal, rules, policyContext(proposal, log, await paypalBalanceCents(), { managed, offers, suppliers: await supplierRoster(shop) }));
-  const d = await appendAudit(shop, { type: "decision", proposalSeq: p.seq, decision });
+  const d = await appendAuditWhen(shop, { type: "decision", proposalSeq: p.seq, decision }, (current) => !current.some((e) => e.event.type === "decision" && e.event.proposalSeq === p.seq), lease);
+  if (!d) return { outcome: "skipped", reason: "Another worker already decided this restock" };
   const result: RestockResult = { outcome: decision.verdict, proposalSeq: p.seq, decisionSeq: d.seq };
 
   // 3. Only "auto" pays now; "approval" waits for a person, "block" stops here.
@@ -369,8 +410,9 @@ async function restock(shop: string, check: StockCheck): Promise<RestockResult> 
       result.payoutSeq = (await executePurchase(shop, d.seq)).seq;
     } catch (e) {
       // Logged so the SKU is retried later; paying the same decision again can never pay twice.
-      result.error = errorText(e);
-      await appendAudit(shop, { type: "payment_failed", decisionSeq: d.seq, reason: result.error });
+      const uncertain = e instanceof PaymentPending || await auditEntries(shop).then((entries) => purchaseReservations(entries).has(d.seq), () => true);
+      result.error = uncertain ? new PaymentPending().message : e instanceof ExecutionRefused ? e.message : "Payment was not confirmed. Review the purchase.";
+      if (!uncertain) await appendAudit(shop, { type: "payment_failed", decisionSeq: d.seq, reason: result.error, definitive: true });
     }
   }
   return result;

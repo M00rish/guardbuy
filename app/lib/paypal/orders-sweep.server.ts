@@ -1,11 +1,12 @@
 import { appendAudit, auditEntries } from "../audit/log.server";
 import { captureApprovalOrder, closeOrder, ExecutionRefused, openOrder } from "../agent/execute.server";
 import { runPayPalTool } from "./toolkit.server";
+import { unresolvedPayments } from "../payments/attempts";
 
 // Background check of PayPal orders (approval in PayPal), so nothing depends on PayPal's redirect
 // reaching GuardBuy:
 //   approved in PayPal -> captured (payer check + rules re-check happen inside capture)
-//   cancelled / expired / unknown to PayPal -> closed, which frees the purchase
+//   confirmed cancelled / expired -> closed, which frees the purchase
 //   already captured -> watched for refunds (spending stops counting refunded money)
 // Runs when Approvals loads and from the reconcile job.
 
@@ -17,7 +18,6 @@ type Order = {
   purchase_units?: { payments?: { captures?: { status: string }[]; refunds?: { amount?: { value: string } }[] } }[];
 };
 
-const notFound = (e: unknown) => /RESOURCE_NOT_FOUND|404/.test(String(e instanceof Error ? e.message : e));
 
 export async function sweepPayPalOrders(shop: string): Promise<string[]> {
   const notes: string[] = [];
@@ -34,19 +34,22 @@ export async function sweepPayPalOrders(shop: string): Promise<string[]> {
       let order: Order;
       try {
         order = await runPayPalTool<Order>("get_order", { id: orderId });
-      } catch (e) {
-        if (notFound(e)) { await closeOrder(shop, decisionSeq, orderId, "expired"); notes.push(`#${decisionSeq} ${orderId}: unknown to PayPal, closed`); }
-        else notes.push(`#${decisionSeq} ${orderId}: PayPal unavailable, will retry`);
+      } catch {
+        notes.push(`#${decisionSeq} ${orderId}: PayPal status unavailable; reservation retained`);
         continue;
       }
       if (order.status === "APPROVED" || order.status === "COMPLETED") {
+        if (unresolvedPayments(log).some((s) => s.attempt.decisionSeq === decisionSeq)) {
+          notes.push(`#${decisionSeq} ${orderId}: original capture needs confirmation; explicit resumption required`);
+          continue;
+        }
         try {
           const entry = await captureApprovalOrder(shop, decisionSeq);
           notes.push(`#${decisionSeq} ${orderId}: captured (entry #${entry.seq})`);
         } catch (e) {
           notes.push(`#${decisionSeq} ${orderId}: not captured: ${e instanceof ExecutionRefused ? e.message : "PayPal error, will retry"}`);
         }
-      } else if (order.status === "VOIDED" || Date.now() - Date.parse(open.at) > UNAPPROVED_ORDER_TTL_MS) {
+      } else if (order.status === "VOIDED" || ["CREATED", "PAYER_ACTION_REQUIRED"].includes(order.status) && Date.now() - Date.parse(open.at) > UNAPPROVED_ORDER_TTL_MS) {
         await closeOrder(shop, decisionSeq, orderId, "expired");
         notes.push(`#${decisionSeq} ${orderId}: expired without approval, closed`);
       }

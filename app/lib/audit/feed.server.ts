@@ -44,6 +44,12 @@ export function toFeed(log: AuditEntry[], you?: string, names: FeedNames = {}): 
     const ev = e.event;
     const base = { seq: e.seq, at: e.at };
     switch (ev.type) {
+      case "payment_attempt":
+        items.push({ ...base, kind: "paypal", title: `Original payment reserved for purchase #${ev.decisionSeq}`, detail: "PayPal confirmation is pending; the request ID and payment details are fixed." });
+        break;
+      case "payment_outcome":
+        items.push({ ...base, kind: ev.status === "unknown" ? "paypal" : "failed", title: ev.status === "unknown" ? `Awaiting PayPal confirmation for purchase #${ev.decisionSeq}` : `Payment request rejected for purchase #${ev.decisionSeq}` });
+        break;
       case "receipt_started":
         items.push({ ...base, kind: "stock", title: `Recording receipt of ${ev.quantity} units for purchase #${ev.decisionSeq}` });
         break;

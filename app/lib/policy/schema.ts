@@ -98,6 +98,13 @@ export type Decision = z.infer<typeof DecisionSchema>;
 
 export const AuditEventSchema = z.discriminatedUnion("type", [
   z.object({
+    type: z.literal("payment_attempt"), decisionSeq: z.number().int(), attemptId: z.string(),
+    operation: z.enum(["payout", "order_create", "order_capture"]), route: z.enum(["payout", "order"]),
+    requestId: z.string(), amountCents: cents.positive(), currency: z.literal("USD"), payeeEmail: z.string().email(),
+    fundingKey: z.string(), previouslyUncertain: z.boolean().optional(), body: z.record(z.string(), z.unknown()), providerId: z.string().optional(), retryUntil: z.string().datetime(),
+  }),
+  z.object({ type: z.literal("payment_outcome"), decisionSeq: z.number().int(), attemptId: z.string(), status: z.enum(["unknown", "failed"]) }),
+  z.object({
     type: z.literal("receipt_started"), decisionSeq: z.number().int(), receiptId: z.string().uuid(),
     quantity: z.number().int().positive(), expectedReceived: z.number().int().nonnegative(),
     variantId: z.string(), inventoryItemId: z.string(), locationId: z.string(), receivedBy: z.string(),
@@ -125,9 +132,10 @@ export const AuditEventSchema = z.discriminatedUnion("type", [
   // A person declined a purchase that needed approval. Nothing is paid; the product is retried later.
   z.object({ type: z.literal("rejected"), decisionSeq: z.number().int(), rejectedBy: z.string(), reason: z.string().max(500).optional() }),
   // An approved decision could not be paid (PayPal error, refused payee, ...). Frees the SKU to retry.
-  z.object({ type: z.literal("payment_failed"), decisionSeq: z.number().int(), reason: z.string() }),
+  z.object({ type: z.literal("payment_failed"), definitive: z.boolean().optional(), decisionSeq: z.number().int(), reason: z.string() }),
   z.object({
     type: z.literal("payout"),
+    paymentAttemptId: z.string().optional(),
     decisionSeq: z.number().int(),
     payoutBatchId: z.string(),
     status: z.string(), // PayPal batch status at time of logging
@@ -136,6 +144,7 @@ export const AuditEventSchema = z.discriminatedUnion("type", [
   // Approval through PayPal: an Orders API order paying the supplier, approved by the merchant in PayPal.
   z.object({
     type: z.literal("order_created"),
+    paymentAttemptId: z.string().optional(),
     decisionSeq: z.number().int(),
     orderId: z.string(),
     approveUrl: z.string().url(),
@@ -143,6 +152,7 @@ export const AuditEventSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("order_captured"),
+    paymentAttemptId: z.string().optional(),
     decisionSeq: z.number().int(),
     orderId: z.string(),
     captureId: z.string(),

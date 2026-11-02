@@ -51,6 +51,12 @@ assert.equal(view.payments.refunded, 2);
 assert.ok(!JSON.stringify(view).includes("private"), "public view must not leak private audit fields");
 assert.ok(!JSON.stringify(view).includes("<script>"));
 assert.equal(publicAudit([]).payments.total, 0);
+const unknown = structuredClone(log.slice(0, 2));
+unknown.push({ ...unknown[0], seq: 2, event: { type: "payment_attempt", decisionSeq: d, attemptId: "private-attempt", requestId: "private-request", operation: "payout", route: "payout", amountCents: 100, currency: "USD", payeeEmail: "private@example.test", fundingKey: "private-account", body: { private: "private-provider-request" }, retryUntil: "2026-12-01T00:00:00.000Z" } });
+assert.equal(publicAudit(unknown).payments.pending, 1);
+assert.ok(!JSON.stringify(publicAudit(unknown)).includes("private"), "durable request snapshots must not appear on the public page");
+unknown.push({ ...unknown[0], seq: 3, event: { type: "payout", decisionSeq: d, paymentAttemptId: "private-attempt", payoutBatchId: "private-batch", amountCents: 100, status: "PENDING" } });
+assert.equal(publicAudit(unknown).payments.total, 1, "resolved attempts and their provider results count only once");
 for (let i = 0; i < 40; i++) add({ type: "approved", decisionSeq: d, approvedBy: "private-staff" });
 assert.equal(publicAudit(log).timeline.length, 30);
 

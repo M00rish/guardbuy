@@ -1,11 +1,13 @@
 import db from "../../db.server";
-import { appendAudit, auditEntries } from "../audit/log.server";
+import { appendAuditWhen, auditEntries } from "../audit/log.server";
 import { paypal } from "../paypal/client.server";
 import { runPayPalTool } from "../paypal/toolkit.server";
 import type { AuditEntry, RecordedProposal } from "../policy/schema";
 import { isManaged, offersForVariant, supplierPaymentEmail, supplierRoster } from "../suppliers/directory.server";
 import { evaluate } from "../policy/engine";
 import { withPaymentLock } from "./payment-lock.server";
+import { candidateAttempt, fundingKey, performAttempt, submitPayout } from "../payments/attempts.server";
+import { attemptStates, canCloseOrder, purchaseReservations, unresolvedPayments, PaymentPending, PaymentRejected, type Attempt, type PaymentResult } from "../payments/attempts";
 import { agentOn, approvalExpired, currentRuleSet, paypalBalanceCents, policyContext } from "./restock.server";
 
 // The only code that moves money. It never takes amounts or suppliers from callers:
@@ -24,9 +26,9 @@ export type PayPalOrder = {
   links?: { rel: string; href: string }[];
   payer?: { payer_id?: string };
   purchase_units?: {
-    amount?: { value: string };
+    amount?: { value: string; currency_code?: string };
     payee?: { email_address?: string };
-    payments?: { captures?: { id: string; status: string; amount: { value: string } }[] };
+    payments?: { captures?: { id: string; status: string; amount: { value: string; currency_code?: string } }[] };
   }[];
 };
 
@@ -64,17 +66,25 @@ export function openOrder(log: AuditEntry[], decisionSeq: number) {
 export function checkCapture(order: PayPalOrder, amountCents: number, payeeEmail: string | undefined) {
   const unit = order.purchase_units?.[0];
   const cap = unit?.payments?.captures?.[0];
+  if (order.purchase_units?.length !== 1 || unit?.payments?.captures?.length !== 1) throw new Error("Unexpected PayPal capture structure");
   if (!cap) throw new Error(`PayPal order ${order.id} has no capture`);
+  if (!cap.id || !cap.status || !unit?.amount || toCents(unit.amount.value) !== amountCents) throw new Error("Incomplete or inconsistent PayPal capture evidence");
   if (toCents(cap.amount.value) !== amountCents) throw new Error(`Captured ${cap.amount.value}, expected ${(amountCents / 100).toFixed(2)}`);
+  if (cap.amount.currency_code !== "USD" || unit?.amount?.currency_code !== "USD") throw new Error("Unexpected PayPal capture currency");
   const payee = unit?.payee?.email_address;
-  if (payee && payee.toLowerCase() !== payeeEmail?.toLowerCase()) throw new Error(`PayPal order ${order.id} pays an unexpected payee`);
+  if (!payee || payee.toLowerCase() !== payeeEmail?.toLowerCase()) throw new Error(`PayPal order ${order.id} pays an unexpected payee`);
   return cap;
 }
 
 export async function closeOrder(shop: string, decisionSeq: number, orderId: string, reason: "cancelled" | "expired" | "wrong_payer") {
   const log = await auditEntries(shop);
   const already = log.find((e) => e.event.type === "order_closed" && e.event.orderId === orderId);
-  return already ?? appendAudit(shop, { type: "order_closed", decisionSeq, orderId, reason });
+  if (already) return already;
+  const closed = await appendAuditWhen(shop, { type: "order_closed", decisionSeq, orderId, reason }, (current) => canCloseOrder(current, decisionSeq, orderId));
+  if (closed) return closed;
+  const concurrent = (await auditEntries(shop)).find((e) => e.event.type === "order_closed" && e.event.orderId === orderId);
+  if (concurrent) return concurrent;
+  throw new PaymentPending();
 }
 
 /**
@@ -139,7 +149,7 @@ async function recheckAtPayment(shop: string, decisionSeq: number, opts: { appro
   const [managed, offers, balance] = await Promise.all([
     proposal.variantId ? isManaged(shop, proposal.variantId) : Promise.resolve(false),
     proposal.variantId ? offersForVariant(shop, proposal.variantId) : Promise.resolve([]),
-    paypalBalanceCents(),
+    paypalBalanceCents({ shop, decisionSeq }),
   ]);
   const fresh = evaluate(proposal, rules, policyContext(proposal, log, balance, { managed, offers, suppliers: await supplierRoster(shop) }, new Date(), decisionSeq));
   const reasons = (verdict: string) => fresh.checks.filter((c) => c.outcome === verdict).map((c) => c.detail).join("; ");
@@ -151,55 +161,38 @@ async function recheckAtPayment(shop: string, decisionSeq: number, opts: { appro
 // ---------- Payouts ----------
 
 export async function executePurchase(shop: string, decisionSeq: number): Promise<AuditEntry> {
-  const { log, decisionEntry, decision, proposal } = await payableDecision(shop, decisionSeq);
-
-  const existing = forDecision(log, "payout", decisionSeq);
-  if (existing) return existing; // already paid: never pay twice
-  if (openOrder(log, decisionSeq)) {
-    throw new ExecutionRefused(`Decision ${decisionSeq} is being paid through a PayPal order`);
-  }
-  const approved = !!forDecision(log, "approved", decisionSeq);
-  if (decision.verdict === "approval" && !approved) {
-    throw new ExecutionRefused(`Decision ${decisionSeq} is waiting for approval`);
-  }
-
-  return withPaymentLock(shop, async () => {
-  // Under the lock: paid meanwhile by someone else? Then return that payout instead of paying again.
-  const paidMeanwhile = forDecision(await auditEntries(shop), "payout", decisionSeq);
-  if (paidMeanwhile) return paidMeanwhile;
-  await recheckAtPayment(shop, decisionSeq, { approvedByPerson: approved });
-  assertPaymentsEnabled(); // last thing before money moves
-
-  // Deterministic id per decision: PayPal treats a repeated id as the same payout.
-  const batchId = `gb-${decisionSeq}-${decisionEntry.hash.slice(0, 16)}`;
-  const res = await paypal<PayoutResponse>("/v1/payments/payouts", {
-    method: "POST",
-    requestId: batchId,
-    body: {
-      sender_batch_header: {
-        sender_batch_id: batchId,
-        email_subject: "GuardBuy purchase order payment",
-        email_message: `Payment for ${proposal.quantity} x ${proposal.sku}`,
+  return withPaymentLock(`funding:${fundingKey()}`, async (lease) => {
+    const { log, decisionEntry, decision, proposal } = await payableDecision(shop, decisionSeq);
+    const existing = forDecision(log, "payout", decisionSeq);
+    if (existing) return existing;
+    if (forDecision(log, "order_captured", decisionSeq) || openOrder(log, decisionSeq)) throw new ExecutionRefused("This purchase is reserved for a PayPal Order");
+    const approved = !!forDecision(log, "approved", decisionSeq);
+    if (decision.verdict === "approval" && !approved) throw new ExecutionRefused("This purchase is waiting for merchant approval");
+    const unresolved = unresolvedPayments(log).find((s) => s.attempt.decisionSeq === decisionSeq);
+    if (unresolved && unresolved.attempt.operation !== "payout") throw new PaymentPending();
+    const previous = attemptStates(log).filter((s) => s.attempt.decisionSeq === decisionSeq && s.attempt.operation === "payout");
+    const legacy = !previous.length && log.some((e) => e.event.type === "payment_failed" && e.event.decisionSeq === decisionSeq);
+    const batchId = `gb-${decisionSeq}-${decisionEntry.hash.slice(0, 16)}${previous.length ? `-${previous.length + 1}` : ""}`;
+    const attempt = unresolved?.attempt ?? candidateAttempt({
+      decisionSeq, operation: "payout", route: "payout", requestId: batchId,
+      amountCents: decision.totalCents, currency: "USD", payeeEmail: await payeeFor(shop, proposal), previouslyUncertain: legacy,
+      body: { sender_batch_header: { sender_batch_id: batchId, email_subject: "GuardBuy purchase order payment", email_message: `Payment for ${proposal.quantity} x ${proposal.sku}` },
+        items: [{ recipient_type: "EMAIL", receiver: proposal.payeeEmail, amount: { value: (decision.totalCents / 100).toFixed(2), currency: "USD" },
+          note: `GuardBuy PO ${shop} #${decisionSeq}: ${proposal.quantity} x ${proposal.sku} (rules ${decision.ruleSetHash.slice(0, 12)})`, sender_item_id: `po-${decisionSeq}` }] },
+    }, legacy ? Date.parse(decisionEntry.at) : Date.now());
+    return performAttempt(shop, attempt, lease, {
+      lookup: async () => null, // No read-only Payouts endpoint searches by sender_batch_id.
+      beforeSend: async (saved) => {
+        await recheckAtPayment(shop, decisionSeq, { approvedByPerson: approved });
+        if (await payeeFor(shop, proposal) !== saved.payeeEmail) throw new ExecutionRefused("The recorded payee changed");
+        assertPaymentsEnabled();
       },
-      items: [
-        {
-          recipient_type: "EMAIL",
-          receiver: await payeeFor(shop, proposal),
-          amount: { value: (decision.totalCents / 100).toFixed(2), currency: "USD" },
-          note: `GuardBuy PO ${shop} #${decisionSeq}: ${proposal.quantity} x ${proposal.sku} (rules ${decision.ruleSetHash.slice(0, 12)})`,
-          sender_item_id: `po-${decisionSeq}`,
-        },
-      ],
-    },
-  });
-
-  return appendAudit(shop, {
-    type: "payout",
-    decisionSeq,
-    payoutBatchId: res.batch_header.payout_batch_id,
-    status: res.batch_header.batch_status,
-    amountCents: decision.totalCents,
-  });
+      send: async (saved) => {
+        const response = await submitPayout<PayoutResponse>(saved);
+        if (!response.batch_header?.payout_batch_id || !response.batch_header.batch_status) throw new Error("Unconfirmed PayPal payout response");
+        return { type: "payout", decisionSeq, payoutBatchId: response.batch_header.payout_batch_id, status: response.batch_header.batch_status, amountCents: saved.amountCents };
+      },
+    });
   });
 }
 
@@ -211,50 +204,39 @@ export async function executePurchase(shop: string, decisionSeq: number): Promis
  * Calling it again for the same decision returns the same order.
  */
 export async function createApprovalOrder(shop: string, decisionSeq: number, returnUrl: string): Promise<AuditEntry> {
-  const { log, decisionEntry, decision, proposal } = await payableDecision(shop, decisionSeq);
-
-  const existing = openOrder(log, decisionSeq);
-  if (existing) return existing;
-  if (forDecision(log, "order_captured", decisionSeq)) throw new ExecutionRefused(`Decision ${decisionSeq} was already paid`);
-  if (decision.verdict !== "approval") throw new ExecutionRefused(`Decision ${decisionSeq} does not need approval`);
-  if (forDecision(log, "payout", decisionSeq)) throw new ExecutionRefused(`Decision ${decisionSeq} was already paid`);
-  // A person approves inside PayPal next; the rules (caps, floor, expiry) are re-checked first.
-  await withPaymentLock(shop, () => recheckAtPayment(shop, decisionSeq, { approvedByPerson: true }));
-
-  // One request id per attempt: a new order after a cancelled/expired one must not reuse the old id.
-  const attempt = log.filter((e) => e.event.type === "order_created" && e.event.decisionSeq === decisionSeq).length;
-  const requestId = `gb-order-${decisionSeq}-${decisionEntry.hash.slice(0, 16)}${attempt ? `-${attempt + 1}` : ""}`;
-  const order = await paypal<PayPalOrder>("/v2/checkout/orders", {
-    method: "POST",
-    requestId,
-    body: {
-      intent: "CAPTURE",
-      purchase_units: [
-        {
-          reference_id: `po-${decisionSeq}`,
-          custom_id: requestId,
-          description: `GuardBuy PO #${decisionSeq}: ${proposal.quantity} x ${proposal.sku}`.slice(0, 127),
-          amount: { currency_code: "USD", value: (decision.totalCents / 100).toFixed(2) },
-          payee: { email_address: await payeeFor(shop, proposal) },
-        },
-      ],
-      payment_source: {
-        paypal: {
-          experience_context: {
-            brand_name: "GuardBuy",
-            shipping_preference: "NO_SHIPPING",
-            user_action: "PAY_NOW",
-            return_url: returnUrl,
-            cancel_url: `${returnUrl}${returnUrl.includes("?") ? "&" : "?"}cancelled=1`,
-          },
-        },
+  return withPaymentLock(`funding:${fundingKey()}`, async (lease) => {
+    const { log, decisionEntry, decision, proposal } = await payableDecision(shop, decisionSeq);
+    const existing = openOrder(log, decisionSeq);
+    if (existing) return existing;
+    if (forDecision(log, "payout", decisionSeq) || forDecision(log, "order_captured", decisionSeq)) throw new ExecutionRefused("This purchase already has a payment");
+    if (decision.verdict !== "approval") throw new ExecutionRefused("This purchase does not need approval");
+    const unresolved = unresolvedPayments(log).find((s) => s.attempt.decisionSeq === decisionSeq);
+    if (unresolved && unresolved.attempt.operation !== "order_create") throw new PaymentPending();
+    const attemptNumber = Math.max(log.filter((e) => e.event.type === "order_created" && e.event.decisionSeq === decisionSeq).length,
+      attemptStates(log).filter((s) => s.attempt.decisionSeq === decisionSeq && s.attempt.operation === "order_create").length);
+    const requestId = `gb-order-${decisionSeq}-${decisionEntry.hash.slice(0, 16)}${attemptNumber ? `-${attemptNumber + 1}` : ""}`;
+    const attempt = unresolved?.attempt ?? candidateAttempt({ decisionSeq, operation: "order_create", route: "order", requestId,
+      amountCents: decision.totalCents, currency: "USD", payeeEmail: await payeeFor(shop, proposal), body: {
+        intent: "CAPTURE", purchase_units: [{ reference_id: `po-${decisionSeq}`, custom_id: requestId,
+          description: `GuardBuy PO #${decisionSeq}: ${proposal.quantity} x ${proposal.sku}`.slice(0, 127), amount: { currency_code: "USD", value: (decision.totalCents / 100).toFixed(2) }, payee: { email_address: proposal.payeeEmail } }],
+        payment_source: { paypal: { experience_context: { brand_name: "GuardBuy", shipping_preference: "NO_SHIPPING", user_action: "PAY_NOW", return_url: returnUrl,
+          cancel_url: `${returnUrl}${returnUrl.includes("?") ? "&" : "?"}cancelled=1` } } },
+      } });
+    return performAttempt(shop, attempt, lease, {
+      lookup: async () => null,
+      beforeSend: async (saved) => {
+        await recheckAtPayment(shop, decisionSeq, { approvedByPerson: true });
+        if (await payeeFor(shop, proposal) !== saved.payeeEmail) throw new ExecutionRefused("The recorded payee changed");
+        assertPaymentsEnabled();
       },
-    },
+      send: async (saved) => {
+        const order = await paypal<PayPalOrder>("/v2/checkout/orders", { method: "POST", requestId: saved.requestId, body: saved.body, maxAttempts: 1 });
+        const approveUrl = order.links?.find((l) => l.rel === "payer-action" || l.rel === "approve")?.href;
+        if (!order.id || !approveUrl) throw new Error("Unconfirmed PayPal Order response");
+        return { type: "order_created", decisionSeq, orderId: order.id, approveUrl, amountCents: saved.amountCents };
+      },
+    });
   });
-
-  const approveUrl = order.links?.find((l) => l.rel === "payer-action" || l.rel === "approve")?.href;
-  if (!approveUrl) throw new Error(`PayPal order ${order.id} has no approval link`);
-  return appendAudit(shop, { type: "order_created", decisionSeq, orderId: order.id, approveUrl, amountCents: decision.totalCents });
 }
 
 // Capture can be triggered by PayPal's redirect and by a manual check at the same time.
@@ -270,51 +252,95 @@ export function captureApprovalOrder(shop: string, decisionSeq: number): Promise
   return job;
 }
 
+async function toolkitOrder(id: string): Promise<PayPalOrder> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([runPayPalTool<PayPalOrder>("get_order", { id }), new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error("PayPal confirmation timeout")), 10_000); })]);
+  } finally { clearTimeout(timer); }
+}
+const confirmWithToolkit = (id: string) => toolkitOrder(id).then((o) => o.status === "COMPLETED", () => false);
+
+function capturedResult(attempt: Attempt, order: PayPalOrder, confirmed = false): PaymentResult {
+  if (order.id !== attempt.providerId) throw new Error("Unexpected PayPal order identity");
+  const cap = checkCapture(order, attempt.amountCents, attempt.payeeEmail);
+  return { type: "order_captured", decisionSeq: attempt.decisionSeq, orderId: order.id, captureId: cap.id, status: cap.status,
+    amountCents: attempt.amountCents, payerId: order.payer?.payer_id, confirmedByGetOrder: confirmed };
+}
+
 async function capture(shop: string, decisionSeq: number): Promise<AuditEntry> {
-  const { log, proposal } = await payableDecision(shop, decisionSeq);
-  const done = forDecision(log, "order_captured", decisionSeq);
-  if (done) return done;
-  const created = openOrder(log, decisionSeq);
-  if (created?.event.type !== "order_created") throw new ExecutionRefused(`Decision ${decisionSeq} has no open PayPal order`);
-  const { orderId, amountCents } = created.event;
-
-  return withPaymentLock(shop, async () => {
-  const again = forDecision(await auditEntries(shop), "order_captured", decisionSeq);
-  if (again) return again;
-  let order = await runPayPalTool<PayPalOrder>("get_order", { id: orderId });
-  if (order.status === "APPROVED") {
-    // Only the merchant's own PayPal account may approve; anyone else holding the link can't pay.
-    if (!allowedApprover(order.payer?.payer_id)) {
-      await closeOrder(shop, decisionSeq, orderId, "wrong_payer");
-      throw new ExecutionRefused("This PayPal order was approved by an account that isn't the store's; nothing was captured");
+  return withPaymentLock(`funding:${fundingKey()}`, async (lease) => {
+    const { log, proposal } = await payableDecision(shop, decisionSeq);
+    const done = forDecision(log, "order_captured", decisionSeq);
+    if (done) return done;
+    if (forDecision(log, "payout", decisionSeq)) throw new ExecutionRefused("This purchase already has a payout");
+    const created = openOrder(log, decisionSeq);
+    if (created?.event.type !== "order_created") throw new ExecutionRefused("This purchase has no open PayPal order");
+    const { orderId, amountCents } = created.event;
+    const unresolved = unresolvedPayments(log).find((s) => s.attempt.decisionSeq === decisionSeq);
+    if (unresolved && unresolved.attempt.operation !== "order_capture") throw new PaymentPending();
+    const priorCaptures = attemptStates(log).filter((s) => s.attempt.decisionSeq === decisionSeq && s.attempt.operation === "order_capture").length;
+    const attempt = unresolved?.attempt ?? candidateAttempt({ decisionSeq, operation: "order_capture", route: "order", requestId: `gb-capture-${orderId}${priorCaptures ? `-${priorCaptures + 1}` : ""}`,
+      amountCents, currency: "USD", payeeEmail: proposal.payeeEmail!, providerId: orderId, body: {} });
+    // The provider read is authoritative for capture recovery, regardless of transaction-search lag.
+    let wrongPayer = false;
+    try { return await performAttempt(shop, attempt, lease, {
+      lookup: async (saved) => {
+        const order = await paypal<PayPalOrder>(`/v2/checkout/orders/${encodeURIComponent(saved.providerId!)}`);
+        if (order.status === "COMPLETED" || order.purchase_units?.[0]?.payments?.captures?.length) return capturedResult(saved, order, await confirmWithToolkit(order.id));
+        return null;
+      },
+      beforeSend: async (saved) => {
+        const order = await toolkitOrder(saved.providerId!);
+        if (order.status !== "APPROVED") throw new ExecutionRefused(`PayPal order is ${order.status}, not approved for capture`);
+        if (!allowedApprover(order.payer?.payer_id)) {
+          wrongPayer = true;
+          // An existing uncertain capture cannot be cancelled merely because a later read differs.
+          throw new ExecutionRefused("This order was approved by an account outside the store's permitted payers");
+        }
+        await recheckAtPayment(shop, decisionSeq, { approvedByPerson: true });
+        await payeeFor(shop, proposal);
+        assertPaymentsEnabled();
+      },
+      send: async (saved) => {
+        const response = await paypal<PayPalOrder>(`/v2/checkout/orders/${encodeURIComponent(saved.providerId!)}/capture`, { method: "POST", requestId: saved.requestId, body: saved.body, maxAttempts: 1 });
+        if (response.id !== saved.providerId) throw new Error("Unexpected PayPal capture response identity");
+        // Capture POST may return a minimal representation without the unit amount/payee.
+        // Validate the full Order readback rather than weakening the supplier/currency checks.
+        const order = await paypal<PayPalOrder>(`/v2/checkout/orders/${encodeURIComponent(saved.providerId!)}`);
+        return capturedResult(saved, order, await confirmWithToolkit(order.id));
+      },
+    }); } catch (error) {
+      if (wrongPayer && error instanceof PaymentRejected) await closeOrder(shop, decisionSeq, orderId, "wrong_payer");
+      throw error;
     }
-    // The merchant approved inside PayPal; the rules still get the final word before capture.
-    await recheckAtPayment(shop, decisionSeq, { approvedByPerson: true });
-    assertPaymentsEnabled(); // last thing before money moves
-    order = await paypal<PayPalOrder>(`/v2/checkout/orders/${orderId}/capture`, { method: "POST", requestId: `gb-capture-${orderId}` });
-  } else if (order.status !== "COMPLETED") {
-    throw new ExecutionRefused(`PayPal order ${orderId} is ${order.status}, not approved yet`);
+  });
+}
+
+/** Merchant-initiated resumption: this may submit the original request, never a new route/key. */
+export async function resumePayment(shop: string, decisionSeq: number) {
+  const log = await auditEntries(shop);
+  const pending = unresolvedPayments(log).find((s) => s.attempt.decisionSeq === decisionSeq)?.attempt;
+  if (pending?.operation === "order_capture") return captureApprovalOrder(shop, decisionSeq);
+  if (pending?.operation === "order_create") {
+    const source = pending.body.payment_source as { paypal?: { experience_context?: { return_url?: string } } } | undefined;
+    return createApprovalOrder(shop, decisionSeq, source?.paypal?.experience_context?.return_url ?? "");
   }
+  if (pending?.operation === "payout" || purchaseReservations(log).has(decisionSeq)) return executePurchase(shop, decisionSeq);
+  throw new ExecutionRefused("No unfinished payment attempt exists for this purchase");
+}
 
-  const cap = checkCapture(order, amountCents, proposal.payeeEmail);
-
-  // Independent read-back through PayPal's Agent Toolkit.
-  const confirmed = await runPayPalTool<PayPalOrder>("get_order", { id: orderId }).then(
-    (o) => o.status === "COMPLETED",
-    () => false,
-  );
-
-  return appendAudit(shop, {
-    type: "order_captured",
-    decisionSeq,
-    orderId,
-    captureId: cap.id,
-    status: cap.status,
-    amountCents,
-    payerId: order.payer?.payer_id,
-    confirmedByGetOrder: confirmed,
-  });
-  });
+/** Read-only recovery. Missing payout/order-create IDs require explicit same-key resumption. */
+export async function recoverKnownPayments(shop: string) {
+  const log = await auditEntries(shop);
+  for (const { attempt } of unresolvedPayments(log).filter((s) => s.attempt.operation === "order_capture").slice(0, 5)) {
+    if (attempt.operation !== "order_capture" || !attempt.providerId || attempt.fundingKey !== fundingKey()) continue;
+    try {
+      const order = await paypal<PayPalOrder>(`/v2/checkout/orders/${encodeURIComponent(attempt.providerId)}`);
+      if (order.status === "COMPLETED" || order.purchase_units?.[0]?.payments?.captures?.length) {
+        await appendAuditWhen(shop, { ...capturedResult(attempt, order, await confirmWithToolkit(order.id)), paymentAttemptId: attempt.attemptId }, (current) => !current.some((e) => "paymentAttemptId" in e.event && e.event.paymentAttemptId === attempt.attemptId));
+      }
+    } catch { /* Keep unresolved; never classify an unavailable provider as a failed payment. */ }
+  }
 }
 
 /** Finds which shop and decision a PayPal order belongs to (PayPal's redirect only carries the order id). */

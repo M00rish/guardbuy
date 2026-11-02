@@ -1,3 +1,4 @@
+import { unresolvedPayments } from "../payments/attempts";
 import type { AuditEntry } from "../policy/schema";
 
 /** No fallback: public visibility is an explicit opt-in for one sandbox store. */
@@ -18,7 +19,7 @@ const payment = (status: string, amountCents: number, success: Set<string>): Pub
 export function publicAudit(log: AuditEntry[]) {
   const proposals = new Set(log.filter((e) => e.event.type === "proposal" && !e.event.scenario).map((e) => e.seq));
   const decisions = new Set(log.filter((e) => e.event.type === "decision" && proposals.has(e.event.proposalSeq)).map((e) => e.seq));
-  const payments: PublicPayment[] = [];
+  const payments: PublicPayment[] = unresolvedPayments(log).filter((s) => decisions.has(s.attempt.decisionSeq)).map((s) => ({ status: "pending", amountCents: s.attempt.amountCents }));
   const timeline: { at: string; text: string }[] = [];
   const counts = { proposals: proposals.size, automatic: 0, review: 0, blocked: 0 };
   for (const entry of log) {
@@ -32,6 +33,7 @@ export function publicAudit(log: AuditEntry[]) {
       if (ev.decision.verdict === "block") { counts.blocked++; text = "Policy checks blocked this restock."; }
     }
     if ("decisionSeq" in ev && decisions.has(ev.decisionSeq)) {
+      if (ev.type === "payment_outcome") text = ev.status === "unknown" ? "Supplier payment awaits PayPal confirmation; original purchase remains reserved." : "PayPal rejected a supplier payment request.";
       if (ev.type === "receipt_received") text = `Merchant received ${ev.quantity} units; Shopify inventory updated.`;
       if (ev.type === "receipt_started") text = "Merchant started recording a delivery receipt.";
       if (ev.type === "receipt_rejected") text = "Delivery receipt was rejected; inventory was not confirmed updated.";

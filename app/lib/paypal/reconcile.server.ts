@@ -1,11 +1,12 @@
 import { appendAudit, auditEntries } from "../audit/log.server";
 import { paypal } from "./client.server";
 import { runPayPalTool } from "./toolkit.server";
+import { recoverKnownPayments } from "../agent/execute.server";
 import { createPayoutRefresh, type PayoutBatch } from "./payout-refresh";
 
 // Shared by both pages and the legacy manual job. One run per shop per app process.
 export const refreshPayouts = createPayoutRefresh({
-  read: auditEntries,
+  read: async (shop) => { await recoverKnownPayments(shop); return auditEntries(shop); },
   append: appendAudit,
   batch: (id) => paypal<PayoutBatch>(`/v1/payments/payouts/${encodeURIComponent(id)}`),
   confirmed: async (id) => {

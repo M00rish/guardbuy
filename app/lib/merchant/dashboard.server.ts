@@ -1,6 +1,7 @@
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
 import db from "../../db.server";
+import { unknownPaymentDecisions } from "../payments/attempts";
 import { deliveries } from "../inventory/deliveries";
 import type { AuditEntry, RuleSet } from "../policy/schema";
 import { paypalBalanceCents } from "../agent/restock.server";
@@ -32,6 +33,11 @@ export function productStatus(
   agentRunning: boolean,
   now = new Date(),
 ): ProductStatus {
+  for (const seq of unknownPaymentDecisions(log)) {
+    const d = log.find((e) => e.seq === seq)?.event;
+    const proposal = d?.type === "decision" ? log.find((e) => e.seq === d.proposalSeq)?.event : undefined;
+    if (proposal?.type === "proposal" && proposal.proposal.variantId === p.variantId) return { label: "Payment reserved · check Approvals", tone: "warning" };
+  }
   const delivery = deliveries(log).find((d) => d.variantId === p.variantId && (d.remaining > 0 || d.pending) && (d.payment !== "failed" || d.pending));
   if (delivery) return { label: delivery.pending ? "Receipt needs confirmation" : delivery.payment === "pending" ? `Payment pending · ${delivery.remaining} on order` : `${delivery.remaining} incoming · awaiting delivery`, tone: "info" };
   if (!p.managed) return { label: "Not managed", tone: "neutral" };

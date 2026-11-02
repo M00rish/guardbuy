@@ -1,7 +1,8 @@
-import { appendAudit, auditEntries } from "../audit/log.server";
+import { appendAudit, appendAuditWhen, auditEntries } from "../audit/log.server";
 import type { AuditEntry, RuleCheck } from "../policy/schema";
 import { offersForVariant, supplierNames } from "../suppliers/directory.server";
 import { createApprovalOrder, ExecutionRefused, executePurchase, openOrder } from "./execute.server";
+import { purchaseReservations, unknownPaymentDecisions, PaymentPending } from "../payments/attempts";
 import { acceptedUnitPrice, APPROVAL_TTL_MS, approvalExpired } from "./restock.server";
 
 // The approval queue: purchases the policy engine sent to a person ("approval" verdict).
@@ -13,7 +14,7 @@ export type ApprovalCard = {
   decisionSeq: number;
   proposedAt: string;
   expiresAt: string; // approvals are valid for 48 hours
-  status: "waiting" | "paypal_pending"; // paypal_pending: a PayPal order exists, waiting for approval in PayPal
+  status: "waiting" | "paypal_pending" | "payment_unknown"; // paypal_pending: a PayPal order exists, waiting for approval in PayPal
   sku: string;
   quantity: number;
   supplierId: string;
@@ -49,7 +50,11 @@ export async function approvalQueue(shop: string): Promise<ApprovalCard[]> {
   const names = await supplierNames(shop);
   const cards: ApprovalCard[] = [];
 
-  for (const d of pendingDecisions(log)) {
+  const reserved = purchaseReservations(log);
+  const unknown = unknownPaymentDecisions(log);
+  const waiting = new Set(pendingDecisions(log).map((d) => d.seq));
+  const visible = log.filter((e) => e.event.type === "decision" && (waiting.has(e.seq) || unknown.has(e.seq) || reserved.has(e.seq) && !!openOrder(log, e.seq)));
+  for (const d of visible) {
     if (d.event.type !== "decision") continue;
     const p = log.find((e) => e.seq === (d.event.type === "decision" ? d.event.proposalSeq : -1));
     if (p?.event.type !== "proposal") continue;
@@ -65,7 +70,7 @@ export async function approvalQueue(shop: string): Promise<ApprovalCard[]> {
       decisionSeq: d.seq,
       proposedAt: p.at,
       expiresAt: new Date(Date.parse(d.at) + APPROVAL_TTL_MS).toISOString(),
-      status: order ? "paypal_pending" : "waiting",
+      status: unknown.has(d.seq) ? "payment_unknown" : order ? "paypal_pending" : "waiting",
       sku: proposal.sku,
       quantity: proposal.quantity,
       supplierId: proposal.supplierId,
@@ -118,14 +123,17 @@ export function approvePurchase(shop: string, decisionSeq: number, actor: string
     if (openOrder(log, decisionSeq)) {
       throw new ExecutionRefused("This purchase is already being approved in PayPal");
     }
-    await appendAudit(shop, { type: "approved", decisionSeq, approvedBy: actor });
+    const approved = await appendAuditWhen(shop, { type: "approved", decisionSeq, approvedBy: actor }, (current) => pendingDecisions(current).some((d) => d.seq === decisionSeq) && !openOrder(current, decisionSeq) && !purchaseReservations(current).has(decisionSeq));
+    if (!approved) throw new ExecutionRefused("This purchase changed on another request. Refresh its status.");
     try {
       const payout = await executePurchase(shop, decisionSeq);
       return { paid: true, message: `Approved; payout submitted (log entry #${payout.seq}). Track payment and receive goods in Deliveries.` };
     } catch (e) {
-      const reason = (e instanceof Error ? e.message : String(e)).slice(0, 300);
-      await appendAudit(shop, { type: "payment_failed", decisionSeq, reason });
-      return { paid: false, message: `Approved, but the payment failed: ${reason}` };
+      const uncertain = e instanceof PaymentPending || await auditEntries(shop).then((entries) => purchaseReservations(entries).has(decisionSeq), () => true);
+      if (uncertain) return { paid: false, message: new PaymentPending().message };
+      const reason = e instanceof ExecutionRefused ? e.message : "PayPal did not confirm this payment. Review its recorded status before retrying.";
+      await appendAudit(shop, { type: "payment_failed", decisionSeq, reason, definitive: true });
+      return { paid: false, message: `Approved, but payment was not submitted successfully. ${reason}` };
     }
   });
 }
@@ -133,7 +141,8 @@ export function approvePurchase(shop: string, decisionSeq: number, actor: string
 export function rejectPurchase(shop: string, decisionSeq: number, actor: string, reason?: string): Promise<ApprovalResult> {
   return oncePerDecision(shop, decisionSeq, async () => {
     await assertPending(shop, decisionSeq);
-    await appendAudit(shop, { type: "rejected", decisionSeq, rejectedBy: actor, reason: reason?.slice(0, 500) || undefined });
+    const rejected = await appendAuditWhen(shop, { type: "rejected", decisionSeq, rejectedBy: actor, reason: reason?.slice(0, 500) || undefined }, (current) => pendingDecisions(current).some((d) => d.seq === decisionSeq) && !purchaseReservations(current).has(decisionSeq) && !openOrder(current, decisionSeq));
+    if (!rejected) throw new ExecutionRefused("A payment or another action already reserved this purchase. Refresh its status.");
     return { paid: false, message: "Declined. Nothing was paid." };
   });
 }
