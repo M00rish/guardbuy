@@ -7,11 +7,12 @@ name = "GuardBuy"
 
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-# Least privilege: read products and orders (daily sales totals, refunds); write_inventory only so the
-# demo can reset stock (judge mode); write_app_proxy configures the storefront judge console.
+# Least privilege: read products/orders for stock and sales; read inventory/locations for receiving.
+# write_inventory records received goods and resets demo stock.
+# write_app_proxy configures the public demo dashboard.
 # Seeding a new dev store needs write_products, write_orders and
 # write_publications added temporarily (scripts/seed-dev-store.ts).
-scopes = "read_products,read_orders,write_inventory,write_app_proxy"
+scopes = "read_products,read_orders,read_inventory,read_locations,write_inventory,write_app_proxy"
 optional_scopes = [ ]
 use_legacy_install_flow = false
 

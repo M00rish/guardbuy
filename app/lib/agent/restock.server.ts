@@ -1,4 +1,5 @@
 import db from "../../db.server";
+import { deliveries } from "../inventory/deliveries";
 import { appendAudit, auditEntries } from "../audit/log.server";
 import type { StockCheck } from "../inventory/trigger.server";
 import { paypal } from "../paypal/client.server";
@@ -265,6 +266,8 @@ function approvedPrices(log: AuditEntry[], exclude?: number): RecordedProposal[]
  */
 export function skipReason(item: { variantId: string; sku: string }, log: AuditEntry[], now = new Date()): string | null {
   // Matched by variant (SKUs can be shared); entries without a variant id fall back to the SKU.
+  const outstanding = deliveries(log).find((d) => d.variantId === item.variantId && (d.remaining > 0 || d.pending) && (d.payment !== "failed" || d.pending));
+  if (outstanding) return `restock #${outstanding.decisionSeq} is already open: ${outstanding.remaining} units awaiting delivery${outstanding.pending ? " (receipt needs confirmation)" : ""}`;
   const same = (r: { variantId?: string; sku: string }) => (r.variantId ? r.variantId === item.variantId : r.sku === item.sku);
   const last = log
     .filter((e) => (e.event.type === "proposal" || e.event.type === "proposal_failed") && !e.event.scenario) // injection tests don't count
@@ -289,9 +292,11 @@ export function skipReason(item: { variantId: string; sku: string }, log: AuditE
   const payout = ofDecision("payout").at(-1);
   if (payout) {
     const failedAt = payoutFailedAt(payout, log);
-    return failedAt ? wait(failedAt, RETRY_AFTER_BLOCK_MS, `payout for #${last.seq} failed`) : open();
+    if (failedAt) return wait(failedAt, RETRY_AFTER_BLOCK_MS, `payout for #${last.seq} failed`);
+    // Fully received variant orders no longer block a future restock. Legacy SKU-only logs retain their old cooldown.
+    return last.event.type === "proposal" && last.event.proposal.variantId ? null : open();
   }
-  if (ofDecision("order_captured").length) return open();
+  if (ofDecision("order_captured").length) return last.event.type === "proposal" && last.event.proposal.variantId ? null : open();
   const rejected = ofDecision("rejected").at(-1);
   if (rejected) return wait(rejected.at, RETRY_AFTER_REJECT_MS, `restock #${last.seq} was declined`);
   const failed = ofDecision("payment_failed").at(-1);

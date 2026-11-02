@@ -32,6 +32,9 @@ export function publicAudit(log: AuditEntry[]) {
       if (ev.decision.verdict === "block") { counts.blocked++; text = "Policy checks blocked this restock."; }
     }
     if ("decisionSeq" in ev && decisions.has(ev.decisionSeq)) {
+      if (ev.type === "receipt_received") text = `Merchant received ${ev.quantity} units; Shopify inventory updated.`;
+      if (ev.type === "receipt_started") text = "Merchant started recording a delivery receipt.";
+      if (ev.type === "receipt_rejected") text = "Delivery receipt was rejected; inventory was not confirmed updated.";
       if (ev.type === "approved") text = "Merchant approved a restock.";
       if (ev.type === "rejected") text = "Merchant declined a restock.";
       if (ev.type === "payment_failed") text = "Supplier payment attempt failed. Merchant review needed.";

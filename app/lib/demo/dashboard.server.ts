@@ -2,6 +2,7 @@ import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import db from "../../db.server";
 import { auditEntries } from "../audit/log.server";
 import { agentOn, currentRuleSet } from "../agent/restock.server";
+import { incomingFor } from "../inventory/deliveries";
 import { salesPerDay } from "../inventory/sales.server";
 import { demoEnabled, publicAudit } from "./public-dashboard";
 
@@ -43,6 +44,7 @@ async function snapshot(admin: AdminApiContext, shop: string) {
           title: v.displayName,
           href: `/products/${encodeURIComponent(v.product.handle)}`,
           available: v.inventoryQuantity,
+          incoming: incomingFor(log, v.id.split("/").at(-1)!),
           reorderBelowUnits: threshold === null ? null : Math.ceil(threshold),
           low: v.inventoryQuantity !== null && threshold !== null && v.inventoryQuantity < threshold,
         };

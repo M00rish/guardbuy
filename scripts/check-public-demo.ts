@@ -41,6 +41,8 @@ add({ type: "payment_failed", decisionSeq: d, reason: "private-provider-error" }
 add({ type: "order_created", decisionSeq: d, orderId: "private-order", approveUrl: "https://example.test/private-token", amountCents: 100 });
 add({ type: "order_captured", decisionSeq: d, orderId: "private-order", captureId: "private-capture", payerId: "private-payer", amountCents: 100, status: "COMPLETED", confirmedByGetOrder: true });
 add({ type: "order_status", decisionSeq: d, orderId: "private-order", status: "PARTIALLY_REFUNDED", refundedCents: 20 });
+add({ type: "receipt_started", decisionSeq: d, receiptId: "ec45a193-82fc-4aeb-a378-1258750229ce", quantity: 1, expectedReceived: 0, variantId: "private-variant", inventoryItemId: "private-item", locationId: "private-location", receivedBy: "private-staff" });
+add({ type: "receipt_received", decisionSeq: d, receiptId: "ec45a193-82fc-4aeb-a378-1258750229ce", quantity: 1, variantId: "private-variant", locationId: "private-location", receivedBy: "private-staff" });
 const view = publicAudit(log);
 assert.equal(view.decisions.proposals, 1, "attack simulations are excluded");
 assert.equal(view.decisions.automatic, 1);

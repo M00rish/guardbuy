@@ -121,7 +121,7 @@ export function approvePurchase(shop: string, decisionSeq: number, actor: string
     await appendAudit(shop, { type: "approved", decisionSeq, approvedBy: actor });
     try {
       const payout = await executePurchase(shop, decisionSeq);
-      return { paid: true, message: `Approved and paid (log entry #${payout.seq})` };
+      return { paid: true, message: `Approved; payout submitted (log entry #${payout.seq}). Track payment and receive goods in Deliveries.` };
     } catch (e) {
       const reason = (e instanceof Error ? e.message : String(e)).slice(0, 300);
       await appendAudit(shop, { type: "payment_failed", decisionSeq, reason });

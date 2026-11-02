@@ -14,10 +14,20 @@ export function entryHash(prevHash: string, entry: { seq: number; shop: string; 
 
 /** Appends one event to the shop's chain. Serialized per shop so two writers can't fork the chain. */
 export async function appendAudit(shop: string, event: AuditEvent): Promise<AuditEntry> {
+  return (await appendAuditWhen(shop, event))!;
+}
+
+/** Conditional append checks current history under the same database lock as the write. */
+export async function appendAuditWhen(shop: string, event: AuditEvent, when?: (log: AuditEntry[]) => boolean): Promise<AuditEntry | null> {
   const parsed = AuditEventSchema.parse(event);
 
   return db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"audit:" + shop}))`;
+    if (when) {
+      const rows = await tx.auditEntry.findMany({ where: { shop }, orderBy: { seq: "asc" } });
+      const log = rows.map((r) => ({ seq: r.seq, shop: r.shop, at: r.at.toISOString(), event: AuditEventSchema.parse(r.event), prevHash: r.prevHash, hash: r.hash }));
+      if (!when(log)) return null;
+    }
     const last = await tx.auditEntry.findFirst({ where: { shop }, orderBy: { seq: "desc" } });
 
     const seq = last ? last.seq + 1 : 0;

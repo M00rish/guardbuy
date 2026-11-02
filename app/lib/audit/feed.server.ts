@@ -44,6 +44,15 @@ export function toFeed(log: AuditEntry[], you?: string, names: FeedNames = {}): 
     const ev = e.event;
     const base = { seq: e.seq, at: e.at };
     switch (ev.type) {
+      case "receipt_started":
+        items.push({ ...base, kind: "stock", title: `Recording receipt of ${ev.quantity} units for purchase #${ev.decisionSeq}` });
+        break;
+      case "receipt_received":
+        items.push({ ...base, kind: "stock", title: `Received ${ev.quantity} units for purchase #${ev.decisionSeq}`, detail: `Shopify stock updated by ${actor(ev.receivedBy, you)}` });
+        break;
+      case "receipt_rejected":
+        items.push({ ...base, kind: "failed", title: `Shopify rejected receipt for purchase #${ev.decisionSeq}` });
+        break;
       case "ruleset_signed":
         items.push({ ...base, kind: "rules", title: "Rules signed", detail: `Approval needed above ${usd(ev.ruleSet.rules.approvalAboveCents)}, weekly cap ${usd(ev.ruleSet.rules.weeklySpendCapCents)}, approved suppliers: ${ev.ruleSet.rules.supplierAllowlist.join(", ")}` });
         break;

@@ -75,7 +75,7 @@ Rules are signed by a Shopify staff member: their id and the rules' SHA-256 fing
 - **Approve in PayPal.** Only allow-listed PayPal payer ids can approve (`GUARDBUY_APPROVER_PAYER_IDS`). Cancelled, expired and wrong-payer orders are closed without paying.
 - **Kill switch.** `GUARDBUY_PAYMENTS_DISABLED=1` refuses every payout and capture.
 - **Least privilege.**
-  - Shopify scopes: `read_products`, `read_orders`, `write_inventory`. Write access is only used to reset demo stock.
+  - Shopify scopes: `read_products`, `read_orders`, `read_inventory`, `read_locations`, `write_inventory`, `write_app_proxy`. Inventory writes record physical delivery receipts and reset demo stock.
   - PayPal Agent Toolkit: only the read-only `get_order` and `list_transactions` tools are loaded.
 - **Untrusted text stays labelled.** Supplier notes and the AI's explanation are shown as "not verified" and never drive a payment on their own.
 
@@ -95,7 +95,7 @@ Rules are signed by a Shopify staff member: their id and the rules' SHA-256 fing
 
 **Judges:** open the demo store in one tab and `/apps/guardbuy` in another. The public dashboard is read-only and shows actual managed stock, today’s test-order count (UTC), recorded restock decisions, and supplier payment outcomes. Place a test checkout order in the storefront and watch the stock change. All visitors see the same store; this is no longer a per-judge simulated sandbox.
 
-**Enable the dashboard:** explicitly set `GUARDBUY_PUBLIC_DEMO_ENABLED=true` and `GUARDBUY_DEMO_STORE` to the intended demo shop domain. It is disabled by default and refuses to open if PayPal’s configured API base is not the sandbox. No new API scopes or database migrations are required. Opening the page is consent to expose only aggregate activity for that store: no customer records, supplier emails, payment IDs, approval URLs, AI reasoning, staff identities, or raw provider errors are returned.
+**Enable the dashboard:** explicitly set `GUARDBUY_PUBLIC_DEMO_ENABLED=true` and `GUARDBUY_DEMO_STORE` to the intended demo shop domain. It is disabled by default and refuses to open if PayPal’s configured API base is not the sandbox. The delivery feature requires `read_inventory`, `read_locations` and `write_inventory` in addition to the existing app scopes; release the updated Shopify configuration and approve permissions. No database migration is required. Opening the page is consent to expose only aggregate activity for that store: no customer records, supplier emails, payment IDs, approval URLs, AI reasoning, staff identities, or raw provider errors are returned.
 
 The page polls every 15 seconds while visible, with a shared 15-second server cache. This polling can keep Render and Neon awake while judges watch. Test-order counts come from Shopify (only `test:true` orders created today UTC; cancelled test orders still count as orders placed). Stock shows up to 50 managed variants. Missing data is labelled unavailable rather than zero. Restock/payment totals cover recorded non-simulation history, not just today. Stock change arrows are observations in the current browser tab, not guaranteed attribution to a particular customer order.
 
@@ -116,6 +116,18 @@ Public requests never send payments, capture orders, reconcile PayPal or change 
 **Merchant admin:** Home, Products & suppliers, Suppliers, Rules, Approvals, Activity (audit log) and Protection (rules at work, attack results, public verification settings).
 
 **Public verify page:** `/verify?id=<PayPal payout or order id>` shows whether a payment is on a store's audit log, which signed rules allowed it, and whether the log is intact.
+
+### Receiving supplier deliveries
+
+Approval submits a payment; it does not increase stock. Open **Deliveries** in the merchant app to see ordered, received and outstanding quantities. Successful payment must be recorded before starting a receipt. Pick the actual receiving location and enter the units physically received. Partial receipts are supported; over-receipts and stale submissions are rejected. Pending receipt attempts can be retried using **Confirm existing receipt**. No public route can receive deliveries.
+
+A receipt appends a durable intent to the audit chain, calls Shopify `inventoryAdjustQuantities` with the same UUID idempotency key on every retry, then records completion. An atomic database audit condition prevents concurrent reservations or duplicate completion entries even if the outer coordination lease expires. If the API response or final audit write is lost, the pending intent remains and blocks a second receipt. [Shopify retains idempotency keys for 24 hours](https://shopify.dev/docs/apps/build/apis/graphql-admin/implementing-idempotency); after 23 hours an ambiguous receipt is refused and requires manual reconciliation against Shopify inventory history. Do not adjust inventory manually and then retry the same receipt.
+
+Incoming quantity is GuardBuy's outstanding order total, not Shopify's native inventory-transfer `incoming` state. Available stock stays unchanged until a receipt succeeds. Failed/refunded payments do not erase already received goods. Outstanding variant orders no longer expire after three days; they keep duplicate restocks blocked until received. Legacy audit entries without a variant ID retain the old cooldown and cannot be received through this screen.
+
+Existing purchases with a variant ID and no recorded receipts appear outstanding. Review them before receiving: goods that were already added manually to Shopify must not be added again through a new receipt. Shipping, cancellations and administrative reconciliation of historical deliveries are outside this first receipt flow.
+
+For deployment, release the updated `shopify.app.toml` scopes (`read_inventory`, `read_locations`, existing `write_inventory`) and approve Shopify's permission update. No database migration or new secret is needed. Manually test a paid order with a partial receipt: available stock rises only by the received amount, remaining incoming decreases, repeating the same submission adds nothing, and the final receipt closes the order. Keep payment approval and inventory receipt as separate actions.
 
 ## Run it locally
 

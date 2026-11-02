@@ -97,6 +97,16 @@ export type Decision = z.infer<typeof DecisionSchema>;
 // ---------- Audit log (append-only, hash-chained) ----------
 
 export const AuditEventSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("receipt_started"), decisionSeq: z.number().int(), receiptId: z.string().uuid(),
+    quantity: z.number().int().positive(), expectedReceived: z.number().int().nonnegative(),
+    variantId: z.string(), inventoryItemId: z.string(), locationId: z.string(), receivedBy: z.string(),
+  }),
+  z.object({
+    type: z.literal("receipt_received"), decisionSeq: z.number().int(), receiptId: z.string().uuid(),
+    quantity: z.number().int().positive(), variantId: z.string(), locationId: z.string(), receivedBy: z.string(),
+  }),
+  z.object({ type: z.literal("receipt_rejected"), decisionSeq: z.number().int(), receiptId: z.string().uuid() }),
   z.object({ type: z.literal("ruleset_signed"), ruleSet: SignedRuleSetSchema }),
   z.object({
     type: z.literal("proposal"),

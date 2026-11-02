@@ -68,6 +68,7 @@ export const SHELL = `
         if (p.href.indexOf("/products/") === 0) link.href = p.href;
         link.target = "_blank"; link.rel = "noopener";
         row.append(link, el("p", p.low ? "low" : "", p.available === null ? "Stock unavailable" : p.available + " units available" + (p.low ? " · Low stock" : "")));
+        row.appendChild(el("p", "muted", (p.incoming || 0) + " units on order / awaiting receipt"));
         row.appendChild(el("p", "muted", p.reorderBelowUnits === null ? "Reorder threshold unavailable" : "Restock below " + p.reorderBelowUnits + " units"));
         if (changes.has(key)) row.appendChild(el("p", "muted", changes.get(key)));
         stock.appendChild(row);

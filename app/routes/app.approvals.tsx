@@ -74,6 +74,7 @@ export default function Approvals() {
   return (
     <s-page heading="Approvals" inlineSize="large">
       <PayoutRefresh state={payoutRefresh} />
+      <s-section><s-text>After payment, track incoming stock and record received goods in </s-text><s-link href="/app/deliveries">Deliveries</s-link><s-text>.</s-text></s-section>
       {cards.length === 0 ? (
         <s-section>
           <Empty heading="Nothing is waiting for you">
