@@ -12,7 +12,7 @@ process.env.GUARDBUY_PAYMENTS_DISABLED = "1";
 const { default: db } = await import("../app/db.server");
 const { appendAudit, auditEntries, verifyChain } = await import("../app/lib/audit/log.server");
 const { defaultRuleSet, policyContext, signRuleSet, spending } = await import("../app/lib/agent/restock.server");
-const { allowedApprover, checkCapture, closeOrder, createApprovalOrder, ExecutionRefused, openOrder } = await import("../app/lib/agent/execute.server");
+const { checkCapture, closeOrder, createApprovalOrder, ExecutionRefused, openOrder } = await import("../app/lib/agent/execute.server");
 const { approvalQueue, approvePurchase } = await import("../app/lib/agent/approvals.server");
 const { sweepPayPalOrders } = await import("../app/lib/paypal/orders-sweep.server");
 const { paypal } = await import("../app/lib/paypal/client.server");
@@ -21,6 +21,7 @@ const { deleteDirectory, offersForVariant, seedDemoCatalog } = await import("../
 const { loader: paypalReturn } = await import("../app/routes/paypal.return");
 
 const SHOP = "unhappy-check.guardbuy.test";
+const { allowedStorePayer, paypalStoreBinding } = await import("../app/lib/paypal/config.server");
 const RETURN = "https://example.com/paypal/return";
 let failed = 0;
 const ok = (cond: boolean, msg: string) => { console.log(`${cond ? "PASS" : "FAIL"}  ${msg}`); if (!cond) failed++; };
@@ -70,8 +71,8 @@ const sweep2 = await sweepPayPalOrders(SHOP);
 ok(!openOrder(await auditEntries(SHOP), d2), `order unknown to PayPal -> closed by the sweep (${sweep2.join("; ")})`);
 
 // ---------- 4. Only the store's PayPal accounts may approve ----------
-ok(allowedApprover("W2SM3R38Q6CD6") && allowedApprover("6JDT8ZFAAAC9G"), "the store's PayPal accounts may approve");
-ok(!allowedApprover("STRANGER12345") && !allowedApprover(undefined), "any other PayPal account may not");
+ok(paypalStoreBinding(SHOP).payerIds.every((id) => allowedStorePayer(SHOP, id)), "the explicitly bound store accounts may approve");
+ok(!allowedStorePayer(SHOP, "STRANGER12345") && !allowedStorePayer(SHOP, undefined), "any other PayPal account may not");
 
 // ---------- 5. A capture must pay the recorded supplier the recorded amount ----------
 const order = (value: string, email: string) => ({ id: "X", status: "COMPLETED", purchase_units: [{ payee: { email_address: email }, payments: { captures: [{ id: "C", status: "COMPLETED", amount: { value } }] } }] });

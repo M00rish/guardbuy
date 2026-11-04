@@ -34,7 +34,7 @@ services:
         sync: false
       - key: SUPPLIER_EMAIL
         sync: false
-      - key: GUARDBUY_APPROVER_PAYER_IDS
+      - key: GUARDBUY_PAYPAL_STORES # server-side JSON binding shop domains to clientId and payerIds
         sync: false
       - key: GOOGLE_GENERATIVE_AI_API_KEY
         sync: false
