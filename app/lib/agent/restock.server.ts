@@ -9,7 +9,7 @@ import { hashOf } from "../policy/hash";
 import { RuleSetSchema, type AuditEntry, type RecordedProposal, type RuleSet } from "../policy/schema";
 import { isManaged, offersForVariant, supplierRoster, type Offer, type RosterEntry } from "../suppliers/directory.server";
 import { lookalikeOf } from "../policy/lookalike";
-import { purchaseReservations, PaymentPending } from "../payments/attempts";
+import { attemptStates, purchaseReservations, PaymentPending } from "../payments/attempts";
 import { withPaymentLock, type PaymentLease } from "./payment-lock.server";
 import { executePurchase, ExecutionRefused } from "./execute.server";
 import { proposePurchase } from "./proposer.server";
@@ -354,23 +354,15 @@ export type RestockResult =
   | { outcome: "skipped" | "failed"; reason: string }
   | { outcome: "auto" | "approval" | "block"; proposalSeq: number; decisionSeq: number; payoutSeq?: number; error?: string };
 
-// One restock at a time per shop + variant in this process. Webhooks for the same SKU arrive in bursts
-// (each sale changes stock), and the LLM call is too slow to hold a database lock across.
-const running = new Map<string, Promise<RestockResult>>();
-
-export function runRestock(shop: string, check: StockCheck): Promise<RestockResult> {
+// Every caller uses the database product lease; no in-memory guard is required for correctness.
+export function runRestock(shop: string, check: StockCheck, options: { jobId?: string } = {}): Promise<RestockResult> {
   const key = `${shop}|${check.variantId}`;
-  const inFlight = running.get(key);
-  if (inFlight) return inFlight.then(() => ({ outcome: "skipped" as const, reason: "a restock for this product was already running" }));
-
-  const job = withPaymentLock(`restock:${key}`, (lease) => restock(shop, check, lease)).finally(() => running.delete(key));
-  running.set(key, job);
-  return job;
+  return withPaymentLock(`restock:${key}`, (lease) => restock(shop, check, lease, options.jobId));
 }
 
 const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 300);
 
-async function restock(shop: string, check: StockCheck, lease: PaymentLease): Promise<RestockResult> {
+async function restock(shop: string, check: StockCheck, lease: PaymentLease, jobId?: string): Promise<RestockResult> {
   let log = await auditEntries(shop);
   const rules = currentRuleSet(log);
   if (!rules) return { outcome: "skipped", reason: "no signed rules yet, so the agent is off" };
@@ -381,43 +373,67 @@ async function restock(shop: string, check: StockCheck, lease: PaymentLease): Pr
   const offers = await offersForVariant(shop, check.variantId);
   if (!offers.length) return { outcome: "skipped", reason: `no suppliers linked to ${check.sku}` };
 
-  const skip = skipReason(check, log);
-  if (skip) return { outcome: "skipped", reason: skip };
+  let p = jobId ? log.find((e) => e.event.type === "proposal" && e.event.restockJobId === jobId) : undefined;
+  if (!p) {
+    const skip = skipReason(check, log);
+    if (skip) return { outcome: "skipped", reason: skip };
+  }
   if (check.daysOfCover >= rules.reorderBelowDaysOfCover) {
     return { outcome: "skipped", reason: `${check.daysOfCover.toFixed(1)} days of cover is above the rule's ${rules.reorderBelowDaysOfCover}` };
   }
 
   // 1. The LLM proposes (untrusted). GuardBuy adds who gets paid; the LLM never supplies it.
-  let proposal: RecordedProposal;
-  try {
-    const proposed = await proposePurchase({ check, rules, offers });
-    const payee = offers.find((o) => o.supplierId === proposed.supplierId)?.paypalEmail;
-    proposal = { ...proposed, variantId: check.variantId, payeeEmail: payee || undefined };
-  } catch (e) {
-    const reason = errorText(e);
-    await appendAudit(shop, { type: "proposal_failed", sku: check.sku, variantId: check.variantId, reason });
-    return { outcome: "failed", reason };
+  if (!p) {
+    let proposal: RecordedProposal;
+    try {
+      const proposed = await proposePurchase({ check, rules, offers });
+      const payee = offers.find((o) => o.supplierId === proposed.supplierId)?.paypalEmail;
+      proposal = { ...proposed, variantId: check.variantId, payeeEmail: payee || undefined };
+    } catch (e) {
+      const reason = errorText(e);
+      await appendAuditWhen(shop, { type: "proposal_failed", sku: check.sku, variantId: check.variantId, reason }, () => true, lease);
+      return { outcome: "failed", reason };
+    }
+    const stock = { available: check.available, perDay: Number(check.perDay.toFixed(2)), daysOfCover: Number(check.daysOfCover.toFixed(1)) };
+    p = await appendAuditWhen(shop, { type: "proposal", proposal, stock, ...(jobId ? { restockJobId: jobId } : {}) }, (current) => !skipReason(check, current)
+      && (!jobId || !current.some((e) => e.event.type === "proposal" && e.event.restockJobId === jobId)), lease) ?? undefined;
+    if (!p && jobId) p = (await auditEntries(shop)).find((e) => e.event.type === "proposal" && e.event.restockJobId === jobId);
   }
-  const stock = { available: check.available, perDay: Number(check.perDay.toFixed(2)), daysOfCover: Number(check.daysOfCover.toFixed(1)) };
-  const p = await appendAuditWhen(shop, { type: "proposal", proposal, stock }, (current) => !skipReason(check, current), lease);
-  if (!p) return { outcome: "skipped", reason: "Another restock reserved this product" };
+  if (p?.event.type !== "proposal") return { outcome: "skipped", reason: "Another restock reserved this product" };
+  const proposal = p.event.proposal;
+  const proposalSeq = p.seq;
 
   // 2. The policy engine decides (deterministic).
   log = await auditEntries(shop);
-  const decision = evaluate(proposal, rules, policyContext(proposal, log, await paypalBalanceCents(), { managed, offers, suppliers: await supplierRoster(shop) }));
-  const d = await appendAuditWhen(shop, { type: "decision", proposalSeq: p.seq, decision }, (current) => !current.some((e) => e.event.type === "decision" && e.event.proposalSeq === p.seq), lease);
-  if (!d) return { outcome: "skipped", reason: "Another worker already decided this restock" };
-  const result: RestockResult = { outcome: decision.verdict, proposalSeq: p.seq, decisionSeq: d.seq };
+  let d = log.find((e) => e.event.type === "decision" && e.event.proposalSeq === proposalSeq);
+  if (!d) {
+    const decision = evaluate(proposal, rules, policyContext(proposal, log, await paypalBalanceCents(), { managed, offers, suppliers: await supplierRoster(shop) }));
+    d = await appendAuditWhen(shop, { type: "decision", proposalSeq, decision }, (current) => !current.some((e) => e.event.type === "decision" && e.event.proposalSeq === proposalSeq), lease) ?? undefined;
+  }
+  if (d?.event.type !== "decision") return { outcome: "skipped", reason: "Another worker already decided this restock" };
+  const decision = d.event.decision;
+  const decisionSeq = d.seq;
+  const result: RestockResult = { outcome: decision.verdict, proposalSeq, decisionSeq: d.seq };
 
   // 3. Only "auto" pays now; "approval" waits for a person, "block" stops here.
   if (decision.verdict === "auto") {
+    log = await auditEntries(shop);
+    const recorded = log.find((e) => e.event.type === "payout" && e.event.decisionSeq === decisionSeq);
+    if (recorded) return { ...result, payoutSeq: recorded.seq };
+    // Job recovery may complete an interrupted proposal/decision, but never retries a prior
+    // payment write. Unknown attempts need explicit same-key resumption from Approvals.
+    if (attemptStates(log).some((s) => s.attempt.decisionSeq === decisionSeq)
+      || log.some((e) => e.event.type === "payment_failed" && e.event.decisionSeq === decisionSeq)) {
+      return { ...result, error: "The original payment needs confirmation or review in Approvals; no automatic payment replay was made." };
+    }
     try {
       result.payoutSeq = (await executePurchase(shop, d.seq)).seq;
     } catch (e) {
       // Logged so the SKU is retried later; paying the same decision again can never pay twice.
       const uncertain = e instanceof PaymentPending || await auditEntries(shop).then((entries) => purchaseReservations(entries).has(d.seq), () => true);
       result.error = uncertain ? new PaymentPending().message : e instanceof ExecutionRefused ? e.message : "Payment was not confirmed. Review the purchase.";
-      if (!uncertain) await appendAudit(shop, { type: "payment_failed", decisionSeq: d.seq, reason: result.error, definitive: true });
+      if (!uncertain) await appendAuditWhen(shop, { type: "payment_failed", decisionSeq: d.seq, reason: result.error, definitive: true }, (current) => !purchaseReservations(current).has(decisionSeq)
+        && !current.some((e) => (e.event.type === "payout" || e.event.type === "order_captured") && e.event.decisionSeq === decisionSeq), lease);
     }
   }
   return result;

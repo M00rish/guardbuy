@@ -25,8 +25,8 @@ export async function appendAuditWhen(shop: string, event: AuditEvent, when?: (l
   return db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"audit:" + shop}))`;
     if (lease) {
-      const rows = await tx.$queryRaw<{ holder: string; lockedUntil: Date }[]>`SELECT "holder", "lockedUntil" FROM "PaymentLock" WHERE "shop" = ${lease.key} FOR UPDATE`;
-      if (rows[0]?.holder !== lease.holder || rows[0].lockedUntil.getTime() <= Date.now()) throw new Error("Payment lease lost; no new attempt may start");
+      const rows = await tx.$queryRaw<{ holder: string; live: boolean }[]>`SELECT "holder", "lockedUntil" > clock_timestamp() AS live FROM "PaymentLock" WHERE "shop" = ${lease.key} FOR UPDATE`;
+      if (rows[0]?.holder !== lease.holder || !rows[0].live) throw new Error("Payment lease lost; no new attempt may start");
     }
     if (when) {
       const rows = await tx.auditEntry.findMany({ where: { shop }, orderBy: { seq: "asc" } });

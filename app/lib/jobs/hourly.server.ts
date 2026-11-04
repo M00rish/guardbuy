@@ -2,10 +2,9 @@ import { timingSafeEqual } from "node:crypto";
 
 import db from "../../db.server";
 import { unauthenticated } from "../../shopify.server";
-import { runRestock } from "../agent/restock.server";
 import { auditEntries } from "../audit/log.server";
-import { checkStock } from "../inventory/trigger.server";
 import { reconcileShop } from "../paypal/reconcile.server";
+import { enqueueRestock } from "./restock-queue.server";
 
 // The hourly job (called by a scheduler with JOBS_SECRET):
 //  1. reconcile payouts and PayPal orders (status, transaction-search confirmation, approvals
@@ -49,15 +48,13 @@ export async function runHourlyJob() {
       for (const p of managed) {
         const res = await admin.graphql(
           `#graphql
-          query Sweep($id: ID!) { productVariant(id: $id) { sku inventoryQuantity createdAt } }`,
+          query Sweep($id: ID!) { productVariant(id: $id) { sku inventoryItem { id } } }`,
           { variables: { id: `gid://shopify/ProductVariant/${p.variantId}` } },
         );
-        const v = ((await res.json()) as { data?: { productVariant?: { sku: string | null; inventoryQuantity: number | null; createdAt: string } | null } }).data?.productVariant;
+        const v = ((await res.json()) as { data?: { productVariant?: { sku: string | null; inventoryItem: { id: string } } | null } }).data?.productVariant;
         if (!v?.sku) continue;
-        const check = await checkStock(shop, { variantId: p.variantId, sku: v.sku, createdAt: new Date(v.createdAt), available: v.inventoryQuantity ?? 0 });
-        if (!check.needsRestock) continue;
-        const r = await runRestock(shop, check);
-        note(shop, `${v.sku}: ${r.outcome}${"reason" in r ? ` (${r.reason})` : ""}`);
+        await enqueueRestock(shop, v.inventoryItem.id.split("/").pop()!);
+        note(shop, `${v.sku}: stock check queued`);
       }
     } catch (e) {
       note(shop, `product sweep failed: ${(e as Error).message.slice(0, 120)}`);
