@@ -55,7 +55,7 @@ export default function App() {
         <ul className={styles.features}>
           <li>
             <h2>The AI proposes, your rules decide</h2>
-            <p>Spending caps, approved suppliers, price and quantity limits, a cash floor. A deterministic engine checks every purchase; the AI can't change the rules or pick who gets paid.</p>
+            <p>Spending caps, approved suppliers, price and quantity limits, a cash floor. A deterministic engine checks every purchase; the AI can’t change the rules or pick who gets paid.</p>
           </li>
           <li className={styles.money}>
             <h2>PayPal pays your suppliers</h2>
@@ -77,6 +77,7 @@ export default function App() {
             {errors?.shop && <p className={styles.error}>{errors.shop}</p>}
           </Form>
         )}
+        <p><a href="/privacy">Privacy policy</a></p>
       </div>
     </main>
   );

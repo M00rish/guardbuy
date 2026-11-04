@@ -133,6 +133,7 @@ async function snapshot(shop: string) { const log = await auditEntries(shop); co
 async function clean() {
   await db.$transaction(async (tx) => { await tx.$executeRaw`SET LOCAL guardbuy.audit_rewrite = 'on'`; await tx.auditEntry.deleteMany({ where: { shop: { in: shops } } }); });
   for (const shop of shops) {
+    await db.privacyBlock.deleteMany({ where: { shopHash: (await import("../app/lib/privacy/state.server")).privacyShopHash(shop) } });
     await db.restockJob.deleteMany({ where: { shop } }); await db.session.deleteMany({ where: { shop } }); await db.supplier.deleteMany({ where: { shop } });
     await db.managedProduct.deleteMany({ where: { shop } }); await db.dailySales.deleteMany({ where: { shop } }); await db.salesBackfill.deleteMany({ where: { shop } });
     await db.paymentLock.deleteMany({ where: { shop: { contains: shop } } });
@@ -211,6 +212,15 @@ try {
   const recoveredState = await snapshot(unknown.shop); assert.ok(recoveredState.log.some((e) => e.event.type === "order_captured"));
   await record("ISM-37 read-only settlement recovery survives removed authorization", { captures, paymentRequests, ...recoveredState }); await clean();
 
+  for (const action of ["payout", "capture"]) {
+    const f = await fixture(action === "capture");
+    if (action === "capture") { const create = await worker("order", f.shop, f.seq); create.start(); assert.ok((await create.done).ok); }
+    const { privacyShopHash } = await import("../app/lib/privacy/state.server");
+    await db.privacyBlock.create({ data: { shopHash: privacyShopHash(f.shop) } });
+    const denied = await worker(action, f.shop, f.seq); denied.start(); assert.equal((await denied.done).ok, false);
+    assert.equal(paymentRequests.length, 0); assert.equal(batches.size, 0); assert.equal(captures, 0);
+    await record(`ISM-42 suppressed shop cannot submit ${action}`, { paymentRequests, batches: batches.size, captures, ...(await snapshot(f.shop)) }); await clean();
+  }
   // Different processes choose different payment routes. Whichever wins is the only payable route.
   const f = await fixture(true); let releaseCreated!: () => void;
   releaseOrder = new Promise<void>((r) => { releaseCreated = r; }); holdOrder = true;
@@ -358,6 +368,12 @@ try {
   await db.$executeRawUnsafe('GRANT SELECT, INSERT ON "AuditEntry" TO guardbuy_app');
   const migration = await readFile("prisma/migrations/20261104140000_durable_restock_jobs/migration.sql", "utf8");
   await db.$executeRawUnsafe(migration.slice(migration.indexOf("DO $$ BEGIN")));
+  // This fixture creates the role after migrations; replay the privacy migration's conditional grants too.
+  const privacyMigration = await readFile("prisma/migrations/20261104220000_privacy_requests/migration.sql", "utf8");
+  const privacyGrants = privacyMigration.match(/DO \$\$ BEGIN[\s\S]*?END \$\$;/)![0];
+  await db.$executeRawUnsafe(privacyGrants);
+  const [privacyPermissions] = await db.$queryRaw<{ read: boolean; insert: boolean; update: boolean; remove: boolean }[]>`SELECT has_table_privilege('guardbuy_app', '"PrivacyBlock"', 'SELECT') AS read, has_table_privilege('guardbuy_app', '"PrivacyRequest"', 'INSERT') AS insert, has_table_privilege('guardbuy_app', '"PrivacyBlock"', 'UPDATE') AS update, has_table_privilege('guardbuy_app', '"PrivacyRequest"', 'DELETE') AS remove`;
+  assert.deepEqual(privacyPermissions, { read: true, insert: true, update: false, remove: false });
   const roleJob = randomUUID();
   await db.$transaction(async (tx) => {
     await tx.$executeRawUnsafe("SET LOCAL ROLE guardbuy_app");
@@ -369,7 +385,7 @@ try {
   for (const statement of ['UPDATE "AuditEntry" SET "hash" = "hash" WHERE false', 'DELETE FROM "AuditEntry" WHERE false']) {
     await assert.rejects(db.$transaction(async (tx) => { await tx.$executeRawUnsafe("SET LOCAL ROLE guardbuy_app"); await tx.$executeRawUnsafe(statement); }), /permission denied/);
   }
-  await record("Migration gives the app role job CRUD without audit UPDATE/DELETE", { jobCreateReadUpdateDelete: true, auditUpdateDenied: true, auditDeleteDenied: true });
+  await record("Migration gives the app role job CRUD without audit UPDATE/DELETE", { jobCreateReadUpdateDelete: true, auditUpdateDenied: true, auditDeleteDenied: true, privacyPermissions });
   console.log(`${results.length} multi-process payment/job checks passed; real Postgres, simulated provider, no live payments.`);
 } finally {
   const stopped = [...workers].map((w) => new Promise<void>((resolve) => w.once("exit", () => resolve())));

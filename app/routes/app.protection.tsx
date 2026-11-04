@@ -2,7 +2,7 @@ import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "re
 import { useFetcher, useLoaderData } from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
-import { authenticate } from "../shopify.server";
+import { privateAdmin } from "../lib/merchant/staff.server";
 import { auditEntries, verifyChain } from "../lib/audit/log.server";
 import { scoreboard } from "../lib/agent/scoreboard.server";
 import { RULE_HELP, RULE_LABELS } from "../lib/policy/rules";
@@ -15,7 +15,7 @@ import { Empty, Metric, Metrics } from "../components/ui";
 // to a person, and the results of attack tests. Computed from the hash-chained log only.
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session } = await privateAdmin(request);
   const log = await auditEntries(session.shop);
   const [score, chain, share] = await Promise.all([scoreboard(session.shop, log), verifyChain(session.shop), shareVerifyDetails(session.shop)]);
   const lastPayment = log.filter((e) => e.event.type === "payout" || e.event.type === "order_captured").at(-1);
@@ -24,7 +24,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session } = await privateAdmin(request);
   const f = await request.formData();
   await setShareVerifyDetails(session.shop, f.get("share") === "true");
   return { ok: true };

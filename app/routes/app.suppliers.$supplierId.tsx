@@ -6,7 +6,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { z } from "zod";
 
 import db from "../db.server";
-import { authenticate } from "../shopify.server";
+import { privateAdmin } from "../lib/merchant/staff.server";
 import { auditEntries } from "../lib/audit/log.server";
 import { currentRuleSet } from "../lib/agent/restock.server";
 import { removeSupplier, saveSupplier } from "../lib/suppliers/directory.server";
@@ -17,7 +17,7 @@ import { Empty, Row } from "../components/ui";
 // Changing the PayPal email is the sensitive edit here, so the page says what it does.
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session } = await privateAdmin(request);
   const shop = session.shop;
   const supplier = await db.supplier.findUnique({
     where: { shop_id: { shop, id: String(params.supplierId ?? "") } },
@@ -45,7 +45,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session } = await privateAdmin(request);
   const id = String(params.supplierId ?? "");
   const existing = await db.supplier.findUnique({ where: { shop_id: { shop: session.shop, id } } });
   if (!existing) return { ok: false, message: "Supplier not found" };
@@ -80,8 +80,8 @@ export default function Supplier() {
 
       {s.emailChangedAt && (
         <s-banner tone="warning" heading={`PayPal email changed on ${date(s.emailChangedAt)}`}>
-          If you didn't expect this, call the supplier on a number you already have before approving purchases.
-          "Please update our payment details" is the most common supplier fraud.
+          If you didn’t expect this, call the supplier on a number you already have before approving purchases.
+          “Please update our payment details” is the most common supplier fraud.
         </s-banner>
       )}
 

@@ -42,6 +42,11 @@ api_version = "2026-10" # keep in step with apiVersion in app/shopify.server.ts
   uri = "/webhooks/refunds/create"
   topics = [ "refunds/create" ]
 
+  # Mandatory privacy requests are received without needing an installed shop session.
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/privacy"
+  compliance_topics = [ "customers/data_request", "customers/redact", "shop/redact" ]
+
 [auth]
 redirect_urls = [
   "https://guardbuy.onrender.com/auth/callback",

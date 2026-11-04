@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { RestockJob } from "@prisma/client";
 import db from "../../db.server";
+import { privacyWriteAllowed } from "../privacy/state.server";
 
 const HOLD_MS = 120_000;
 export type ClaimedRestockJob = RestockJob & { holder: string; claimedGeneration: number };
@@ -10,16 +11,19 @@ export const restockJobKey = (job: ClaimedRestockJob) => `${job.id}:${job.claime
 export async function enqueueRestock(shop: string, inventoryItemId: string | number) {
   const item = String(inventoryItemId);
   if (!shop || !/^\d+$/.test(item)) throw new Error("Invalid restock trigger");
-  const rows = await db.$queryRaw<RestockJob[]>`
-    INSERT INTO "RestockJob" ("id", "shop", "inventoryItemId", "updatedAt")
-    VALUES (${randomUUID()}, ${shop}, ${item}, clock_timestamp())
-    ON CONFLICT ("shop", "inventoryItemId") DO UPDATE
-    SET "generation" = "RestockJob"."generation" + 1,
-        "availableAt" = CASE WHEN "RestockJob"."claimedGeneration" IS NULL
-          THEN LEAST("RestockJob"."availableAt", clock_timestamp()) ELSE "RestockJob"."availableAt" END,
-        "updatedAt" = clock_timestamp()
-    RETURNING *`;
-  return rows[0];
+  return db.$transaction(async (tx) => {
+    if (!await privacyWriteAllowed(tx, shop)) return null;
+    const rows = await tx.$queryRaw<RestockJob[]>`
+      INSERT INTO "RestockJob" ("id", "shop", "inventoryItemId", "updatedAt")
+      VALUES (${randomUUID()}, ${shop}, ${item}, clock_timestamp())
+      ON CONFLICT ("shop", "inventoryItemId") DO UPDATE
+      SET "generation" = "RestockJob"."generation" + 1,
+          "availableAt" = CASE WHEN "RestockJob"."claimedGeneration" IS NULL
+            THEN LEAST("RestockJob"."availableAt", clock_timestamp()) ELSE "RestockJob"."availableAt" END,
+          "updatedAt" = clock_timestamp()
+      RETURNING *`;
+    return rows[0];
+  }, { maxWait: 15_000, timeout: 20_000 });
 }
 
 export async function claimRestockJob(): Promise<ClaimedRestockJob | null> {

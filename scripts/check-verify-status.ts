@@ -5,6 +5,7 @@ const rows: { seq: number; shop: string; at: Date; event: AuditEvent; prevHash: 
 let payment = 0;
 Object.assign(globalThis, { prismaGlobal: {
   auditEntry: { findFirst: async () => rows[payment], findMany: async () => rows },
+  privacyBlock: { findUnique: async () => null },
   shopSettings: { findUnique: async () => null },
 } });
 const { entryHash } = await import("../app/lib/audit/log.server");

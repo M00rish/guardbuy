@@ -6,7 +6,7 @@ import { useFetcher, useLoaderData } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
-import { authenticate } from "../shopify.server";
+import { privateAdmin } from "../lib/merchant/staff.server";
 import { approvalQueue, approveInPayPal, approvePurchase, rejectPurchase, retryPurchase, type ApprovalCard } from "../lib/agent/approvals.server";
 import { ApprovalRefused } from "../lib/agent/approval-actions";
 import { PaymentLockBusy } from "../lib/agent/payment-lock.server";
@@ -21,7 +21,7 @@ import { ago, Empty, plural, Row } from "../components/ui";
 // can act, and their staff id is written to the audit log with the decision.
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session } = await privateAdmin(request);
   // Settle PayPal orders first (capture approved ones, close expired or cancelled ones), so the queue is current.
   // A status-only refresh must not capture an approved Order.
   if (new URL(request.url).searchParams.get("payoutRefresh") !== "1") {
@@ -35,7 +35,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 type ActionResult = { ok: boolean; message: string; approveUrl?: string };
 
 export const action = async ({ request }: ActionFunctionArgs): Promise<ActionResult> => {
-  const { session, sessionToken } = await authenticate.admin(request);
+  const { session, sessionToken } = await privateAdmin(request);
   const staffId = sessionToken?.sub;
   if (!staffId) throw new Response("A signed-in staff member is required", { status: 403 });
 

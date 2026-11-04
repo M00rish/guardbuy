@@ -159,3 +159,30 @@ model RestockJob {
   @@unique([shop, inventoryItemId])
   @@index([availableAt, lockedUntil])
 }
+
+// Minimal compliance inbox: no webhook body, customer identity or requested order IDs.
+// The authenticated shop is cleared after fulfillment; completed receipt metadata is pruned by the operator.
+model PrivacyRequest {
+  id           String   @id @default(cuid())
+  eventId      String
+  shop         String?
+  shopHash     String
+  topic        String
+  requestId    String?
+  receivedAt   DateTime @default(now())
+  dueAt        DateTime
+  status       String   @default("pending")
+  completedAt  DateTime?
+  referenceHash String?
+
+  @@unique([shopHash, topic, eventId])
+  @@index([status, dueAt])
+}
+
+// Pseudonymous suppression marker prevents delayed webhooks/old workers recreating erased data.
+// Kept until an operator approves a later reinstall. Contains no raw shop domain or payload.
+model PrivacyBlock {
+  shopHash String @id
+  createdAt DateTime @default(now())
+  purgedAt DateTime?
+}
