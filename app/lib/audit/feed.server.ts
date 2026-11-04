@@ -1,3 +1,4 @@
+import { paymentStatus } from "../payments/status";
 import type { AuditEntry } from "../policy/schema";
 import { usd } from "../format";
 import { classifyAttack, WHAT_IF_SCENARIO } from "../agent/attack.server";
@@ -123,7 +124,7 @@ export function toFeed(log: AuditEntry[], you?: string, names: FeedNames = {}): 
         items.push({ ...base, kind: "failed", title: "Payment failed", detail: ev.reason });
         break;
       case "payout":
-        items.push({ ...base, kind: "paid", title: `Submitted ${usd(ev.amountCents)} via PayPal Payouts${purchaseOf(ev.decisionSeq) ? ` for ${purchaseOf(ev.decisionSeq)}` : ""}`, detail: `PayPal payout batch ${ev.payoutBatchId} (${ev.status})`, verifyId: ev.payoutBatchId });
+        items.push({ ...base, kind: paymentStatus(log, e).settled ? "paid" : "paypal", title: `${paymentStatus(log, e).label}: submitted ${usd(ev.amountCents)} via PayPal Payouts${purchaseOf(ev.decisionSeq) ? ` for ${purchaseOf(ev.decisionSeq)}` : ""}`, detail: `Initial payout submission: ${ev.payoutBatchId} (${ev.status})`, verifyId: ev.payoutBatchId });
         break;
       case "payout_status":
         items.push({ ...base, kind: "status", title: `Payout status: ${ev.status}`, detail: ev.confirmedByTransactionSearch ? "Confirmed in PayPal's transaction records" : undefined });
@@ -140,7 +141,7 @@ export function toFeed(log: AuditEntry[], you?: string, names: FeedNames = {}): 
         items.push({ ...base, kind: ev.status.includes("REFUND") ? "paypal" : "status", title: `PayPal order ${ev.orderId}: ${ev.status}`, detail: ev.refundedCents ? `${usd(ev.refundedCents)} refunded by the supplier` : undefined });
         break;
       case "order_captured":
-        items.push({ ...base, kind: "paid", title: `Paid ${usd(ev.amountCents)} via PayPal Orders${purchaseOf(ev.decisionSeq) ? ` for ${purchaseOf(ev.decisionSeq)}` : ""}`, detail: `Capture ${ev.captureId} (${ev.status})`, verifyId: ev.orderId });
+        items.push({ ...base, kind: paymentStatus(log, e).settled ? "paid" : "paypal", title: `${paymentStatus(log, e).label}: ${usd(ev.amountCents)} via PayPal Orders${purchaseOf(ev.decisionSeq) ? ` for ${purchaseOf(ev.decisionSeq)}` : ""}`, detail: `Initial capture response: ${ev.captureId} (${ev.status})`, verifyId: ev.orderId });
         break;
     }
   }

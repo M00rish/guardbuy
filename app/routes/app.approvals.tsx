@@ -190,12 +190,15 @@ function CardView({ card }: { card: Card }) {
             <s-text tone="neutral">GuardBuy records the payment when PayPal sends you back.</s-text>
           </s-stack>
         ) : (
-          <s-stack direction="inline" gap="base">
+          <s-stack gap="base">
+            <s-text>{`Approve and pay submits a PayPal Payout from the configured merchant funding account to ${card.payeeEmail ?? "the recorded supplier"} for exactly ${usd(card.totalCents)}. Approve in PayPal opens an Order: the approving merchant pays that supplier from their PayPal account. The demo uses sandbox accounts. Submission is not confirmation of payment.`}</s-text>
+            <s-stack direction="inline" gap="base">
             <s-button variant="primary" onClick={() => submit("approve")} disabled={busy} {...(busyWith === "approve" ? { loading: true } : {})}>
               {`Approve and pay ${usd(card.totalCents)}`}
             </s-button>
             <s-button onClick={() => submit("paypal")} disabled={busy} {...(busyWith === "paypal" ? { loading: true } : {})}>Approve in PayPal</s-button>
             <s-button tone="critical" variant="tertiary" onClick={() => submit("reject")} disabled={busy} {...(busyWith === "reject" ? { loading: true } : {})}>Decline</s-button>
+            </s-stack>
           </s-stack>
         )}
       </s-stack>
