@@ -1,6 +1,7 @@
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
 import db from "../../db.server";
+import { approvalStates } from "../agent/approval-state";
 import { unknownPaymentDecisions } from "../payments/attempts";
 import { deliveries } from "../inventory/deliveries";
 import type { AuditEntry, RuleSet } from "../policy/schema";
@@ -37,6 +38,13 @@ export function productStatus(
     const d = log.find((e) => e.seq === seq)?.event;
     const proposal = d?.type === "decision" ? log.find((e) => e.seq === d.proposalSeq)?.event : undefined;
     if (proposal?.type === "proposal" && proposal.proposal.variantId === p.variantId) return { label: "Payment reserved · check Approvals", tone: "warning" };
+  }
+  for (const state of approvalStates(log, now).filter((s) => s.status === "payment_failed")) {
+    const d = log.find((e) => e.seq === state.decisionSeq)?.event;
+    const proposalEntry = d?.type === "decision" ? log.find((e) => e.seq === d.proposalSeq) : undefined;
+    const proposal = proposalEntry?.event;
+    const newer = log.some((e) => e.seq > (proposalEntry?.seq ?? -1) && e.event.type === "proposal" && !e.event.scenario && e.event.proposal.variantId === p.variantId);
+    if (!newer && proposal?.type === "proposal" && proposal.proposal.variantId === p.variantId) return { label: "Payment needs attention · check Approvals", tone: "critical" };
   }
   const delivery = deliveries(log).find((d) => d.variantId === p.variantId && (d.remaining > 0 || d.pending) && (d.payment !== "failed" || d.pending));
   if (delivery) return { label: delivery.pending ? "Receipt needs confirmation" : delivery.payment === "pending" ? `Payment pending · ${delivery.remaining} on order` : `${delivery.remaining} incoming · awaiting delivery`, tone: "info" };

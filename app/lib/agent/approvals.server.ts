@@ -1,9 +1,12 @@
-import { appendAudit, appendAuditWhen, auditEntries } from "../audit/log.server";
-import type { AuditEntry, RuleCheck } from "../policy/schema";
+import { appendAuditWhen, auditEntries } from "../audit/log.server";
+import type { RuleCheck } from "../policy/schema";
 import { offersForVariant, supplierNames } from "../suppliers/directory.server";
 import { createApprovalOrder, ExecutionRefused, executePurchase, openOrder } from "./execute.server";
-import { purchaseReservations, unknownPaymentDecisions, PaymentPending } from "../payments/attempts";
-import { acceptedUnitPrice, APPROVAL_TTL_MS, approvalExpired } from "./restock.server";
+import { approvalStates, type ApprovalStatus } from "./approval-state";
+import { createApprovalActions } from "./approval-actions";
+import { withPaymentLock } from "./payment-lock.server";
+import { PaymentRejected } from "../payments/attempts";
+import { acceptedUnitPrice, APPROVAL_TTL_MS } from "./restock.server";
 
 // The approval queue: purchases the policy engine sent to a person ("approval" verdict).
 // Cards lead with facts GuardBuy computed itself (price vs the price you accepted, quantity vs usual, who gets
@@ -14,7 +17,12 @@ export type ApprovalCard = {
   decisionSeq: number;
   proposedAt: string;
   expiresAt: string; // approvals are valid for 48 hours
-  status: "waiting" | "paypal_pending" | "payment_unknown"; // paypal_pending: a PayPal order exists, waiting for approval in PayPal
+  status: ApprovalStatus;
+  canRetry: boolean;
+  canResume: boolean;
+  canCancel: boolean;
+  expired: boolean;
+  paymentReason?: string;
   sku: string;
   quantity: number;
   supplierId: string;
@@ -30,31 +38,13 @@ export type ApprovalCard = {
   paypalApproveUrl?: string;
 };
 
-const ofDecision = (log: AuditEntry[], type: AuditEntry["event"]["type"], decisionSeq: number) =>
-  log.filter((e) => e.event.type === type && "decisionSeq" in e.event && e.event.decisionSeq === decisionSeq);
-
-/** Decisions still waiting for a person: verdict "approval", not yet approved, declined, paid or expired (48 h). */
-function pendingDecisions(log: AuditEntry[], now = new Date()) {
-  return log.filter((e) => {
-    if (e.event.type !== "decision" || e.event.decision.verdict !== "approval") return false;
-    if (approvalExpired(e.at, now)) return false;
-    const proposalSeq = e.event.proposalSeq;
-    const proposal = log.find((p) => p.seq === proposalSeq);
-    if (proposal?.event.type === "proposal" && proposal.event.scenario) return false; // injection tests are never paid
-    return (["approved", "rejected", "payout", "order_captured"] as const).every((t) => ofDecision(log, t, e.seq).length === 0);
-  });
-}
-
 export async function approvalQueue(shop: string): Promise<ApprovalCard[]> {
   const log = await auditEntries(shop);
   const names = await supplierNames(shop);
   const cards: ApprovalCard[] = [];
 
-  const reserved = purchaseReservations(log);
-  const unknown = unknownPaymentDecisions(log);
-  const waiting = new Set(pendingDecisions(log).map((d) => d.seq));
-  const visible = log.filter((e) => e.event.type === "decision" && (waiting.has(e.seq) || unknown.has(e.seq) || reserved.has(e.seq) && !!openOrder(log, e.seq)));
-  for (const d of visible) {
+  for (const state of approvalStates(log)) {
+    const d = log.find((e) => e.seq === state.decisionSeq)!;
     if (d.event.type !== "decision") continue;
     const p = log.find((e) => e.seq === (d.event.type === "decision" ? d.event.proposalSeq : -1));
     if (p?.event.type !== "proposal") continue;
@@ -70,7 +60,8 @@ export async function approvalQueue(shop: string): Promise<ApprovalCard[]> {
       decisionSeq: d.seq,
       proposedAt: p.at,
       expiresAt: new Date(Date.parse(d.at) + APPROVAL_TTL_MS).toISOString(),
-      status: unknown.has(d.seq) ? "payment_unknown" : order ? "paypal_pending" : "waiting",
+      status: state.status,
+      canRetry: state.canRetry, canResume: state.canResume, canCancel: state.canCancel, expired: state.expired, paymentReason: state.reason,
       sku: proposal.sku,
       quantity: proposal.quantity,
       supplierId: proposal.supplierId,
@@ -89,68 +80,23 @@ export async function approvalQueue(shop: string): Promise<ApprovalCard[]> {
   return cards.reverse(); // newest first
 }
 
-// One action at a time per purchase: a double click must not log (or pay) twice.
-const acting = new Map<string, Promise<unknown>>();
-function oncePerDecision<T>(shop: string, decisionSeq: number, fn: () => Promise<T>): Promise<T> {
-  const key = `${shop}|${decisionSeq}`;
-  if (acting.has(key)) return Promise.reject(new ExecutionRefused("This purchase is already being handled"));
-  const job = fn().finally(() => acting.delete(key));
-  acting.set(key, job);
-  return job;
-}
-
-async function assertPending(shop: string, decisionSeq: number) {
-  const log = await auditEntries(shop);
-  const d = log.find((e) => e.seq === decisionSeq);
-  if (d?.event.type === "decision" && d.event.decision.verdict === "approval" && approvalExpired(d.at)) {
-    throw new ExecutionRefused(`Purchase #${decisionSeq} expired (approvals are valid for 48 hours); the agent will propose it again with fresh numbers`);
-  }
-  if (!pendingDecisions(log).some((d) => d.seq === decisionSeq)) {
-    throw new ExecutionRefused(`Purchase #${decisionSeq} is not waiting for approval`);
-  }
-  return log;
-}
-
-export type ApprovalResult = { paid: boolean; message: string };
-
-/**
- * A person approves inside GuardBuy: logged, then paid by payout. `actor` is recorded as-is,
- * e.g. "shopify-staff:<id>" (admin) or "judge:<session>" (judge console sandbox).
- */
-export function approvePurchase(shop: string, decisionSeq: number, actor: string): Promise<ApprovalResult> {
-  return oncePerDecision(shop, decisionSeq, async () => {
-    const log = await assertPending(shop, decisionSeq);
-    if (openOrder(log, decisionSeq)) {
-      throw new ExecutionRefused("This purchase is already being approved in PayPal");
-    }
-    const approved = await appendAuditWhen(shop, { type: "approved", decisionSeq, approvedBy: actor }, (current) => pendingDecisions(current).some((d) => d.seq === decisionSeq) && !openOrder(current, decisionSeq) && !purchaseReservations(current).has(decisionSeq));
-    if (!approved) throw new ExecutionRefused("This purchase changed on another request. Refresh its status.");
-    try {
-      const payout = await executePurchase(shop, decisionSeq);
-      return { paid: true, message: `Approved; payout submitted (log entry #${payout.seq}). Track payment and receive goods in Deliveries.` };
-    } catch (e) {
-      const uncertain = e instanceof PaymentPending || await auditEntries(shop).then((entries) => purchaseReservations(entries).has(decisionSeq), () => true);
-      if (uncertain) return { paid: false, message: new PaymentPending().message };
-      const reason = e instanceof ExecutionRefused ? e.message : "PayPal did not confirm this payment. Review its recorded status before retrying.";
-      await appendAudit(shop, { type: "payment_failed", decisionSeq, reason, definitive: true });
-      return { paid: false, message: `Approved, but payment was not submitted successfully. ${reason}` };
-    }
-  });
-}
-
-export function rejectPurchase(shop: string, decisionSeq: number, actor: string, reason?: string): Promise<ApprovalResult> {
-  return oncePerDecision(shop, decisionSeq, async () => {
-    await assertPending(shop, decisionSeq);
-    const rejected = await appendAuditWhen(shop, { type: "rejected", decisionSeq, rejectedBy: actor, reason: reason?.slice(0, 500) || undefined }, (current) => pendingDecisions(current).some((d) => d.seq === decisionSeq) && !purchaseReservations(current).has(decisionSeq) && !openOrder(current, decisionSeq));
-    if (!rejected) throw new ExecutionRefused("A payment or another action already reserved this purchase. Refresh its status.");
-    return { paid: false, message: "Declined. Nothing was paid." };
-  });
-}
+// Shared across workers and restarts. Conditional audit appends remain authoritative if a
+// worker outlives its lease; the executor independently reserves the route under its funding lock.
+const oncePerDecision = <T>(shop: string, seq: number, fn: () => Promise<T>) =>
+  withPaymentLock(`approval:${shop}:${seq}`, fn);
+const actions = createApprovalActions({ read: auditEntries, appendWhen: appendAuditWhen, lock: oncePerDecision, execute: executePurchase,
+  failureReason: (error) => error instanceof ExecutionRefused || error instanceof PaymentRejected ? error.message : undefined,
+});
+export const approvePurchase = actions.approve;
+export const retryPurchase = actions.retry;
+export const rejectPurchase = actions.reject;
+export type { ApprovalResult } from "./approval-actions";
 
 /** Creates (or returns) the PayPal order, so the merchant approves and pays in PayPal itself. */
 export function approveInPayPal(shop: string, decisionSeq: number, returnUrl: string): Promise<{ approveUrl: string }> {
   return oncePerDecision(shop, decisionSeq, async () => {
-    await assertPending(shop, decisionSeq);
+    const state = approvalStates(await auditEntries(shop)).find((s) => s.decisionSeq === decisionSeq);
+    if (state?.status !== "waiting" && state?.status !== "paypal_pending") throw new ExecutionRefused("This purchase is not waiting for approval. Refresh its status.");
     const order = await createApprovalOrder(shop, decisionSeq, returnUrl);
     if (order.event.type !== "order_created") throw new Error("Unexpected log entry");
     return { approveUrl: order.event.approveUrl };

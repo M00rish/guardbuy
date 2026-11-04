@@ -23,8 +23,40 @@ jobs:
       - run: npx tsx scripts/check-public-demo.ts
       - run: npx tsx scripts/check-payout-refresh.ts
       - run: npx tsx scripts/check-payment-attempts.ts
+      - run: npx tsx scripts/check-unpaid-approvals.ts
       - run: npx tsx scripts/check-payment-http.ts
       - run: npx tsx scripts/check-paypal-errors.ts
       - run: npx tsx scripts/check-policy.ts
       - run: npx tsx scripts/check-scoreboard.ts
       - run: node --import tsx scripts/check-checkpoints.ts
+
+  unpaid-approvals-db:
+    name: Unpaid approvals on Postgres
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: offline-only
+          POSTGRES_DB: guardbuy_ism135_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism135_test
+      DIRECT_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism135_test
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma migrate deploy
+      - run: npx tsx scripts/check-unpaid-approvals-db.ts

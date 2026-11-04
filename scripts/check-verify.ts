@@ -34,7 +34,7 @@ async function payment(quantity: number, batchId: string, approve = false) {
   const p = await appendAudit(SHOP, { type: "proposal", proposal });
   const decision = evaluate(proposal, rules, ctx);
   const d = await appendAudit(SHOP, { type: "decision", proposalSeq: p.seq, decision });
-  if (approve) await appendAudit(SHOP, { type: "approved", decisionSeq: d.seq, approvedBy: "shopify-staff:1" });
+  if (approve) await appendAudit(SHOP, { type: "approved", decisionSeq: d.seq, approvedBy: "shopify-staff:1", paymentProtocol: "durable-v1" });
   const pay = await appendAudit(SHOP, { type: "payout", decisionSeq: d.seq, payoutBatchId: batchId, status: "PENDING", amountCents: decision.totalCents });
   await appendAudit(SHOP, { type: "payout_status", payoutSeq: pay.seq, status: "SUCCESS", transactionId: "TXN123", confirmedByTransactionSearch: true });
   return decision.verdict;

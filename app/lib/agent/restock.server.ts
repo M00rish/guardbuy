@@ -1,4 +1,5 @@
 import db from "../../db.server";
+import { approvalExpired, approvalStates } from "./approval-state";
 import { deliveries } from "../inventory/deliveries";
 import { appendAudit, appendAuditWhen, auditEntries } from "../audit/log.server";
 import type { StockCheck } from "../inventory/trigger.server";
@@ -25,8 +26,7 @@ const RETRY_AFTER_REJECT_MS = DAY_MS; // the merchant said no: don't ask again t
 const IN_FLIGHT_MS = 10 * 60_000; // an "auto" decision with no payment result yet is still being paid
 
 /** A purchase waiting for approval expires after this long: it can't be paid, and the product is re-proposed with fresh numbers. */
-export const APPROVAL_TTL_MS = 48 * 60 * 60_000;
-export const approvalExpired = (decisionAt: string, now = new Date()) => now.getTime() - Date.parse(decisionAt) >= APPROVAL_TTL_MS;
+export { APPROVAL_TTL_MS, approvalExpired } from "./approval-state";
 
 // PayPal payout statuses (batch or item) meaning the supplier did not get, or did not keep, the money.
 const PAYOUT_FAILED = new Set(["DENIED", "CANCELED", "CANCELLED", "FAILED", "RETURNED", "BLOCKED", "REFUNDED", "REVERSED", "DECLINED"]);
@@ -93,7 +93,7 @@ export async function paypalBalanceCents(exclude?: { shop: string; decisionSeq: 
 }
 
 async function adjustForLag(reportedCents: number, asOf: Date | null, exclude?: { shop: string; decisionSeq: number }) {
-  const rows = await db.auditEntry.findMany({ where: { type: { in: ["payment_attempt", "payment_outcome", "payment_failed", "decision", "rejected", "order_created", "order_closed", "payout", "order_captured", "payout_status", "order_status"] } }, orderBy: [{ shop: "asc" }, { seq: "asc" }] });
+  const rows = await db.auditEntry.findMany({ where: { type: { in: ["payment_attempt", "payment_outcome", "payment_failed", "approved", "decision", "rejected", "order_created", "order_closed", "payout", "order_captured", "payout_status", "order_status"] } }, orderBy: [{ shop: "asc" }, { seq: "asc" }] });
   const groups = new Map<string, AuditEntry[]>();
   for (const row of rows) {
     const list = groups.get(row.shop) ?? [];
@@ -304,6 +304,11 @@ export function skipReason(item: { variantId: string; sku: string }, log: AuditE
     const d = log.find((e) => e.seq === seq)?.event;
     const p = d?.type === "decision" ? log.find((e) => e.seq === d.proposalSeq)?.event : undefined;
     if (p?.type === "proposal" && !p.scenario && (p.proposal.variantId ? p.proposal.variantId === item.variantId : p.proposal.sku === item.sku)) return `purchase #${seq} is awaiting PayPal confirmation; its reservation has not expired`;
+  }
+  for (const state of approvalStates(log, now).filter((s) => s.status === "payment_failed" && s.canCancel && !s.expired)) {
+    const d = log.find((e) => e.seq === state.decisionSeq)?.event;
+    const p = d?.type === "decision" ? log.find((e) => e.seq === d.proposalSeq)?.event : undefined;
+    if (p?.type === "proposal" && (p.proposal.variantId ? p.proposal.variantId === item.variantId : p.proposal.sku === item.sku)) return `purchase #${state.decisionSeq} needs attention in Approvals before a replacement restock`;
   }
   const outstanding = deliveries(log).find((d) => d.variantId === item.variantId && (d.remaining > 0 || d.pending) && (d.payment !== "failed" || d.pending));
   if (outstanding) return `restock #${outstanding.decisionSeq} is already open: ${outstanding.remaining} units awaiting delivery${outstanding.pending ? " (receipt needs confirmation)" : ""}`;

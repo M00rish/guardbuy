@@ -7,7 +7,7 @@ import { isManaged, offersForVariant, supplierPaymentEmail, supplierRoster } fro
 import { evaluate } from "../policy/engine";
 import { withPaymentLock } from "./payment-lock.server";
 import { candidateAttempt, fundingKey, performAttempt, submitPayout } from "../payments/attempts.server";
-import { attemptStates, canCloseOrder, purchaseReservations, unresolvedPayments, PaymentPending, PaymentRejected, type Attempt, type PaymentResult } from "../payments/attempts";
+import { attemptStates, canCloseOrder, purchaseReservations, unresolvedPayments, untrackedApproval, PaymentPending, PaymentRejected, type Attempt, type PaymentResult } from "../payments/attempts";
 import { agentOn, approvalExpired, currentRuleSet, paypalBalanceCents, policyContext } from "./restock.server";
 
 // The only code that moves money. It never takes amounts or suppliers from callers:
@@ -171,7 +171,7 @@ export async function executePurchase(shop: string, decisionSeq: number): Promis
     const unresolved = unresolvedPayments(log).find((s) => s.attempt.decisionSeq === decisionSeq);
     if (unresolved && unresolved.attempt.operation !== "payout") throw new PaymentPending();
     const previous = attemptStates(log).filter((s) => s.attempt.decisionSeq === decisionSeq && s.attempt.operation === "payout");
-    const legacy = !previous.length && log.some((e) => e.event.type === "payment_failed" && e.event.decisionSeq === decisionSeq);
+    const legacy = !previous.length && log.some((e) => e.event.type === "payment_failed" && e.event.decisionSeq === decisionSeq && !e.event.definitive);
     const batchId = `gb-${decisionSeq}-${decisionEntry.hash.slice(0, 16)}${previous.length ? `-${previous.length + 1}` : ""}`;
     const attempt = unresolved?.attempt ?? candidateAttempt({
       decisionSeq, operation: "payout", route: "payout", requestId: batchId,
@@ -319,6 +319,7 @@ async function capture(shop: string, decisionSeq: number): Promise<AuditEntry> {
 /** Merchant-initiated resumption: this may submit the original request, never a new route/key. */
 export async function resumePayment(shop: string, decisionSeq: number) {
   const log = await auditEntries(shop);
+  if (untrackedApproval(log, decisionSeq)) throw new ExecutionRefused("This older approval has no saved payment request. Reconcile it with PayPal manually; do not submit a replacement payment.");
   const pending = unresolvedPayments(log).find((s) => s.attempt.decisionSeq === decisionSeq)?.attempt;
   if (pending?.operation === "order_capture") return captureApprovalOrder(shop, decisionSeq);
   if (pending?.operation === "order_create") {
