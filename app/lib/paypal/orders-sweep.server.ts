@@ -1,4 +1,4 @@
-import { appendAudit, auditEntries } from "../audit/log.server";
+import { appendAuditWhen, auditEntries } from "../audit/log.server";
 import { captureApprovalOrder, closeOrder, ExecutionRefused, openOrder } from "../agent/execute.server";
 import { runPayPalTool } from "./toolkit.server";
 import { unresolvedPayments } from "../payments/attempts";
@@ -14,15 +14,16 @@ import { unresolvedPayments } from "../payments/attempts";
 const UNAPPROVED_ORDER_TTL_MS = 3 * 60 * 60_000;
 
 type Order = {
+  id: string;
   status: string;
   purchase_units?: { payments?: { captures?: { status: string }[]; refunds?: { amount?: { value: string } }[] } }[];
 };
 
 
-export async function sweepPayPalOrders(shop: string): Promise<string[]> {
+export async function sweepPayPalOrders(shop: string, options: { readOnly?: boolean } = {}): Promise<string[]> {
   const notes: string[] = [];
   const log = await auditEntries(shop);
-  const decisions = [...new Set(log.flatMap((e) => (e.event.type === "order_created" ? [e.event.decisionSeq] : [])))];
+  const decisions = [...new Set(log.flatMap((e) => ((e.event.type === "order_created" || e.event.type === "order_captured") ? [e.event.decisionSeq] : [])))];
 
   for (const decisionSeq of decisions) {
     const open = openOrder(log, decisionSeq);
@@ -30,6 +31,7 @@ export async function sweepPayPalOrders(shop: string): Promise<string[]> {
 
     // 1. Orders still waiting: capture, close or leave.
     if (open?.event.type === "order_created" && !captured) {
+      if (options.readOnly) continue; // Delivery refresh never captures or closes an approval Order.
       const { orderId } = open.event;
       let order: Order;
       try {
@@ -65,11 +67,13 @@ export async function sweepPayPalOrders(shop: string): Promise<string[]> {
       const order = await runPayPalTool<Order>("get_order", { id: orderId }).catch(() => null);
       const unit = order?.purchase_units?.[0];
       const status = unit?.payments?.captures?.[0]?.status;
-      if (!status || status === known) continue;
+      if (!status || order?.id !== orderId) continue;
       const refundedCents = Math.round((unit?.payments?.refunds ?? []).reduce((sum, r) => sum + Number(r.amount?.value ?? 0), 0) * 100);
-      await appendAudit(shop, {
-        type: "order_status", decisionSeq, orderId, status,
-        refundedCents: status === "REFUNDED" ? captured.event.amountCents : refundedCents,
+      const amount = status === "REFUNDED" ? captured.event.amountCents : refundedCents;
+      if (status === known && amount === (last?.event.type === "order_status" ? last.event.refundedCents : 0)) continue;
+      await appendAuditWhen(shop, { type: "order_status", decisionSeq, orderId, status, refundedCents: amount }, (current) => {
+        const latest = current.filter((e) => e.event.type === "order_status" && e.event.orderId === orderId).at(-1)?.event;
+        return latest?.type !== "order_status" || latest.status !== status || latest.refundedCents !== amount;
       });
       notes.push(`#${decisionSeq} ${orderId}: ${known} -> ${status}`);
     }

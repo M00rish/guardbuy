@@ -10,11 +10,12 @@ import { feedNames } from "../lib/merchant/dashboard.server";
 import { manageDelivery } from "../lib/inventory/delivery-management.server";
 import { deliveries, DeliveryRefused } from "../lib/inventory/deliveries";
 import { receiptLocations, receiver } from "../lib/inventory/receive.server";
+import { sweepPayPalOrders } from "../lib/paypal/orders-sweep.server";
 import { refreshPayouts } from "../lib/paypal/reconcile.server";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { admin, session } = await adminWithStaff(request);
-  await refreshPayouts(session.shop);
+  await Promise.all([refreshPayouts(session.shop), sweepPayPalOrders(session.shop, { readOnly: true })]);
   const [log, names] = await Promise.all([auditEntries(session.shop), feedNames(session.shop)]);
   const all = deliveries(log).reverse();
   const params = new URL(request.url).searchParams;

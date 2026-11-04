@@ -226,6 +226,27 @@ try {
   assert.equal(batches.size, 1, "stale cached incoming coverage must not suppress a now-eligible restock");
   await record("ISM-15 execution re-derives incoming coverage instead of trusting a stale stock snapshot", { acceptedPayments: batches.size, ...(await snapshot(staleCover.shop)) }); await clean();
 
+  const orderRefund = await fixture(true);
+  const makeRefundOrder = await worker("order", orderRefund.shop, orderRefund.seq); makeRefundOrder.start(); assert.ok((await makeRefundOrder.done).ok);
+  const beforeApproval = await worker("refresh-orders", orderRefund.shop); beforeApproval.start(); assert.ok((await beforeApproval.done).ok);
+  assert.equal(captures, 0); assert.equal(paymentRequests.length, 0, "read-only refresh must not capture even a provider-approved Order");
+  const payOrder = await worker("capture", orderRefund.shop, orderRefund.seq); payOrder.start(); assert.ok((await payOrder.done).ok);
+  const refundOrder = [...orders.values()][0], unit = refundOrder.purchase_units![0];
+  unit.payments!.captures![0].status = "PARTIALLY_REFUNDED";
+  Object.assign(unit.payments!, { refunds: [{ amount: { value: "1.00" } }] });
+  const firstRefund = await worker("refresh-orders", orderRefund.shop); firstRefund.start(); assert.ok((await firstRefund.done).ok);
+  let refundState = await snapshot(orderRefund.shop);
+  const firstRefundEvent = refundState.log.at(-1)!.event; assert.ok(firstRefundEvent.type === "order_status"); assert.equal(firstRefundEvent.refundedCents, 100);
+  const { incomingFor } = await import("../app/lib/inventory/deliveries"); assert.equal(incomingFor(refundState.log, "123"), 10);
+  Object.assign(unit.payments!, { refunds: [{ amount: { value: "2.00" } }] });
+  const moreRefund = await worker("refresh-orders", orderRefund.shop); moreRefund.start(); assert.ok((await moreRefund.done).ok);
+  refundState = await snapshot(orderRefund.shop);
+  const secondRefundEvent = refundState.log.at(-1)!.event; assert.ok(secondRefundEvent.type === "order_status"); assert.equal(secondRefundEvent.refundedCents, 200, "a second partial refund must update even when its status is unchanged");
+  unit.payments!.captures![0].status = "REFUNDED";
+  const fullRefund = await worker("refresh-orders", orderRefund.shop); fullRefund.start(); assert.ok((await fullRefund.done).ok);
+  refundState = await snapshot(orderRefund.shop); assert.equal(incomingFor(refundState.log, "123"), 0); assert.equal(captures, 1); assert.equal(paymentRequests.length, 1);
+  await record("ISM-15 delivery Order refresh records incremental/full refunds without capture POSTs", { captures, paymentRequests, ...refundState }); await clean();
+
   // Different processes choose different payment routes. Whichever wins is the only payable route.
   const f = await fixture(true); let releaseCreated!: () => void;
   releaseOrder = new Promise<void>((r) => { releaseCreated = r; }); holdOrder = true;

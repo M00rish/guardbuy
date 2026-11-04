@@ -17,6 +17,7 @@ try {
     case "decline": result = await rejectPurchase(input.shop, input.decisionSeq, "shopify-staff:worker-test"); break;
     case "order": result = await createApprovalOrder(input.shop, input.decisionSeq, "https://example.test/paypal/return"); break;
     case "capture": result = await captureApprovalOrder(input.shop, input.decisionSeq); break;
+    case "refresh-orders": result = await sweepPayPalOrders(input.shop, { readOnly: true }); break;
     case "sweep": result = await sweepPayPalOrders(input.shop); break;
     case "resume": result = await resumePayment(input.shop, input.decisionSeq); break;
     case "drain": result = await processNextRestockJob(); break;
