@@ -110,6 +110,7 @@ async function payableDecision(shop: string, decisionSeq: number) {
   const proposalEntry = log.find((e) => e.seq === proposalSeq);
   if (proposalEntry?.event.type !== "proposal") throw new ExecutionRefused(`Decision ${decisionSeq} has no proposal`);
   const proposal = proposalEntry.event.proposal;
+
   if (proposalEntry.event.scenario) throw new ExecutionRefused(`Decision ${decisionSeq} was an injection test; tests are never paid`);
 
   if (decision.verdict === "block") throw new ExecutionRefused(`Decision ${decisionSeq} was blocked by policy`);
@@ -138,6 +139,10 @@ async function recheckAtPayment(shop: string, decisionSeq: number, opts: { appro
   const proposalEntry = log.find((e) => e.seq === (decisionEntry.event.type === "decision" ? decisionEntry.event.proposalSeq : -1));
   if (decisionEntry.event.type !== "decision" || proposalEntry?.event.type !== "proposal") throw new ExecutionRefused(`Decision ${decisionSeq} is incomplete`);
   const proposal = proposalEntry.event.proposal;
+
+  if (proposalEntry.event.restockJobId && !await db.session.findFirst({ where: { shop, isOnline: false }, select: { id: true } })) {
+    throw new ExecutionRefused("This store is no longer installed; queued purchases cannot submit payments");
+  }
 
   if (decisionEntry.event.decision.verdict === "approval" && approvalExpired(decisionEntry.at)) {
     throw new ExecutionRefused(`Decision ${decisionSeq} expired: approvals are valid for 48 hours`);
@@ -239,17 +244,10 @@ export async function createApprovalOrder(shop: string, decisionSeq: number, ret
   });
 }
 
-// Capture can be triggered by PayPal's redirect and by a manual check at the same time.
-const capturing = new Map<string, Promise<AuditEntry>>();
-
 /** Captures a PayPal order once the merchant has approved it, then confirms it through the Agent Toolkit. */
 export function captureApprovalOrder(shop: string, decisionSeq: number): Promise<AuditEntry> {
-  const key = `${shop}|${decisionSeq}`;
-  const inFlight = capturing.get(key);
-  if (inFlight) return inFlight;
-  const job = capture(shop, decisionSeq).finally(() => capturing.delete(key));
-  capturing.set(key, job);
-  return job;
+  // The funding lease and recorded attempt protect callbacks from every process, including sweeps.
+  return capture(shop, decisionSeq);
 }
 
 async function toolkitOrder(id: string): Promise<PayPalOrder> {

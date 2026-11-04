@@ -138,3 +138,24 @@ model PaymentLock {
   holder      String
   lockedUntil DateTime
 }
+
+// One durable, coalescing inventory trigger per shop/item. A claimed generation survives crashes;
+// newer webhooks cannot acknowledge or replace work that is still in progress.
+model RestockJob {
+  id                  String   @id
+  shop                String
+  inventoryItemId     String
+  generation          Int      @default(1)
+  completedGeneration Int      @default(0)
+  claimedGeneration   Int?
+  holder              String?
+  lockedUntil         DateTime?
+  availableAt         DateTime @default(now())
+  attempts            Int      @default(0)
+  lastError           String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([shop, inventoryItemId])
+  @@index([availableAt, lockedUntil])
+}

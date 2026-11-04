@@ -16,20 +16,20 @@ export type PaymentLease = { key: string; holder: string };
 
 /** A late worker must not submit after another process acquired its expired lease. */
 export async function renewPaymentLease(lease: PaymentLease) {
-  const now = new Date();
-  const renewed = await db.paymentLock.updateMany({ where: { shop: lease.key, holder: lease.holder, lockedUntil: { gt: now } }, data: { lockedUntil: new Date(now.getTime() + HOLD_MS) } });
-  if (renewed.count !== 1) throw new PaymentLockBusy("Payment lease lost; refresh the original payment status");
+  const renewed = await db.$executeRaw`
+    UPDATE "PaymentLock" SET "lockedUntil" = clock_timestamp() + ${HOLD_MS} * interval '1 millisecond'
+    WHERE "shop" = ${lease.key} AND "holder" = ${lease.holder} AND "lockedUntil" > clock_timestamp()`;
+  if (renewed !== 1) throw new PaymentLockBusy("Payment lease lost; refresh the original payment status");
 }
 
 /** Takes the shop's payment lock in one atomic statement; false if someone else holds it. */
 async function tryLock(shop: string, holder: string) {
-  const now = new Date();
-  const until = new Date(now.getTime() + HOLD_MS);
-  // Times come from the app (UTC), not the database's NOW(), so the comparison doesn't depend on its timezone.
+  // The database clock avoids clock skew between workers. clock_timestamp also advances while
+  // a transaction is waiting, unlike NOW() (which is frozen at the transaction's start).
   const rows = await db.$executeRaw`
-    INSERT INTO "PaymentLock" ("shop", "holder", "lockedUntil") VALUES (${shop}, ${holder}, ${until})
+    INSERT INTO "PaymentLock" ("shop", "holder", "lockedUntil") VALUES (${shop}, ${holder}, clock_timestamp() + ${HOLD_MS} * interval '1 millisecond')
     ON CONFLICT ("shop") DO UPDATE SET "holder" = EXCLUDED."holder", "lockedUntil" = EXCLUDED."lockedUntil"
-    WHERE "PaymentLock"."lockedUntil" < ${now}`;
+    WHERE "PaymentLock"."lockedUntil" <= clock_timestamp()`;
   return rows === 1;
 }
 
@@ -41,8 +41,7 @@ export async function withPaymentLock<T>(shop: string, fn: (lease: PaymentLease)
     await new Promise((r) => setTimeout(r, POLL_MS));
   }
   const timer = setInterval(() => {
-    const now = new Date();
-    void db.paymentLock.updateMany({ where: { shop, holder, lockedUntil: { gt: now } }, data: { lockedUntil: new Date(now.getTime() + HOLD_MS) } }).catch(() => {});
+    void renewPaymentLease({ key: shop, holder }).catch(() => {});
   }, 15_000);
   timer.unref();
   try {
