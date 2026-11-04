@@ -92,7 +92,7 @@ Rules are signed by a Shopify staff member: their id and the rules' SHA-256 fing
   - *Outside the database:* historical fingerprints are in `anchors/fingerprints.jsonl`. The independent R2 checkpoint workflow is enabled every six hours. It recomputes database history and checks existing external checkpoints before publishing changes. Bootstrap and an unchanged repeat run passed on 31 October 2026. The app's Home/Activity checks currently verify internal consistency only; they do not establish external verification. See [checkpoint status and setup](anchors/README.md).
 - **Re-check at payment.** Approvals expire after 48 hours, and the rules and balance are checked again just before money moves.
 - **One payment per decision.** A database lock (`PaymentLock`) and PayPal idempotency keys mean a double click, a second tab or a retry can't pay twice.
-- **Approve in PayPal.** Only allow-listed PayPal payer ids can approve (`GUARDBUY_APPROVER_PAYER_IDS`). Cancelled, expired and wrong-payer orders are closed without paying.
+- **Approve in PayPal.** Only merchant payer IDs explicitly bound to the store and configured client ID can fund capture (`GUARDBUY_PAYPAL_STORES`). Missing and wrong payers are refused. A fresh wrong-payer order can be closed without a capture; an uncertain earlier capture stays reserved for reconciliation. The obsolete global `GUARDBUY_APPROVER_PAYER_IDS` is ignored.
 - **Kill switch.** `GUARDBUY_PAYMENTS_DISABLED=1` refuses every payout and capture.
 - **Least privilege.**
   - Shopify scopes: `read_products`, `read_orders`, `read_inventory`, `read_locations`, `write_inventory`, `write_app_proxy`. Inventory writes record physical delivery receipts and reset demo stock.
@@ -109,7 +109,21 @@ Rules are signed by a Shopify staff member: their id and the rules' SHA-256 fing
 | **Agent Toolkit: `get_order`** | Checks order status on return from PayPal and in the background sweep |
 | **Agent Toolkit: `list_transactions`** | Confirms each payout in PayPal's own transaction records |
 
-**Sandbox note.** The demo runs on the PayPal sandbox. One sandbox business account plays both GuardBuy and the merchant, and pays the supplier's sandbox account. Purchases approved in PayPal already come from the merchant's own account. In production, each merchant connects their own PayPal.
+**Sandbox account ownership (ISM-37).** This server reads one global `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET`. Automatic and in-app-approved Payouts spend that sandbox business account's balance. PayPal Orders pay the recorded supplier from the sandbox account whose payer approves checkout; it must be one of the merchant payer IDs explicitly bound to that shop. These can be different accounts. Supplier credentials are used only by test/refill scripts. There is no per-store PayPal credential storage or onboarding.
+
+Before enabling payments, set `GUARDBUY_PAYPAL_STORES` as server-side JSON, for example:
+
+```json
+{"your-store.myshopify.com":{"clientId":"your-sandbox-client-id","payerIds":["YOURMERCHANTPAYERID"]}}
+```
+
+Use the exact Shopify shop domain, the configured client ID and the intended merchant's sandbox payer ID (not its email or the supplier's payer). A shop absent from this mapping cannot submit Payouts, create Orders or capture them. Empty/malformed lists, missing payer identity and another shop's payer fail closed. Bind only shops whose owner has deliberately authorized this account; a configuration entry is operator configuration, not a merchant consent/onboarding product. Startup validates mappings before starting the restock worker. An enabled public demo must name a bound demo store. Account/client changes require rebinding and manual reconciliation of saved attempts from the old account. Coordinate real credential changes with ISM-133; this PR does not rotate any credentials.
+
+REST and Agent Toolkit both require the exact `https://api-m.sandbox.paypal.com` origin. Live and alternate API origins are rejected, including with the public judge dashboard enabled. This app does not enable live payments. Before real merchant use, establish the supported PayPal ownership, onboarding, merchant consent and production permissions model separately.
+
+Deployment: add the explicit mapping before starting this version with payments enabled. If it is not ready, set `GUARDBUY_PAYMENTS_DISABLED=1` to run a sandbox server that displays history while refusing payment writes. There is no permissive development payer exception. Offline HTTP tests alone opt into a loopback fake REST API with both `NODE_ENV=test` and `GUARDBUY_PAYPAL_TEST_API=1`; the real Toolkit refuses that different environment and integration tests replace its reads with a local adapter. Do not set the test flag in deployment. Existing read-only settlement recovery continues to record already completed payments, even when a mapping is later removed; removing authorization never proves an earlier attempt unpaid.
+
+Checks: `npx tsx scripts/check-paypal-binding.ts` covers store/account binding and startup configuration without provider I/O. The multi-process/Postgres suite also exercises the actual executor with a simulated provider to prove refused identities send zero capture requests.
 
 ## Try it
 

@@ -1,6 +1,7 @@
 import { PayPalAgentToolkit } from "@paypal/agent-toolkit/ai-sdk";
 
 import { merchantCredentials } from "./client.server";
+import { assertToolkitEnvironment } from "./config.server";
 
 // PayPal's Agent Toolkit, called directly from server code (deterministic, no LLM in the loop).
 // The toolkit targets an older AI SDK, so we use its tools' execute functions rather than its
@@ -10,6 +11,7 @@ type ToolkitTool = { execute: (args: unknown, opts: unknown) => Promise<unknown>
 let tools: Record<string, ToolkitTool> | null = null;
 
 function toolkit(): Record<string, ToolkitTool> {
+  assertToolkitEnvironment();
   if (!tools) {
     const { clientId, clientSecret } = merchantCredentials();
     tools = new PayPalAgentToolkit({
@@ -22,12 +24,12 @@ function toolkit(): Record<string, ToolkitTool> {
   return tools;
 }
 
-export async function runPayPalTool<T = any>(name: string, args: Record<string, unknown>): Promise<T> {
+export async function runPayPalTool<T = unknown>(name: string, args: Record<string, unknown>): Promise<T> {
   const tool = toolkit()[name];
   if (!tool) throw new Error(`Unknown PayPal toolkit tool: ${name}`);
   const raw = await tool.execute(args, { toolCallId: `guardbuy-${name}`, messages: [] });
   const value = typeof raw === "string" ? JSON.parse(raw) : raw;
-  if (value && typeof value === "object" && ("error" in value || (value as any).ok === false)) {
+  if (value && typeof value === "object" && ("error" in value || (value as { ok?: unknown }).ok === false)) {
     throw new Error(`PayPal toolkit ${name} failed: ${JSON.stringify(value).slice(0, 300)}`);
   }
   return value as T;

@@ -20,6 +20,8 @@ const server = createServer((req, res) => {
 await new Promise<void>((r) => server.listen(0, r));
 const port = (server.address() as { port: number }).port;
 
+process.env.NODE_ENV = "test";
+process.env.GUARDBUY_PAYPAL_TEST_API = "1";
 process.env.PAYPAL_API_BASE = `http://127.0.0.1:${port}`;
 process.env.PAYPAL_CLIENT_ID = "fake"; process.env.PAYPAL_CLIENT_SECRET = "fake";
 const { paypal, PayPalError } = await import("../app/lib/paypal/client.server");

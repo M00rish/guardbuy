@@ -1,6 +1,7 @@
 import db from "../../db.server";
 import { appendAuditWhen, auditEntries } from "../audit/log.server";
 import { paypal } from "../paypal/client.server";
+import { allowedStorePayer, paypalStoreBinding } from "../paypal/config.server";
 import { runPayPalTool } from "../paypal/toolkit.server";
 import type { AuditEntry, RecordedProposal } from "../policy/schema";
 import { isManaged, offersForVariant, supplierPaymentEmail, supplierRoster } from "../suppliers/directory.server";
@@ -87,16 +88,6 @@ export async function closeOrder(shop: string, decisionSeq: number, orderId: str
   throw new PaymentPending();
 }
 
-/**
- * PayPal accounts allowed to approve purchases in PayPal (the merchant's own). Until each merchant
- * connects their PayPal (Phase B), it's configured: GUARDBUY_APPROVER_PAYER_IDS (comma-separated
- * PayPal payer ids). Empty list = any approver is accepted and recorded (dev only).
- */
-export function allowedApprover(payerId: string | undefined) {
-  const list = (process.env.GUARDBUY_APPROVER_PAYER_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
-  if (list.length === 0) return true;
-  return !!payerId && list.includes(payerId);
-}
 const forDecision = (log: AuditEntry[], type: AuditEntry["event"]["type"], decisionSeq: number) =>
   log.find((e) => e.event.type === type && "decisionSeq" in e.event && e.event.decisionSeq === decisionSeq);
 
@@ -188,6 +179,7 @@ export async function executePurchase(shop: string, decisionSeq: number): Promis
     return performAttempt(shop, attempt, lease, {
       lookup: async () => null, // No read-only Payouts endpoint searches by sender_batch_id.
       beforeSend: async (saved) => {
+        paypalStoreBinding(shop);
         await recheckAtPayment(shop, decisionSeq, { approvedByPerson: approved });
         if (await payeeFor(shop, proposal) !== saved.payeeEmail) throw new ExecutionRefused("The recorded payee changed");
         assertPaymentsEnabled();
@@ -230,6 +222,7 @@ export async function createApprovalOrder(shop: string, decisionSeq: number, ret
     return performAttempt(shop, attempt, lease, {
       lookup: async () => null,
       beforeSend: async (saved) => {
+        paypalStoreBinding(shop);
         await recheckAtPayment(shop, decisionSeq, { approvedByPerson: true });
         if (await payeeFor(shop, proposal) !== saved.payeeEmail) throw new ExecutionRefused("The recorded payee changed");
         assertPaymentsEnabled();
@@ -288,9 +281,16 @@ async function capture(shop: string, decisionSeq: number): Promise<AuditEntry> {
         return null;
       },
       beforeSend: async (saved) => {
+        paypalStoreBinding(shop);
         const order = await toolkitOrder(saved.providerId!);
+        if (order.id !== saved.providerId) throw new ExecutionRefused("Unexpected PayPal approval order identity");
+        const unit = order.purchase_units?.[0];
+        if (order.purchase_units?.length !== 1 || unit?.amount?.currency_code !== saved.currency
+          || toCents(unit.amount.value) !== saved.amountCents
+          || unit.payee?.email_address?.toLowerCase() !== saved.payeeEmail.toLowerCase()
+          || unit.payments?.captures?.length) throw new ExecutionRefused("PayPal approval does not match the recorded purchase");
         if (order.status !== "APPROVED") throw new ExecutionRefused(`PayPal order is ${order.status}, not approved for capture`);
-        if (!allowedApprover(order.payer?.payer_id)) {
+        if (!allowedStorePayer(shop, order.payer?.payer_id)) {
           wrongPayer = true;
           // An existing uncertain capture cannot be cancelled merely because a later read differs.
           throw new ExecutionRefused("This order was approved by an account outside the store's permitted payers");
