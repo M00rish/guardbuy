@@ -32,4 +32,5 @@ assert.deepEqual(budgetSummary(2000, 3000, 10000), { spent: 2000, reserved: 3000
 assert.equal(budgetSummary(9000, 3000, 10000).remaining, 0);
 assert.equal(budgetSummary(9000, 3000, 10000).over, 2000);
 assert.equal(budgetSummary(0, 1000, 10000).remaining, 9000);
+assert.equal(toFeed([{ ...pay, event: { type: "payment_failed", decisionSeq: 1, reason: "Lost response" } }])[0].title, "Awaiting PayPal confirmation");
 console.log("PASS payment lifecycle: batch acceptance, recipient settlement, pending capture, returns/refunds/failure, Activity categories, Home status and committed budget including over-cap commitments.");

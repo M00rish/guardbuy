@@ -121,7 +121,7 @@ export function toFeed(log: AuditEntry[], you?: string, names: FeedNames = {}): 
         items.push({ ...base, kind: ev.on ? "rules" : "failed", title: ev.on ? `Agent turned on by ${actor(ev.by, you)}` : `Agent paused by ${actor(ev.by, you)}` });
         break;
       case "payment_failed":
-        items.push({ ...base, kind: "failed", title: "Payment failed", detail: ev.reason });
+        items.push({ ...base, kind: ev.definitive ? "failed" : "paypal", title: ev.definitive ? "Payment failed" : "Awaiting PayPal confirmation", detail: ev.reason });
         break;
       case "payout":
         items.push({ ...base, kind: paymentStatus(log, e).settled ? "paid" : "paypal", title: `${paymentStatus(log, e).label}: submitted ${usd(ev.amountCents)} via PayPal Payouts${purchaseOf(ev.decisionSeq) ? ` for ${purchaseOf(ev.decisionSeq)}` : ""}`, detail: `Initial payout submission: ${ev.payoutBatchId} (${ev.status})`, verifyId: ev.payoutBatchId });
