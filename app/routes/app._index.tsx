@@ -150,7 +150,7 @@ export default function Home() {
             <s-grid gridTemplateColumns="@container (inline-size <= 640px) 1fr 1fr, 1fr 1fr 1fr 1fr" gap="base">
               <Metric label="Spent · Last 7 days" value={usd(d.spentCents)} detail={capCents ? `of ${usd(capCents)} rolling 7-day cap` : undefined}>
                 {capCents > 0 && (
-                  <s-progress value={Math.min(d.budget.committed, capCents)} max={capCents} tone={d.budget.committed > capCents * 0.8 ? "critical" : "auto"} accessibilityLabel="Spent plus reserved against the rolling seven-day cap" />
+                  <s-text>{`Committed: ${usd(d.budget.committed)} of ${usd(capCents)}`}</s-text>
                 )}
               </Metric>
               <Metric label="Reserved" value={usd(d.budget.reserved)} detail="Pending payments and unexpired approval commitments" />
