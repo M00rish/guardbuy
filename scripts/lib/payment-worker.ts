@@ -31,6 +31,7 @@ try {
       if (!result) throw new Error("Startup worker did not drain the saved job");
       break;
     }
+    case "stale-cover": result = await runRestock(input.shop, { variantId: "123", sku: "coffee", available: 1, perDay: 2, daysOfCover: 0.5, incoming: 999, projectedDaysOfCover: 999, needsRestock: false }); break;
     case "restock": result = await runRestock(input.shop, { variantId: "123", sku: "coffee", available: 1, perDay: 2, daysOfCover: 0.5, needsRestock: true }, { jobId: input.jobId }); break;
     default: throw new Error("Unknown worker action");
   }

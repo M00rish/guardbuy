@@ -1,5 +1,6 @@
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import { appendAuditWhen, auditEntries } from "../audit/log.server";
+import { assertPrivacyActive } from "../privacy/state.server";
 import { withPaymentLock } from "../agent/payment-lock.server";
 import { canAppendReceipt, createReceiveDelivery, DeliveryRefused } from "./deliveries";
 
@@ -36,7 +37,7 @@ export async function receiptLocations(admin: AdminApiContext, variantId: string
 
 export function receiver(admin: AdminApiContext) {
   return createReceiveDelivery({
-    read: auditEntries, lock: withPaymentLock,
+    read: auditEntries, lock: (shop, fn) => withPaymentLock(shop, async () => { await assertPrivacyActive(shop); return fn(); }),
     append: async (shop, event) => {
       const result = await appendAuditWhen(shop, event, (log) => canAppendReceipt(log, event));
       if (!result && event.type === "receipt_started") throw new DeliveryRefused("Another receipt changed this purchase. Reload before continuing.");

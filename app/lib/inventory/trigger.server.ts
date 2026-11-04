@@ -1,6 +1,8 @@
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
 import db from "../../db.server";
+import { auditEntries } from "../audit/log.server";
+import { incomingFor } from "./deliveries";
 import { backfillSales, daysOfCover, salesPerDay, variantKey } from "./sales.server";
 
 // Until merchants can sign their own rules (policy engine task), use the demo default.
@@ -13,6 +15,8 @@ export type StockCheck = {
   perDay: number;
   daysOfCover: number;
   needsRestock: boolean;
+  incoming?: number;
+  projectedDaysOfCover?: number;
 };
 
 /** Backfills sales history until one backfill has fully completed for this shop. */
@@ -58,5 +62,7 @@ export async function checkStock(
 ): Promise<StockCheck> {
   const perDay = await salesPerDay(shop, item.variantId, item.createdAt);
   const cover = daysOfCover(item.available, perDay);
-  return { variantId: item.variantId, sku: item.sku, available: item.available, perDay, daysOfCover: cover, needsRestock: cover < reorderBelowDays };
+  const incoming = incomingFor(await auditEntries(shop), item.variantId);
+  const projectedDaysOfCover = daysOfCover(item.available + incoming, perDay);
+  return { variantId: item.variantId, sku: item.sku, available: item.available, perDay, daysOfCover: cover, incoming, projectedDaysOfCover, needsRestock: projectedDaysOfCover < reorderBelowDays };
 }

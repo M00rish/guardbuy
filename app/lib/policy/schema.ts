@@ -70,6 +70,7 @@ export type Proposal = z.infer<typeof ProposalSchema>;
 export const RecordedProposalSchema = ProposalSchema.extend({
   payeeEmail: z.string().email().optional(),
   variantId: z.string().optional(), // the Shopify variant restocked (also added by GuardBuy, not the LLM)
+  supplierLeadTimeDays: z.number().int().nonnegative().optional(), // supplier terms at proposal time; never supplied by the AI
   model: z.string().optional(), // which AI model wrote the proposal, e.g. "google:gemini-3.8-flash"
 });
 export type RecordedProposal = z.infer<typeof RecordedProposalSchema>;
@@ -113,6 +114,8 @@ export const AuditEventSchema = z.discriminatedUnion("type", [
     type: z.literal("receipt_received"), decisionSeq: z.number().int(), receiptId: z.string().uuid(),
     quantity: z.number().int().positive(), variantId: z.string(), locationId: z.string(), receivedBy: z.string(),
   }),
+  z.object({ type: z.literal("delivery_estimate_updated"), decisionSeq: z.number().int(), updateId: z.string().uuid(), expectedRevision: z.number().int(), expectedAt: z.string().datetime(), updatedBy: z.string() }),
+  z.object({ type: z.literal("delivery_remainder_closed"), decisionSeq: z.number().int(), updateId: z.string().uuid(), expectedRevision: z.number().int(), quantity: z.number().int().positive(), reason: z.enum(["supplier_cancelled", "not_arriving"]), closedBy: z.string() }),
   z.object({ type: z.literal("receipt_rejected"), decisionSeq: z.number().int(), receiptId: z.string().uuid() }),
   z.object({ type: z.literal("ruleset_signed"), ruleSet: SignedRuleSetSchema }),
   z.object({

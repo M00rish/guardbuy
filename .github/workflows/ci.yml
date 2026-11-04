@@ -20,6 +20,7 @@ jobs:
       - run: npm run typecheck
       # Offline, deterministic checks (no database, PayPal or Gemini needed)
       - run: npx tsx scripts/check-deliveries.ts
+      - run: npx tsx scripts/check-incoming-stock.ts
       - run: npx tsx scripts/check-public-demo.ts
       - run: npx tsx scripts/check-payout-refresh.ts
       - run: npx tsx scripts/check-payment-attempts.ts
@@ -143,3 +144,41 @@ jobs:
           path: |
             privacy-results.json
             privacy-server.log
+
+  incoming-stock:
+    name: Incoming stock and receipt lifecycle
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: offline-only
+          POSTGRES_DB: guardbuy_ism15_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism15_test
+      DIRECT_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism15_test
+      GUARDBUY_INCOMING_EVIDENCE_PATH: incoming-stock-results.json
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma migrate deploy
+      - run: npx tsx scripts/check-delivery-lifecycle-db.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: incoming-stock-proof
+          path: incoming-stock-results.json

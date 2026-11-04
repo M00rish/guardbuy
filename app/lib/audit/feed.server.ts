@@ -51,6 +51,12 @@ export function toFeed(log: AuditEntry[], you?: string, names: FeedNames = {}): 
       case "payment_outcome":
         items.push({ ...base, kind: ev.status === "unknown" ? "paypal" : "failed", title: ev.status === "unknown" ? `Awaiting PayPal confirmation for purchase #${ev.decisionSeq}` : `Payment request rejected for purchase #${ev.decisionSeq}` });
         break;
+      case "delivery_estimate_updated":
+        items.push({ ...base, kind: "stock", title: `Expected arrival updated for purchase #${ev.decisionSeq}`, detail: `${ev.expectedAt.slice(0, 10)} (merchant estimate, UTC) by ${actor(ev.updatedBy, you)}` });
+        break;
+      case "delivery_remainder_closed":
+        items.push({ ...base, kind: "stock", title: `Closed ${ev.quantity} undelivered units for purchase #${ev.decisionSeq}`, detail: `${ev.reason === "supplier_cancelled" ? "Supplier cancelled" : "Confirmed not arriving"} · ${actor(ev.closedBy, you)}. No inventory adjustment or refund.` });
+        break;
       case "receipt_started":
         items.push({ ...base, kind: "stock", title: `Recording receipt of ${ev.quantity} units for purchase #${ev.decisionSeq}` });
         break;

@@ -10,9 +10,11 @@ type Card = Data["cards"][number];
 
 function deliveryStatus(card: Card) {
   if (card.pending) return { label: "Confirm receipt", tone: "warning" as const };
-  if (card.remaining === 0) return { label: "Received", tone: "success" as const };
+  if (card.remaining === 0) return { label: card.closed ? card.received ? "Remainder closed" : "Delivery closed" : "Received", tone: card.closed ? "neutral" as const : "success" as const };
   if (card.payment === "failed") return { label: "Payment needs review", tone: "critical" as const };
   if (card.payment === "pending") return { label: "Payment pending", tone: "caution" as const };
+  if (card.partialRefund) return { label: "Partial refund", tone: "warning" as const };
+  if (card.overdue) return { label: "Overdue", tone: "warning" as const };
   if (card.received > 0) return { label: "Partially received", tone: "info" as const };
   return { label: "Awaiting delivery", tone: "info" as const };
 }
@@ -24,6 +26,14 @@ export function DeliveriesPage({ data }: { data: Data }) {
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
   const modal = useRef<ElementRef<"s-modal">>(null);
+  const managementModal = useRef<ElementRef<"s-modal">>(null);
+  const managementButton = useRef<ElementRef<"s-button">>(null);
+  const [manageSelected, setManageSelected] = useState<number | null>(null);
+  const [change, setChange] = useState("estimate");
+  const [arrival, setArrival] = useState("");
+  const [confirmed, setConfirmed] = useState(false);
+  const [reason, setReason] = useState("supplier_cancelled");
+  const managed = cards.find((row) => row.decisionSeq === manageSelected);
   const receiveButton = useRef<ElementRef<"s-button">>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [quantity, setQuantity] = useState("");
@@ -48,7 +58,9 @@ export function DeliveriesPage({ data }: { data: Data }) {
     shopify.toast.show(fetcher.data.message, { isError: !fetcher.data.ok });
     if (fetcher.data.ok) {
       modal.current?.hideOverlay();
+      managementModal.current?.hideOverlay();
       setSelected(null);
+      setManageSelected(null);
     } else setError(fetcher.data.message);
   }, [fetcher.state, fetcher.data, shopify]);
 
@@ -78,6 +90,25 @@ export function DeliveriesPage({ data }: { data: Data }) {
     button?.addEventListener("click", receive);
     return () => button?.removeEventListener("click", receive);
   }, [receive]);
+  const openManagement = (row: Card) => {
+    setManageSelected(row.decisionSeq);
+    setChange(row.payment === "paid" ? "estimate" : "close");
+    setArrival(row.expectedAt?.slice(0, 10) ?? "");
+    setConfirmed(false); setReason("supplier_cancelled"); setError("");
+    managementModal.current?.showOverlay();
+  };
+  const saveManagement = useCallback(() => {
+    if (!managed || busy) return;
+    if (change === "close" && !confirmed) { setError("Confirm with the supplier that no more goods will arrive."); return; }
+    setError("");
+    fetcher.submit({ intent: change, decisionSeq: managed.decisionSeq, updateId: managed.updateId,
+      expectedRevision: managed.revision, date: arrival, confirmed: String(confirmed), reason }, { method: "POST" });
+  }, [managed, busy, change, arrival, confirmed, reason, fetcher]);
+  useEffect(() => {
+    const button = managementButton.current;
+    button?.addEventListener("click", saveManagement);
+    return () => button?.removeEventListener("click", saveManagement);
+  }, [saveManagement]);
   const pageLink = (number: number) => `/app/deliveries?${new URLSearchParams({ ...(view === "all" ? {} : { view }), page: String(number) })}`;
 
   return (
@@ -97,6 +128,7 @@ export function DeliveriesPage({ data }: { data: Data }) {
                 <s-table-header listSlot="secondary">Supplier</s-table-header>
                 <s-table-header format="numeric">Ordered</s-table-header>
                 <s-table-header format="numeric">Received</s-table-header>
+                <s-table-header format="numeric">Closed</s-table-header>
                 <s-table-header format="numeric">Remaining</s-table-header>
                 <s-table-header>Status</s-table-header>
                 <s-table-header>Actions</s-table-header>
@@ -110,14 +142,21 @@ export function DeliveriesPage({ data }: { data: Data }) {
                     <s-table-cell>{row.supplier}</s-table-cell>
                     <s-table-cell>{row.ordered}</s-table-cell>
                     <s-table-cell>{row.received}</s-table-cell>
+                    <s-table-cell>{row.closed}</s-table-cell>
                     <s-table-cell><s-text type={row.remaining ? "strong" : "generic"}>{row.remaining}</s-text></s-table-cell>
                     <s-table-cell><s-stack gap="small-200"><s-badge tone={status.tone}>{status.label}</s-badge>
+                      {row.partialRefund && row.remaining > 0 && <s-text tone="neutral">Review the remaining delivery</s-text>}
+                      {row.remaining > 0 && <>
+                        <s-text tone="neutral">{row.expectedAt ? `Expected ${row.expectedAt.slice(0, 10)} · ${row.estimateSource === "merchant" ? "merchant" : "supplier lead-time"} estimate (UTC)` : "Expected arrival not recorded"}</s-text>
+                        <s-text tone="neutral">Tracking not connected · shipment status unknown</s-text>
+                      </>}
                       {row.locationError && <s-text tone="neutral">Locations unavailable</s-text>}
                     </s-stack></s-table-cell>
-                    <s-table-cell>{canReceive
+                    <s-table-cell><s-stack gap="small-200">{canReceive
                       ? <s-button variant="tertiary" disabled={busy} onClick={() => open(row)}>{row.pending ? "Confirm receipt" : "Receive"}</s-button>
                       : <s-button variant="tertiary" href="/app/activity">View activity</s-button>}
-                    </s-table-cell>
+                    {row.remaining > 0 && !row.pending && row.payment !== "pending" && <s-button variant="tertiary" disabled={busy} onClick={() => openManagement(row)}>Manage delivery</s-button>}
+                    </s-stack></s-table-cell>
                   </s-table-row>;
                 })}
               </s-table-body>
@@ -132,6 +171,33 @@ export function DeliveriesPage({ data }: { data: Data }) {
           </s-stack>
         </s-stack>
       </s-section>
+
+      <s-modal ref={managementModal} id="manage-delivery" heading="Manage outstanding delivery">
+        {managed && <s-stack gap="base">
+          <s-text type="strong">{`${managed.title} · purchase #${managed.decisionSeq}`}</s-text>
+          <s-text>{`${managed.received} received · ${managed.closed} closed · ${managed.remaining} outstanding`}</s-text>
+          <s-select label="Delivery update" value={change} disabled={busy} onChange={(event) => { setChange(event.currentTarget.value); setConfirmed(false); setError(""); }}>
+            {managed.payment === "paid" && <s-option value="estimate">Update expected arrival</s-option>}
+            <s-option value="close">Close undelivered remainder</s-option>
+          </s-select>
+          {change === "estimate" ? <>
+            <s-text-field label="Expected arrival (YYYY-MM-DD)" value={arrival} disabled={busy} details="Today or later, in UTC. A merchant estimate, not confirmed carrier tracking."
+              onInput={(event) => { setArrival(event.currentTarget.value); setError(""); }} />
+            <s-text>The remaining quantity stays incoming, even when overdue. No stock is added until you receive the goods.</s-text>
+          </> : <>
+            <s-banner tone="warning" heading="A replacement restock may be proposed">Closing the remainder removes its incoming quantity. This does not refund PayPal or change Shopify stock. Use this only after confirming no more goods will arrive.</s-banner>
+            <s-select label="Reason" value={reason} disabled={busy} onChange={(event) => setReason(event.currentTarget.value)}>
+              <s-option value="supplier_cancelled">Supplier cancelled remaining units</s-option>
+              <s-option value="not_arriving">Confirmed remaining units will not arrive</s-option>
+            </s-select>
+            <s-checkbox label="The supplier confirmed no more goods will arrive. I understand a replacement restock may be proposed." checked={confirmed} disabled={busy}
+              onChange={(event) => { setConfirmed(event.currentTarget.checked); setError(""); }} />
+          </>}
+          {error && <s-banner tone="critical">{error}</s-banner>}
+        </s-stack>}
+        <s-button ref={managementButton} slot="primary-action" variant="primary" disabled={!managed || busy || change === "close" && !confirmed} {...(busy ? { loading: true } : {})}>Save delivery update</s-button>
+        <s-button slot="secondary-actions" commandFor="manage-delivery" command="--hide" disabled={busy}>Cancel</s-button>
+      </s-modal>
 
       <s-modal ref={modal} id="receive-delivery" heading={card?.pending ? "Confirm delivery receipt" : "Receive delivery"}>
         {card && <s-stack gap="base">
