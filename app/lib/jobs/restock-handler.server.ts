@@ -1,10 +1,12 @@
 import db from "../../db.server";
+import { privacyBlocked } from "../privacy/state.server";
 import { unauthenticated } from "../../shopify.server";
 import { runRestock } from "../agent/restock.server";
 import { checkStock, ensureSalesHistory, stockForInventoryItem } from "../inventory/trigger.server";
 import { restockJobKey, type ClaimedRestockJob } from "./restock-queue.server";
 
 export async function handleRestockJob(job: ClaimedRestockJob) {
+  if (await privacyBlocked(job.shop)) return {};
   // Uninstalled stores must never be processed with old credentials or an old stock snapshot.
   if (!await db.session.findFirst({ where: { shop: job.shop, isOnline: false }, select: { id: true } })) return {};
   const { admin } = await unauthenticated.admin(job.shop);

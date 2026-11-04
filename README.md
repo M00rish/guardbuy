@@ -281,3 +281,17 @@ anchors/           published audit-log fingerprints (created by the first hourly
 ## License
 
 MIT. See [LICENSE.md](LICENSE.md). Portions are from Shopify's app template (MIT).
+
+## Privacy and data handling (ISM-42)
+
+Read the [public privacy policy](https://guardbuy.onrender.com/privacy) (`/privacy` in a local build), also linked from Home and the public landing page. The hosted page exists after deployment; this PR does not deploy it. [Operator fulfillment runbook](docs/privacy-operations.md).
+
+GuardBuy reads products/stock/locations and order/refund dates, variant IDs and quantities to calculate sales rates and restocks. It stores variant/day/unit sales aggregates, supplier names/payment emails/terms/notes, signed rules, staff identifiers, connection sessions/tokens and payment/audit evidence. It does not request shopper names, email, addresses or card data for restocking, and does not persist raw order/privacy webhook bodies. Shopify sessions can contain **merchant staff** names/emails; merchant-entered notes/names and stored AI text may contain personal information. Do not claim the app stores no personal data at all.
+
+The **90-day cutoff applies to sales aggregates**, pruned during backfill/maintenance, not to all app records and not by a guaranteed daily scheduler. Webhook deduplication IDs have a seven-day cutoff. Audit history has no automatic 90-day deletion. Uninstall removes sessions/jobs; complete erasure uses the reviewed privacy workflow. Hosting logs, backups and provider copies have independently configured retention; checkpoint fingerprints can remain subject to external locks. No universal 90-day erasure promise is made.
+
+Google Gemini and fallback OpenRouter/model providers receive SKU, stock/sales/coverage, target/suggested quantity and supplier IDs/names/prices/lead times/preferences/notes. The prompt does not intentionally include Shopify/PayPal credentials, balances, payment emails or shopper records; personal data pasted into free text is not automatically removed. Default demo routing includes free tiers. **Use demo data only until a paid/no-training setup and every fallback's terms are verified.** No paid service or provider account change is made here. Render, Neon, Shopify, PayPal and Cloudflare R2 also process their respective app/payment/checkpoint data.
+
+The three mandatory Shopify `compliance_topics` point to the authenticated `/webhooks/privacy` endpoint. Receipt metadata is durably deduplicated before 200; no raw customer payload is kept. Requests enter a manual inbox with a 30-day deadline; receipt does not mean fulfillment. `shop/redact` revokes sessions and suppresses processing/public proofs. Owner-only whole-shop erasure preserves app-role append-only restrictions and refuses unresolved commitments; selective audit edits are not supported. External copies require a separate review. See the runbook for daily monitoring, fulfillment commands and limitations.
+
+Deployment requires the privacy migration, updated Shopify webhook configuration and a public `GUARDBUY_PRIVACY_CONTACT` (HTTPS support URL or `mailto:`). Without a configured contact the page clearly directs customers to the merchant's Shopify privacy-request tools; direct support contact remains a launch requirement. No privacy scheduler, notification messages or automatic provider deletion is enabled. This notice is **not** merchant terms or a DPA: keep the Partner Dashboard “privacy agreements” answer **No** until real agreements exist.

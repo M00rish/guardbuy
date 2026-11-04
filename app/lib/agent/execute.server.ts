@@ -1,4 +1,5 @@
 import db from "../../db.server";
+import { assertPrivacyActive } from "../privacy/state.server";
 import { appendAuditWhen, auditEntries } from "../audit/log.server";
 import { paypal } from "../paypal/client.server";
 import { allowedStorePayer, paypalStoreBinding } from "../paypal/config.server";
@@ -179,6 +180,7 @@ export async function executePurchase(shop: string, decisionSeq: number): Promis
     return performAttempt(shop, attempt, lease, {
       lookup: async () => null, // No read-only Payouts endpoint searches by sender_batch_id.
       beforeSend: async (saved) => {
+        await assertPrivacyActive(shop);
         paypalStoreBinding(shop);
         await recheckAtPayment(shop, decisionSeq, { approvedByPerson: approved });
         if (await payeeFor(shop, proposal) !== saved.payeeEmail) throw new ExecutionRefused("The recorded payee changed");
@@ -222,6 +224,7 @@ export async function createApprovalOrder(shop: string, decisionSeq: number, ret
     return performAttempt(shop, attempt, lease, {
       lookup: async () => null,
       beforeSend: async (saved) => {
+        await assertPrivacyActive(shop);
         paypalStoreBinding(shop);
         await recheckAtPayment(shop, decisionSeq, { approvedByPerson: true });
         if (await payeeFor(shop, proposal) !== saved.payeeEmail) throw new ExecutionRefused("The recorded payee changed");
@@ -281,6 +284,7 @@ async function capture(shop: string, decisionSeq: number): Promise<AuditEntry> {
         return null;
       },
       beforeSend: async (saved) => {
+        await assertPrivacyActive(shop);
         paypalStoreBinding(shop);
         const order = await toolkitOrder(saved.providerId!);
         if (order.id !== saved.providerId) throw new ExecutionRefused("Unexpected PayPal approval order identity");

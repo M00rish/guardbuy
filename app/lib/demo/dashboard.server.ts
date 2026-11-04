@@ -1,5 +1,6 @@
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import db from "../../db.server";
+import { privacyBlocked } from "../privacy/state.server";
 import { auditEntries } from "../audit/log.server";
 import { agentOn, currentRuleSet } from "../agent/restock.server";
 import { incomingFor } from "../inventory/deliveries";
@@ -70,8 +71,9 @@ async function snapshot(admin: AdminApiContext, shop: string) {
 
 // A short shared snapshot limits Shopify traffic from public tabs. Failed reads are retried.
 let cached: { shop: string; expires: number; pending: ReturnType<typeof snapshot> } | undefined;
-export function publicDashboard(admin: AdminApiContext, shop: string) {
+export async function publicDashboard(admin: AdminApiContext, shop: string) {
   requirePublicDemo(shop); // Check on every request, including cache hits.
+  if (await privacyBlocked(shop)) throw new Response("Not found", { status: 404, headers: { "Cache-Control": "no-store" } });
   if (cached?.shop === shop && cached.expires > Date.now()) return cached.pending;
   const pending = snapshot(admin, shop);
   cached = { shop, expires: Date.now() + 15_000, pending };

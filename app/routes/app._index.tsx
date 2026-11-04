@@ -313,6 +313,7 @@ export default function Home() {
         )}
         <s-box paddingBlockStart="small-200"><s-link href="/app/activity">All activity</s-link></s-box>
       </s-section>
+      <s-section><s-paragraph><s-link href="/privacy" target="_blank">Privacy policy</s-link> · What GuardBuy reads, shares and retains.</s-paragraph></s-section>
     </s-page>
   );
 }
