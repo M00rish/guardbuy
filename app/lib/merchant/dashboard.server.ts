@@ -1,5 +1,6 @@
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
+import { paymentStatus } from "../payments/status";
 import db from "../../db.server";
 import { approvalStates } from "../agent/approval-state";
 import { unknownPaymentDecisions } from "../payments/attempts";
@@ -44,7 +45,10 @@ export function productStatus(
     const proposalEntry = d?.type === "decision" ? log.find((e) => e.seq === d.proposalSeq) : undefined;
     const proposal = proposalEntry?.event;
     const newer = log.some((e) => e.seq > (proposalEntry?.seq ?? -1) && e.event.type === "proposal" && !e.event.scenario && e.event.proposal.variantId === p.variantId);
-    if (!newer && proposal?.type === "proposal" && proposal.proposal.variantId === p.variantId) return { label: "Payment needs attention · check Approvals", tone: "critical" };
+    if (!newer && proposal?.type === "proposal" && proposal.proposal.variantId === p.variantId) {
+      const payment = log.find((e) => (e.event.type === "payout" || e.event.type === "order_captured") && e.event.decisionSeq === state.decisionSeq);
+      return { label: `${payment ? paymentStatus(log, payment).label : "Payment failed"} · check Approvals`, tone: "critical" };
+    }
   }
   const delivery = deliveries(log).find((d) => d.variantId === p.variantId && (d.remaining > 0 || d.pending) && (d.payment !== "failed" || d.pending));
   if (delivery) return { label: delivery.pending ? "Receipt needs confirmation" : delivery.payment === "pending" ? `Payment pending · ${delivery.remaining} on order` : `${delivery.remaining} incoming · awaiting delivery`, tone: "info" };
@@ -58,9 +62,9 @@ export function productStatus(
     const of = (type: string) => (d ? log.filter((e) => e.event.type === type && "decisionSeq" in e.event && e.event.decisionSeq === d.seq).at(-1) : undefined);
     const paid = of("payout") ?? of("order_captured");
     const total = d?.event.type === "decision" ? `$${(d.event.decision.totalCents / 100).toFixed(2)}` : "";
-    if (paid) return { label: `Ordered · ${total}`, tone: "success", at: paid.at };
+    if (paid) { const state = paymentStatus(log, paid); return { label: `${state.label} · ${total}`, tone: state.tone, at: paid.at }; }
     if (of("rejected")) return { label: "You declined the restock", tone: "neutral", at: of("rejected")!.at };
-    if (of("payment_failed")) return { label: "Payment failed · retrying", tone: "critical", at: of("payment_failed")!.at };
+    if (of("payment_failed")) return { label: "Payment failed · check Activity", tone: "critical", at: of("payment_failed")!.at };
     const created = of("order_created");
     const closed = created?.event.type === "order_created" && log.some((e) => e.event.type === "order_closed" && created.event.type === "order_created" && e.event.orderId === created.event.orderId);
     if (created && !closed) return { label: "Waiting for PayPal approval", tone: "warning", at: last.at };

@@ -24,6 +24,8 @@ jobs:
       - run: npx tsx scripts/check-payout-refresh.ts
       - run: npx tsx scripts/check-payment-attempts.ts
       - run: npx tsx scripts/check-unpaid-approvals.ts
+      - run: npx tsx scripts/check-payment-status.ts
+      - run: npx tsx scripts/check-verify-status.ts
       - run: npx tsx scripts/check-payment-http.ts
       - run: npx tsx scripts/check-paypal-errors.ts
       - run: npx tsx scripts/check-policy.ts

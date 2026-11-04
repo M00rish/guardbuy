@@ -125,7 +125,7 @@ export default function Rules() {
             <s-grid gridTemplateColumns="@container (inline-size <= 640px) 1fr, 1fr 1fr 1fr" gap="base">
               {field("reorderBelowDaysOfCover", "Restock when stock lasts fewer than (days)", "Based on each product's recent sales", { min: 1, step: 1 })}
               {field("targetDaysOfCover", "Buy enough for (days)", "The agent's suggested quantity aims for this", { min: 1, step: 1 })}
-              {field("maxQuantityMultiple", "Largest order (times the usual)", "Blocks orders this many times above a supplier's usual order", { min: 1, step: 0.5 })}
+              {field("maxQuantityMultiple", "Largest order (times the usual)", "Blocks orders this many times above a supplier’s usual order", { min: 1, step: 0.5 })}
             </s-grid>
           </s-query-container>
         </s-section>
@@ -134,7 +134,7 @@ export default function Rules() {
           <s-query-container>
             <s-grid gridTemplateColumns="@container (inline-size <= 640px) 1fr, 1fr 1fr 1fr" gap="base">
               {field("approvalAbove", "Ask me above ($)", "Bigger purchases wait in Approvals", { min: 0, step: 1 })}
-              {field("weeklySpendCap", "Weekly spending cap ($)", "Rolling 7 days, all suppliers", { min: 0, step: 1 })}
+              {field("weeklySpendCap", "Last 7 days spending cap ($)", "Rolling 7 days, all suppliers", { min: 0, step: 1 })}
               {field("cashFloor", "Keep at least this in PayPal ($)", "Purchases that would go below are blocked", { min: 0, step: 1 })}
               {field("priceTolerance", "Price increase without asking ($ per unit)", "Above the price you entered or last approved", { min: 0, step: 0.05 })}
               {field("maxPurchasesPer24h", "Purchases per 24 hours", "Across all products", { min: 1, step: 1 })}
@@ -158,7 +158,7 @@ export default function Rules() {
             {errors.allow && suppliers.length > 0 ? (
               <s-text tone="critical">{errors.allow}</s-text>
             ) : (
-              <s-text tone="neutral">Purchases from any supplier you don't tick are blocked, even if it's linked to a product.</s-text>
+              <s-text tone="neutral">Purchases from any supplier you do not select are blocked, even if it is linked to a product.</s-text>
             )}
           </s-stack>
         </s-section>
@@ -173,7 +173,7 @@ export default function Rules() {
               {changed && signed && <s-badge tone="caution">Unsaved changes</s-badge>}
               {signed && changed && <s-button variant="tertiary" disabled={busy} onClick={() => { setFormKey((k) => k + 1); setForm(saved); }}>Discard</s-button>}
             </s-stack>
-            <s-text tone="neutral">Signing records these rules, their fingerprint and your name in the audit log. They apply from the next purchase.</s-text>
+            <s-text tone="neutral">Signing activates automatic purchases within these limits. Flagged purchases still need approval. These rules, their fingerprint and your staff identity are recorded in the audit log.</s-text>
           </s-stack>
         </s-section>
       </fetcher.Form>

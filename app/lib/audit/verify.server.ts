@@ -1,3 +1,4 @@
+import { paymentStatus } from "../payments/status";
 import db from "../../db.server";
 import { usd } from "../format";
 import type { AuditEntry } from "../policy/schema";
@@ -22,6 +23,7 @@ export type PaymentProof =
       how: "automatic" | "approved";
       approvedByKind?: string;
       paidAt: string;
+      paymentStatus: string;
       rulesFingerprint: string | null;
       rulesSignedAt: string | null;
       steps: ProofStep[]; // oldest first
@@ -64,7 +66,7 @@ export async function verifyPayment(rawId: string): Promise<PaymentProof> {
   const rules = proposal ? log.filter((e) => e.event.type === "ruleset_signed" && e.seq < proposal.seq).at(-1) : undefined;
   const approved = log.find((e) => e.event.type === "approved" && e.event.decisionSeq === decisionSeq);
   const orderCreated = log.find((e) => e.event.type === "order_created" && e.event.decisionSeq === decisionSeq);
-  const statuses = pay.event.type === "payout" ? log.filter((e) => e.event.type === "payout_status" && e.event.payoutSeq === pay.seq) : [];
+  const statuses = log.filter((e) => pay.event.type === "payout" ? e.event.type === "payout_status" && e.event.payoutSeq === pay.seq : e.event.type === "order_status" && pay.event.type === "order_captured" && e.event.orderId === pay.event.orderId);
 
   const step = (e: AuditEntry | undefined, label: string, note?: string): ProofStep[] =>
     e ? [{ seq: e.seq, at: e.at, step: label, hash: e.hash, prevHash: e.prevHash, note }] : [];
@@ -74,8 +76,8 @@ export async function verifyPayment(rawId: string): Promise<PaymentProof> {
     ...step(decision, "Rules checked it", decision?.event.type === "decision" ? `verdict: ${decision.event.decision.verdict === "auto" ? "allowed automatically" : decision.event.decision.verdict === "approval" ? "needs a person" : "blocked"}` : undefined),
     ...step(approved, "A person approved it"),
     ...step(orderCreated, "PayPal order created for approval in PayPal"),
-    ...step(pay, pay.event.type === "payout" ? "Paid via PayPal Payouts" : "Paid via PayPal Orders"),
-    ...statuses.flatMap((s) => step(s, "PayPal status update", s.event.type === "payout_status" ? s.event.status + (s.event.confirmedByTransactionSearch ? " · confirmed in PayPal's records" : "") : undefined)),
+    ...step(pay, pay.event.type === "payout" ? "Submitted via PayPal Payouts" : "Capture submitted via PayPal Orders"),
+    ...statuses.flatMap((s) => step(s, "PayPal status update", s.event.type === "payout_status" ? s.event.status + (s.event.confirmedByTransactionSearch ? " · confirmed in PayPal's records" : "") : s.event.type === "order_status" ? s.event.status : undefined)),
   ].sort((a, b) => a.seq - b.seq);
 
   const approvedBy = approved?.event.type === "approved" ? approved.event.approvedBy : undefined;
@@ -113,6 +115,7 @@ export async function verifyPayment(rawId: string): Promise<PaymentProof> {
     how: approved || orderCreated ? "approved" : "automatic",
     approvedByKind: approvedBy ? (approvedBy.startsWith("judge:") ? "a demo judge" : "a store staff member") : orderCreated ? "the merchant, inside PayPal" : undefined,
     paidAt: pay.at,
+    paymentStatus: paymentStatus(log, pay).label,
     rulesFingerprint: rules?.event.type === "ruleset_signed" ? rules.event.ruleSet.hash : null,
     rulesSignedAt: rules?.event.type === "ruleset_signed" ? rules.event.ruleSet.signedAt : null,
     steps,
