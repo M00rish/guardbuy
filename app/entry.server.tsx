@@ -8,8 +8,11 @@ import { addDocumentResponseHeaders } from "./shopify.server";
 import { validatePayPalStartup } from "./lib/paypal/config.server";
 import { startRestockWorker } from "./lib/jobs/restock-worker.server";
 
+import { startAlertWorker } from "./lib/alerts/worker.server";
+
 validatePayPalStartup();
 startRestockWorker();
+startAlertWorker();
 
 export const streamTimeout = 5000;
 

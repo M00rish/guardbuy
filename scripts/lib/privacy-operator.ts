@@ -30,6 +30,7 @@ export async function purgeShopRequest(owner: PrismaClient, id: string, confirmS
     // The restricted app role still has no DELETE privilege and cannot use this exception.
     await tx.$executeRaw`SET LOCAL guardbuy.audit_rewrite = 'on'`;
     const removed = await tx.auditEntry.deleteMany({ where: { shop: confirmShop } });
+    await tx.alertChannel.deleteMany({ where: { shop: confirmShop } });
     await tx.restockJob.deleteMany({ where: { shop: confirmShop } });
     await tx.productSupplier.deleteMany({ where: { shop: confirmShop } });
     await tx.supplier.deleteMany({ where: { shop: confirmShop } });

@@ -18,6 +18,7 @@ export async function receivePrivacyRequest({ shop, topic, eventId, requestId }:
       await tx.privacyBlock.createMany({ data: [{ shopHash }], skipDuplicates: true });
       await tx.session.deleteMany({ where: { shop } });
       await tx.shopSettings.deleteMany({ where: { shop } });
+      await tx.alertChannel.deleteMany({ where: { shop } });
       await tx.restockJob.deleteMany({ where: { shop } });
     }
   }, { maxWait: 15_000, timeout: 20_000 });
