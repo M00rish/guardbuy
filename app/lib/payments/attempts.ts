@@ -29,7 +29,30 @@ export function paymentReservations(log: AuditEntry[]) {
 
 const SETTLED_FAILURES = new Set(["DENIED", "CANCELED", "CANCELLED", "FAILED", "RETURNED", "BLOCKED", "REFUNDED", "REVERSED", "DECLINED"]);
 
+/** Older approvals may precede durable attempts. Absence of a result cannot prove no payment. */
+export function untrackedApproval(log: AuditEntry[], seq: number) {
+  const events = log.filter((e) => "decisionSeq" in e.event && e.event.decisionSeq === seq);
+  return events.some((e) => e.event.type === "approved")
+    && !events.some((e) => e.event.type === "approved" && e.event.paymentProtocol === "durable-v1")
+    && !events.some((e) => ["payment_attempt", "payment_failed", "payout", "order_captured", "rejected"].includes(e.event.type));
+}
+
+export function settledPaymentFailure(log: AuditEntry[], seq: number) {
+  const payout = log.find((e) => e.event.type === "payout" && e.event.decisionSeq === seq);
+  const capture = log.find((e) => e.event.type === "order_captured" && e.event.decisionSeq === seq);
+  let status: string | undefined;
+  if (payout?.event.type === "payout") {
+    const latest = log.filter((e) => e.event.type === "payout_status" && e.event.payoutSeq === payout.seq).at(-1)?.event;
+    status = latest?.type === "payout_status" ? latest.status : payout.event.status;
+  } else if (capture?.event.type === "order_captured") {
+    const latest = log.filter((e) => e.event.type === "order_status" && capture.event.type === "order_captured" && e.event.orderId === capture.event.orderId).at(-1)?.event;
+    status = latest?.type === "order_status" ? latest.status : capture.event.status;
+  }
+  return status && SETTLED_FAILURES.has(status) ? status : undefined;
+}
+
 export function canStartAttempt(log: AuditEntry[], attempt: Attempt) {
+  if (untrackedApproval(log, attempt.decisionSeq)) return false;
   if (attemptStates(log).some((s) => s.attempt.attemptId === attempt.attemptId)) return false;
   if (log.some((e) => "decisionSeq" in e.event && e.event.decisionSeq === attempt.decisionSeq && ["payout", "order_captured", "rejected"].includes(e.event.type))) return false;
   if (unresolvedPayments(log).some((s) => s.attempt.decisionSeq === attempt.decisionSeq)) return false;
@@ -124,6 +147,10 @@ export function purchaseReservations(log: AuditEntry[]) {
   for (const state of unresolvedPayments(log)) reserved.set(state.attempt.decisionSeq, { amountCents: state.attempt.amountCents, at: state.at });
   for (const entry of log) {
     const ev = entry.event;
+    if (ev.type === "approved" && untrackedApproval(log, ev.decisionSeq)) {
+      const d = log.find((e) => e.seq === ev.decisionSeq);
+      if (d?.event.type === "decision") reserved.set(ev.decisionSeq, { amountCents: d.event.decision.totalCents, at: entry.at });
+    }
     if (ev.type === "payout") {
       const update = [...log].reverse().find((e) => e.event.type === "payout_status" && e.event.payoutSeq === entry.seq)?.event;
       // A batch SUCCESS alone does not prove that its recipient item succeeded.

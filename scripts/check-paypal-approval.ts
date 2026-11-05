@@ -41,7 +41,7 @@ if (cmd === "create") {
   const again = await createApprovalOrder(SHOP, d.seq, `${process.env.APP_URL}/paypal/return`);
   ok(again.seq === order.seq, "creating it again returns the same order");
   ok((await refused(() => captureApprovalOrder(SHOP, d.seq))).includes("not approved yet"), "capture refused before the merchant approves");
-  await appendAudit(SHOP, { type: "approved", decisionSeq: d.seq, approvedBy: "approval-check" });
+  await appendAudit(SHOP, { type: "approved", decisionSeq: d.seq, approvedBy: "approval-check", paymentProtocol: "durable-v1" });
   ok((await refused(() => executePurchase(SHOP, d.seq))).includes("PayPal order"), "payout refused once a PayPal order exists (no double payment)");
 
   if (order.event.type === "order_created") console.log(`\nApprove as the merchant (personal sandbox buyer) here:\n${order.event.approveUrl}\n`);

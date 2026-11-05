@@ -146,7 +146,7 @@ assert.ok(await race.ports().reserve(order));
 race.add({ type: "approved", decisionSeq: 1, approvedBy: "stale-worker" });
 await assert.rejects(runPaymentAttempt(race.candidate(), race.ports()), PaymentRouteRefused);
 assert.equal(race.provider.size, 0, "a competing route cannot send money");
-const approveFirst = fixture("approval"); approveFirst.add({ type: "approved", decisionSeq: 1, approvedBy: "merchant" });
+const approveFirst = fixture("approval"); approveFirst.add({ type: "approved", decisionSeq: 1, approvedBy: "merchant", paymentProtocol: "durable-v1" });
 assert.equal(canStartAttempt(approveFirst.log, approveFirst.candidate("order_create")), false);
 await runPaymentAttempt(approveFirst.candidate(), approveFirst.ports());
 assert.equal(approveFirst.provider.size, 1);

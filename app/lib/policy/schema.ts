@@ -128,7 +128,7 @@ export const AuditEventSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("decision"), proposalSeq: z.number().int(), decision: DecisionSchema }),
   // The merchant paused or resumed the agent. Paused: nothing is proposed or bought automatically.
   z.object({ type: z.literal("agent_state"), on: z.boolean(), by: z.string() }),
-  z.object({ type: z.literal("approved"), decisionSeq: z.number().int(), approvedBy: z.string() }),
+  z.object({ type: z.literal("approved"), decisionSeq: z.number().int(), approvedBy: z.string(), paymentProtocol: z.literal("durable-v1").optional() }),
   // A person declined a purchase that needed approval. Nothing is paid; the product is retried later.
   z.object({ type: z.literal("rejected"), decisionSeq: z.number().int(), rejectedBy: z.string(), reason: z.string().max(500).optional() }),
   // An approved decision could not be paid (PayPal error, refused payee, ...). Frees the SKU to retry.

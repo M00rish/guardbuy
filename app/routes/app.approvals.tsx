@@ -7,7 +7,9 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import { authenticate } from "../shopify.server";
-import { approvalQueue, approveInPayPal, approvePurchase, rejectPurchase, type ApprovalCard } from "../lib/agent/approvals.server";
+import { approvalQueue, approveInPayPal, approvePurchase, rejectPurchase, retryPurchase, type ApprovalCard } from "../lib/agent/approvals.server";
+import { ApprovalRefused } from "../lib/agent/approval-actions";
+import { PaymentLockBusy } from "../lib/agent/payment-lock.server";
 import { PaymentPending, PaymentRouteRefused } from "../lib/payments/attempts";
 import { ExecutionRefused, resumePayment } from "../lib/agent/execute.server";
 import { feedNames } from "../lib/merchant/dashboard.server";
@@ -48,8 +50,14 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<ActionRes
         return entry.event.type === "order_created" ? { ok: true, message: "Original PayPal Order recovered. Continue approval in PayPal.", approveUrl: entry.event.approveUrl }
           : { ok: true, message: "Original payment outcome recorded. Refresh its status in Activity." };
       }
-      case "approve":
-        return { ok: true, ...(await approvePurchase(session.shop, decisionSeq, `shopify-staff:${staffId}`)) };
+      case "retry": {
+        const result = await retryPurchase(session.shop, decisionSeq, `shopify-staff:${staffId}`);
+        return { ok: result.paid, ...result };
+      }
+      case "approve": {
+        const result = await approvePurchase(session.shop, decisionSeq, `shopify-staff:${staffId}`);
+        return { ok: result.paid, ...result };
+      }
       case "reject":
         return { ok: true, ...(await rejectPurchase(session.shop, decisionSeq, `shopify-staff:${staffId}`, String(form.get("reason") ?? ""))) };
       case "paypal": {
@@ -60,7 +68,7 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<ActionRes
         return { ok: false, message: "Unknown action" };
     }
   } catch (e) {
-    if (e instanceof ExecutionRefused || e instanceof PaymentPending || e instanceof PaymentRouteRefused) return { ok: false, message: e.message };
+    if (e instanceof ApprovalRefused || e instanceof PaymentLockBusy || e instanceof ExecutionRefused || e instanceof PaymentPending || e instanceof PaymentRouteRefused) return { ok: false, message: e.message };
     console.error("[approvals] Payment action could not be confirmed");
     return { ok: false, message: "Payment status could not be confirmed. Refresh and check the original purchase before retrying." };
   }
@@ -84,14 +92,14 @@ export default function Approvals() {
       {cards.length === 0 ? (
         <s-section>
           <Empty heading="Nothing is waiting for you">
-            Purchases above your approval limit, or that a rule flags, wait here until you decide. Each one expires after 48 hours.
+            Purchases needing approval or payment attention appear here. New approvals expire after 48 hours; uncertain payments stay reserved until confirmed.
           </Empty>
         </s-section>
       ) : (
         <>
           <s-section>
             <s-text tone="neutral">
-              {plural(cards.length, "purchase")} waiting. GuardBuy computed the facts below itself; the AI’s explanation comes last and isn’t verified.
+              {plural(cards.length, "purchase")} needing approval or payment attention. GuardBuy computed the facts below itself; the AI’s explanation comes last and isn’t verified.
             </s-text>
           </s-section>
           {cards.map((card) => <CardView key={card.decisionSeq} card={card} />)}
@@ -116,13 +124,14 @@ function CardView({ card }: { card: Card }) {
   const qtyMultiple = card.usualQuantity ? card.quantity / card.usualQuantity : null;
   const passed = card.otherChecks.filter((c) => c.outcome === "auto").length;
 
+  const statusLabel = { waiting: "Needs you", paypal_pending: "Waiting for PayPal", payment_unknown: "Awaiting PayPal confirmation", payment_pending: "Payment submitted · pending", payment_failed: card.canRetry ? "Approved · unpaid" : "Payment needs attention" }[card.status];
   return (
     <s-section heading={`${card.quantity} × ${card.productTitle}`}>
       <s-stack gap="base">
         <s-stack direction="inline" gap="small-200" alignItems="center">
-          <s-badge tone={card.status === "paypal_pending" ? "info" : "caution"}>{card.status === "payment_unknown" ? "Awaiting PayPal confirmation" : card.status === "paypal_pending" ? "Waiting for PayPal" : "Needs you"}</s-badge>
+          <s-badge tone={card.status === "paypal_pending" || card.status === "payment_pending" ? "info" : "caution"}>{statusLabel}</s-badge>
           <s-heading>{usd(card.totalCents)}</s-heading>
-          <s-text tone="neutral">from {card.supplierName} · proposed {ago(card.proposedAt, Date.now())} · {card.status === "payment_unknown" ? "Original payment remains reserved" : expiresIn(card.expiresAt)}</s-text>
+          <s-text tone="neutral">from {card.supplierName} · proposed {ago(card.proposedAt, Date.now())} · {card.status === "payment_unknown" || card.status === "payment_pending" ? "Original payment remains reserved" : card.expired ? "Approval expired" : expiresIn(card.expiresAt)}</s-text>
         </s-stack>
 
         <s-stack gap="small-200">
@@ -155,9 +164,25 @@ function CardView({ card }: { card: Card }) {
 
         {card.status === "payment_unknown" ? (
           <s-stack gap="base">
-            <s-text>The original payment outcome is uncertain. Resuming may submit that original payment if PayPal has not processed it. It uses the same request ID and cannot switch payment routes.</s-text>
-            <s-button disabled={busy} loading={busy && busyWith === "resume"} onClick={() => submit("resume")}>Resume original payment</s-button>
+            <s-text>{card.canResume ? "The original payment outcome is uncertain. Resuming may submit that original payment if PayPal has not processed it. It uses the same request ID and cannot switch payment routes." : card.paymentReason}</s-text>
+            {card.canResume && <s-button disabled={busy} loading={busy && busyWith === "resume"} onClick={() => submit("resume")}>Resume original payment</s-button>}
+            <s-link href="/app/activity">View payment evidence in Activity</s-link>
             {fetcher.data?.approveUrl && <s-link href={fetcher.data.approveUrl} target="_blank">Continue in PayPal</s-link>}
+          </s-stack>
+        ) : card.status === "payment_pending" ? (
+          <s-stack gap="base">
+            <s-text>PayPal has the original payment. Its outcome is still pending; do not submit another payment. Use Refresh payout status above to check for confirmation.</s-text>
+            <s-link href="/app/activity">View payment evidence in Activity</s-link>
+          </s-stack>
+        ) : card.status === "payment_failed" ? (
+          <s-stack gap="base">
+            <s-banner tone="warning">{card.paymentReason ?? "Payment was not submitted successfully."}</s-banner>
+            <s-text>{card.canRetry ? "Retry pays the same supplier and amount for this approved purchase, after checking your current rules." : card.canCancel ? "This purchase cannot be retried here. Cancel it to let the agent propose a fresh purchase with current numbers." : "This payment already has a provider result. Review its evidence in Activity; retrying or cancelling it here could misrepresent what PayPal processed."}</s-text>
+            <s-stack direction="inline" gap="base">
+              {card.canRetry && <s-button variant="primary" disabled={busy} loading={busy && busyWith === "retry"} onClick={() => submit("retry")}>{`Retry payment of ${usd(card.totalCents)}`}</s-button>}
+              {card.canCancel && <s-button tone="critical" variant="tertiary" disabled={busy} loading={busy && busyWith === "reject"} onClick={() => submit("reject")}>Cancel unpaid purchase</s-button>}
+              <s-link href="/app/activity">View payment evidence</s-link>
+            </s-stack>
           </s-stack>
         ) : card.status === "paypal_pending" && card.paypalApproveUrl ? (
           <s-stack direction="inline" gap="base" alignItems="center">

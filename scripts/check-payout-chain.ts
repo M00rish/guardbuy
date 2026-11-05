@@ -1,7 +1,7 @@
 // End-to-end check of the payout step + hash-chained audit log against the PayPal SANDBOX.
 // Uses a throwaway shop name and deletes its audit rows at the end.
 //   npx tsx scripts/check-payout-chain.ts
-export {};
+import type { Prisma } from "@prisma/client";
 process.loadEnvFile(".env");
 
 const { asAuditOwner, deleteAuditEntries } = await import("./lib/audit-admin");
@@ -52,7 +52,7 @@ const b = await propose("atlas-roasters", 2, 1119);
 ok(b.verdict === "approval", `2 units ($22.38) -> ${b.verdict}`);
 try { await executePurchase(SHOP, b.seq); ok(false, "paid without approval"); }
 catch (e) { ok(e instanceof ExecutionRefused, `refused before approval: ${(e as Error).message}`); }
-await appendAudit(SHOP, { type: "approved", decisionSeq: b.seq, approvedBy: "chain-check" });
+await appendAudit(SHOP, { type: "approved", decisionSeq: b.seq, approvedBy: "chain-check", paymentProtocol: "durable-v1" });
 const pay2 = await executePurchase(SHOP, b.seq);
 ok(pay2.event.type === "payout", `paid after approval: batch ${pay2.event.type === "payout" ? pay2.event.payoutBatchId : "-"}`);
 
@@ -66,11 +66,11 @@ catch (e) { ok(e instanceof ExecutionRefused, `refused: ${(e as Error).message}`
 const v1 = await verifyChain(SHOP);
 ok(v1.valid, `chain valid (${v1.valid ? v1.length : 0} entries)`);
 const victim = await db.auditEntry.findUniqueOrThrow({ where: { shop_seq: { shop: SHOP, seq: pay1.seq } } });
-const tampered = { ...(victim.event as any), amountCents: 1 };
+const tampered = { ...(victim.event as Prisma.InputJsonObject), amountCents: 1 };
 await asAuditOwner((tx) => tx.auditEntry.update({ where: { shop_seq: { shop: SHOP, seq: pay1.seq } }, data: { event: tampered } }));
 const v2 = await verifyChain(SHOP);
 ok(!v2.valid, `tampering detected: ${v2.valid ? "NOT detected" : `seq ${v2.brokenAtSeq}, ${v2.reason}`}`);
-await asAuditOwner((tx) => tx.auditEntry.update({ where: { shop_seq: { shop: SHOP, seq: pay1.seq } }, data: { event: victim.event as any } }));
+await asAuditOwner((tx) => tx.auditEntry.update({ where: { shop_seq: { shop: SHOP, seq: pay1.seq } }, data: { event: victim.event as Prisma.InputJsonObject } }));
 ok((await verifyChain(SHOP)).valid, "chain valid again after restoring the row");
 
 await deleteAuditEntries({ shop: SHOP });
