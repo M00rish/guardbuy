@@ -28,7 +28,7 @@ export default function Verify() {
       <div className={styles.wrap}>
         <a className={styles.back} href="/">← GuardBuy</a>
         <p className={styles.eyebrow} style={{ marginTop: 18 }}>Verify a payment</p>
-        <h1 className={styles.heading}>Was this payment allowed by the merchant's rules?</h1>
+        <h1 className={styles.heading}>Was this payment allowed by the merchant’s rules?</h1>
         <p className={styles.lede}>
           Paste a PayPal payout batch ID, order ID or capture ID. GuardBuy recomputes its audit log from the first entry and
           shows the chain of steps that led to the payment.
@@ -54,10 +54,12 @@ export default function Verify() {
             {proof.demo && <span className={styles.none} style={{ marginLeft: 8 }}>Demo session</span>}
 
             <dl className={styles.facts}>
-              <dt>Paid</dt>
+              <dt>Payment status</dt>
+              <dd>{proof.paymentStatus} · last recorded provider evidence</dd>
+              <dt>Submitted</dt>
               <dd>{when(proof.paidAt)} via {proof.paidBy}</dd>
               <dt>How</dt>
-              <dd>{proof.how === "automatic" ? "Automatically, within the merchant's signed rules" : `Approved by ${proof.approvedByKind ?? "a person"}`}</dd>
+              <dd>{proof.how === "automatic" ? "Automatically, within the merchant’s signed rules" : `Approved by ${proof.approvedByKind ?? "a person"}`}</dd>
               <dt>Rules in force</dt>
               <dd>{proof.rulesFingerprint ? <><span className={styles.mono}>{short(proof.rulesFingerprint)}</span>{proof.rulesSignedAt ? `, signed ${when(proof.rulesSignedAt)}` : ""}</> : "Unknown"}</dd>
               <dt>Audit log</dt>

@@ -1,3 +1,4 @@
+import { budgetSummary } from "../lib/payments/status";
 import { useEffect, useState } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
@@ -49,6 +50,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
     signed: signed?.event.type === "ruleset_signed" ? { by: signed.event.ruleSet.signedBy === actor ? "you" : signed.event.ruleSet.signedBy.replace("shopify-staff:", "staff member "), at: signed.event.ruleSet.signedAt } : null,
     spentCents: spending(log).spentLast7dCents,
+    budget: budgetSummary(spending(log).spentLast7dCents, spending(log).pendingCents, rules?.weeklySpendCapCents ?? 0),
     balanceCents,
     waiting: queue.length,
     blocked: { count: score.real.blocked, cents: score.real.blockedCents },
@@ -95,7 +97,7 @@ export default function Home() {
     { done: d.setup.managedProducts > 0, label: "Switch on the products GuardBuy may restock", why: "GuardBuy only ever buys products you switch on.", action: "Choose products", href: "/app/products" },
     { done: d.setup.suppliers > 0, label: "Add your suppliers", why: "GuardBuy only pays suppliers you add, at the PayPal email you enter.", action: "Add a supplier", href: "/app/suppliers" },
     { done: d.setup.managedWithSuppliers > 0, label: "Link a supplier to each product", why: "Tells the agent who sells each product, and at what price.", action: "Link suppliers", href: "/app/products?view=managed" },
-    { done: !!d.rules, label: "Sign your spending rules", why: "Your limits: when to ask you, the weekly cap, and how much stays in PayPal.", action: "Review and sign rules", href: "/app/rules" },
+    { done: !!d.rules, label: "Sign your spending rules", why: "Signing activates automatic purchases within your limits. Flagged purchases still wait for your approval.", action: "Review and sign rules", href: "/app/rules" },
   ];
   const doneSteps = steps.filter((s) => s.done).length;
   const next = steps.findIndex((s) => !s.done);
@@ -146,12 +148,14 @@ export default function Home() {
           {d.ready && (
             <s-query-container>
             <s-grid gridTemplateColumns="@container (inline-size <= 640px) 1fr 1fr, 1fr 1fr 1fr 1fr" gap="base">
-              <Metric label="Spent this week" value={usd(d.spentCents)} detail={capCents ? `of ${usd(capCents)} weekly cap` : undefined}>
+              <Metric label="Spent · Last 7 days" value={usd(d.spentCents)} detail={capCents ? `of ${usd(capCents)} rolling 7-day cap` : undefined}>
                 {capCents > 0 && (
-                  <s-progress value={Math.min(d.spentCents, capCents)} max={capCents} tone={d.spentCents > capCents * 0.8 ? "critical" : "auto"} accessibilityLabel="Weekly spending" />
+                  <s-text>{`Committed: ${usd(d.budget.committed)} of ${usd(capCents)}`}</s-text>
                 )}
               </Metric>
-              <Metric label="PayPal balance" value={d.balanceCents === null ? "Unavailable" : usd(d.balanceCents)} detail={d.rules ? `Floor ${usd(d.rules.cashFloorCents)}` : undefined} badge={lowBalance ? { tone: "caution", label: "Low" } : undefined} />
+              <Metric label="Reserved" value={usd(d.budget.reserved)} detail="Pending payments and unexpired approval commitments" />
+              <Metric label="Remaining budget" value={usd(d.budget.remaining)} detail={d.budget.over ? `${usd(d.budget.over)} over the cap; review Approvals` : "Cap minus spent and reserved"} />
+              <Metric label="PayPal balance after commitments" value={d.balanceCents === null ? "Unavailable" : usd(d.balanceCents)} detail={d.balanceCents === null ? "PayPal unavailable. Refresh this page; check Approvals before retrying a payment." : d.rules ? `Floor ${usd(d.rules.cashFloorCents)}` : undefined} badge={lowBalance ? { tone: "caution", label: "Low" } : undefined} />
               <Metric label="Waiting for you" value={String(d.waiting)} detail={d.waiting ? "Open Approvals" : "Nothing to approve"} href={d.waiting ? "/app/approvals" : undefined} />
               <Metric label="Stopped by your rules" value={String(d.blocked.count)} detail={d.blocked.count ? `${usd(d.blocked.cents)} not spent` : "Nothing blocked yet"} href="/app/protection" />
             </s-grid>
@@ -288,7 +292,7 @@ export default function Home() {
 
       <s-section heading="Recent activity">
         {d.recent.length === 0 ? (
-          <Empty heading="No activity yet">Low stock, the agent's proposals, your rules' decisions and payments show up here as they happen.</Empty>
+          <Empty heading="No activity yet">Low stock, the agent’s proposals, decisions from your rules and payments show up here as they happen.</Empty>
         ) : (
           <s-table>
             <s-table-header-row>
