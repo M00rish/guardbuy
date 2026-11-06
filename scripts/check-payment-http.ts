@@ -34,6 +34,8 @@ const server = createServer(async (req, res) => {
   json(404, { name: "NOT_FOUND" });
 });
 await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+process.env.NODE_ENV = "test";
+process.env.GUARDBUY_PAYPAL_TEST_API = "1";
 process.env.PAYPAL_API_BASE = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
 process.env.PAYPAL_CLIENT_ID = "offline-test";
 process.env.PAYPAL_CLIENT_SECRET = "fake";

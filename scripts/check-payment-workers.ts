@@ -80,6 +80,8 @@ const server = createServer(async (req, res) => {
 });
 await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
 const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+process.env.NODE_ENV = "test";
+process.env.GUARDBUY_PAYPAL_TEST_API = "1";
 process.env.PAYPAL_API_BASE = base; process.env.PAYPAL_CLIENT_ID = "offline-worker-test"; process.env.PAYPAL_CLIENT_SECRET = "fake";
 const { default: db } = await import("../app/db.server");
 const { appendAudit, auditEntries, verifyChain } = await import("../app/lib/audit/log.server");
@@ -91,7 +93,7 @@ const queue = await import("../app/lib/jobs/restock-queue.server");
 const workers = new Set<ReturnType<typeof spawn>>(), shops: string[] = [];
 type WorkerResult = { ok?: boolean; result?: unknown; error?: { name: string; message: string }; killed?: boolean };
 async function worker(action: string, shop: string, decisionSeq = 0, extraEnv: Record<string, string> = {}) {
-  const child = spawn(process.execPath, [entry, JSON.stringify({ action, shop, decisionSeq })], { env: { ...process.env, NODE_ENV: "test", GUARDBUY_APPROVER_PAYER_IDS: "TESTPAYER", ...extraEnv }, stdio: ["ignore", "pipe", "pipe", "ipc"] });
+  const child = spawn(process.execPath, [entry, JSON.stringify({ action, shop, decisionSeq })], { env: { ...process.env, NODE_ENV: "test", GUARDBUY_PAYPAL_STORES: JSON.stringify(Object.fromEntries(shops.map((s) => [s, { clientId: "offline-worker-test", payerIds: ["TESTPAYER"] }]))), ...extraEnv }, stdio: ["ignore", "pipe", "pipe", "ipc"] });
   workers.add(child); let output = "", ready!: () => void, answer: WorkerResult | undefined;
   const deadline = setTimeout(() => child.kill("SIGKILL"), 45_000);
   const started = new Promise<void>((resolve) => { ready = resolve; });
@@ -144,6 +146,71 @@ async function expireLeases() {
 }
 function heldBalance() { let release!: () => void; releaseBalance = new Promise<void>((r) => { release = r; }); holdBalance = true; return { entered: new Promise<void>((r) => { balanceHeld = r; }), release }; }
 try {
+  // ISM-37: exercise real capture/execution code with denied server mappings and provider identities.
+  const bindingJson = (shop: string, payerIds = ["TESTPAYER"], clientId = "offline-worker-test") =>
+    JSON.stringify({ [shop]: { clientId, payerIds } });
+  for (const identity of [undefined, "WRONGPAYER", "OTHERSTOREPAYER"]) {
+    const f = await fixture(true);
+    const create = await worker("order", f.shop, f.seq); create.start(); assert.ok((await create.done).ok);
+    const order = [...orders.values()][0]; order.payer = identity ? { payer_id: identity } : {};
+    const mapping = JSON.parse(bindingJson(f.shop)); mapping["other.myshopify.com"] = { clientId: "offline-worker-test", payerIds: ["OTHERSTOREPAYER"] };
+    const denied = await worker("capture", f.shop, f.seq, { GUARDBUY_PAYPAL_STORES: JSON.stringify(mapping) }); denied.start(); assert.equal((await denied.done).ok, false);
+    const state = await snapshot(f.shop);
+    assert.equal(captures, 0); assert.equal(paymentRequests.length, 0);
+    assert.ok(state.log.some((e) => e.event.type === "order_closed" && e.event.reason === "wrong_payer"));
+    await record(`ISM-37 ${identity ?? "missing payer"}: zero capture POSTs`, { identity: identity ?? null, captures, paymentRequests, ...state }); await clean();
+  }
+  for (const config of ["unmapped", "empty-payers", "wrong-client"]) {
+    const f = await fixture(true);
+    const create = await worker("order", f.shop, f.seq); create.start(); assert.ok((await create.done).ok);
+    const mapping = config === "unmapped" ? "{}" : bindingJson(f.shop, config === "empty-payers" ? [] : ["TESTPAYER"], config === "wrong-client" ? "other-client" : "offline-worker-test");
+    const denied = await worker("capture", f.shop, f.seq, { GUARDBUY_PAYPAL_STORES: mapping }); denied.start(); assert.equal((await denied.done).ok, false);
+    assert.equal(captures, 0); assert.equal(paymentRequests.length, 0);
+    await record(`ISM-37 ${config}: zero capture POSTs`, { captures, paymentRequests, ...(await snapshot(f.shop)) }); await clean();
+  }
+  for (const action of ["payout", "order"]) {
+    const f = await fixture(action === "order");
+    const denied = await worker(action, f.shop, f.seq, { GUARDBUY_PAYPAL_STORES: "{}" }); denied.start(); assert.equal((await denied.done).ok, false);
+    assert.equal(batches.size, 0); assert.equal(orders.size, 0); assert.equal(paymentRequests.length, 0);
+    await record(`ISM-37 unbound store cannot submit ${action}`, { batches: batches.size, orders: orders.size, ...(await snapshot(f.shop)) }); await clean();
+  }
+  for (const mismatch of ["order-id", "amount", "currency", "payee"]) {
+    const f = await fixture(true);
+    const create = await worker("order", f.shop, f.seq); create.start(); assert.ok((await create.done).ok);
+    const order = [...orders.values()][0];
+    if (mismatch === "order-id") order.id = "UNRELATEDORDER";
+    if (mismatch === "amount") order.purchase_units![0].amount!.value = "999.00";
+    if (mismatch === "currency") order.purchase_units![0].amount!.currency_code = "EUR";
+    if (mismatch === "payee") order.purchase_units![0].payee!.email_address = "wrong@example.test";
+    const denied = await worker("capture", f.shop, f.seq); denied.start(); assert.equal((await denied.done).ok, false);
+    assert.equal(captures, 0); assert.equal(paymentRequests.length, 0);
+    await record(`ISM-37 approval ${mismatch} mismatch sends zero capture POSTs`, { captures, paymentRequests, ...(await snapshot(f.shop)) }); await clean();
+  }
+  const bound = await fixture(true);
+  const boundCreate = await worker("order", bound.shop, bound.seq); boundCreate.start(); assert.ok((await boundCreate.done).ok);
+  const approved = await worker("capture", bound.shop, bound.seq); approved.start(); assert.ok((await approved.done).ok);
+  assert.equal(captures, 1);
+  const repeated = await worker("capture", bound.shop, bound.seq); repeated.start(); assert.ok((await repeated.done).ok); assert.equal(captures, 1);
+  await record("ISM-37 bound merchant captures once; repeat returns saved evidence", { captures, paymentRequests, ...(await snapshot(bound.shop)) }); await clean();
+
+  // An uncertain earlier capture remains reserved if later authorization no longer matches.
+  const unknown = await fixture(true);
+  const unknownCreate = await worker("order", unknown.shop, unknown.seq); unknownCreate.start(); assert.ok((await unknownCreate.done).ok);
+  const unknownOrder = [...orders.values()][0];
+  const { candidateAttempt } = await import("../app/lib/payments/attempts.server");
+  await appendAudit(unknown.shop, candidateAttempt({ decisionSeq: unknown.seq, operation: "order_capture", route: "order", requestId: `gb-capture-${unknownOrder.id}`, providerId: unknownOrder.id, amountCents: 1000, currency: "USD", payeeEmail: "supplier@example.test", body: {} }));
+  unknownOrder.payer = { payer_id: "WRONGPAYER" };
+  const unknownRetry = await worker("capture", unknown.shop, unknown.seq); unknownRetry.start(); assert.equal((await unknownRetry.done).ok, false);
+  const unknownState = await snapshot(unknown.shop);
+  assert.equal(captures, 0); assert.equal(unknownState.reserved, 1000); assert.equal(unknownState.log.some((e) => e.event.type === "order_closed"), false);
+  await record("ISM-37 uncertain capture with changed payer is retained, never closed or replayed", { captures, paymentRequests, ...unknownState });
+  // Existing provider settlement remains money spent even after server authorization is removed.
+  unknownOrder.status = "COMPLETED"; unknownOrder.purchase_units![0].payments = { captures: [{ id: "EXISTINGCAPTURE", status: "COMPLETED", amount: unknownOrder.purchase_units![0].amount! }] };
+  const recovered = await worker("capture", unknown.shop, unknown.seq, { GUARDBUY_PAYPAL_STORES: "{}" }); recovered.start(); assert.ok((await recovered.done).ok);
+  assert.equal(captures, 0); assert.equal(paymentRequests.length, 0);
+  const recoveredState = await snapshot(unknown.shop); assert.ok(recoveredState.log.some((e) => e.event.type === "order_captured"));
+  await record("ISM-37 read-only settlement recovery survives removed authorization", { captures, paymentRequests, ...recoveredState }); await clean();
+
   // Different processes choose different payment routes. Whichever wins is the only payable route.
   const f = await fixture(true); let releaseCreated!: () => void;
   releaseOrder = new Promise<void>((r) => { releaseCreated = r; }); holdOrder = true;

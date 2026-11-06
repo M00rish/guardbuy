@@ -1,9 +1,9 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { paypalApiBase } from "./config.server";
 // Minimal PayPal REST client for the calls the Agent Toolkit doesn't cover (Payouts, Orders with a payee).
 // Sandbox only for the hackathon. Caches the OAuth token, spaces requests out to stay under the
 // sandbox limit (~50 req/min per IP), and retries network blips and 429s.
 
-const BASE = process.env.PAYPAL_API_BASE ?? "https://api-m.sandbox.paypal.com";
 const MIN_INTERVAL_MS = 1_300; // ~46 requests per minute at most
 
 type Credentials = { clientId: string; clientSecret: string };
@@ -40,7 +40,7 @@ async function accessToken(creds: Credentials, signal: AbortSignal): Promise<str
   const cached = tokens.get(creds.clientId);
   if (cached && cached.expiresAt > Date.now() + 60_000) return cached.value;
 
-  const res = await fetch(`${BASE}/v1/oauth2/token`, {
+  const res = await fetch(`${paypalApiBase()}/v1/oauth2/token`, {
     method: "POST",
     signal,
     headers: {
@@ -63,6 +63,7 @@ export async function paypal<T>(
   path: string,
   init: { method?: "GET" | "POST"; body?: unknown; requestId?: string; creds?: Credentials; maxAttempts?: number; timeoutMs?: number } = {},
 ): Promise<T> {
+  const base = paypalApiBase();
   const creds = init.creds ?? merchantCredentials();
   const signal = AbortSignal.timeout(init.timeoutMs ?? 20_000);
   const maxAttempts = init.maxAttempts ?? 3;
@@ -70,7 +71,7 @@ export async function paypal<T>(
     await throttle(creds.clientId, signal);
     signal.throwIfAborted();
     try {
-      const res = await fetch(`${BASE}${path}`, {
+      const res = await fetch(`${base}${path}`, {
         method: init.method ?? "GET",
         signal,
         headers: {
