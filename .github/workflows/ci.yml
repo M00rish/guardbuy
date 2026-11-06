@@ -60,3 +60,41 @@ jobs:
       - run: npx prisma generate
       - run: npx prisma migrate deploy
       - run: npx tsx scripts/check-unpaid-approvals-db.ts
+
+  payment-workers:
+    name: Payment safety across processes
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: offline-only
+          POSTGRES_DB: guardbuy_ism43_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism43_test
+      DIRECT_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism43_test
+      GUARDBUY_TEST_EVIDENCE_PATH: payment-workers-results.json
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
+      - run: npx prisma migrate deploy
+      - run: npx tsx scripts/check-payment-workers.ts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: payment-workers-proof
+          path: payment-workers-results.json

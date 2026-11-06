@@ -118,6 +118,7 @@ export const AuditEventSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("proposal"),
     proposal: RecordedProposalSchema,
+    restockJobId: z.string().optional(),
     // What triggered it: stock and sales rate when GuardBuy asked the AI (optional for older entries).
     stock: z.object({ available: z.number(), perDay: z.number(), daysOfCover: z.number() }).optional(),
     // Set when this proposal was a prompt-injection test (demo): never paid, never counts as a restock.

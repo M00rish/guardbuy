@@ -1,3 +1,3 @@
-// Health check for Render and uptime pings. Deliberately doesn't touch the database, so pinging
-// it to keep the free server awake doesn't keep Neon's free database awake too.
+// This loader does not query the database. The restock worker polls while the web process is
+// awake, so keeping the service awake also keeps its configured queue polling active.
 export const loader = () => new Response("ok", { headers: { "Cache-Control": "no-store" } });
