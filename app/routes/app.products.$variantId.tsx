@@ -5,7 +5,7 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import db from "../db.server";
-import { authenticate } from "../shopify.server";
+import { privateAdmin } from "../lib/merchant/staff.server";
 import { linkSupplier, setManaged, setPreferred, unlinkSupplier } from "../lib/suppliers/directory.server";
 import { usd } from "../lib/format";
 import { auditEntries } from "../lib/audit/log.server";
@@ -17,7 +17,7 @@ import { Empty } from "../components/ui";
 // and which one is preferred.
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session } = await privateAdmin(request);
   const shop = session.shop;
   const variantId = String(params.variantId ?? "");
   if (!/^\d+$/.test(variantId)) throw new Response("Not found", { status: 404 });
@@ -62,7 +62,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session } = await privateAdmin(request);
   const shop = session.shop;
   const variantId = String(params.variantId ?? "");
   if (!/^\d+$/.test(variantId)) return { ok: false, message: "Unknown product" };
@@ -124,7 +124,7 @@ export default function ProductSuppliers() {
         </s-stack>
         {p.managed && p.links.length === 0 && (
           <s-box paddingBlockStart="base">
-            <s-banner tone="warning" heading="Link a supplier">GuardBuy can't restock this product until it has at least one supplier.</s-banner>
+            <s-banner tone="warning" heading="Link a supplier">GuardBuy can’t restock this product until it has at least one supplier.</s-banner>
           </s-box>
         )}
       </s-section>

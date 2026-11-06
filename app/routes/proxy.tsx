@@ -1,4 +1,5 @@
 import type { LoaderFunctionArgs } from "react-router";
+import { assertPrivacyActive } from "../lib/privacy/state.server";
 import { authenticate } from "../shopify.server";
 import { requirePublicDemo } from "../lib/demo/dashboard.server";
 
@@ -102,6 +103,7 @@ export const SHELL = `
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { liquid, session } = await authenticate.public.appProxy(request);
   if (!session) throw new Response("Not found", { status: 404 });
+  await assertPrivacyActive(session.shop);
   requirePublicDemo(session.shop);
   return liquid(SHELL, { headers: { "Cache-Control": "no-store" } });
 };

@@ -1,6 +1,7 @@
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
 import db from "../../db.server";
+import { privacyWriteAllowed } from "../privacy/state.server";
 import { TX_OPTIONS } from "../audit/log.server";
 
 // Sales history is kept as net daily totals per variant only: no order IDs, prices or customer data.
@@ -24,6 +25,7 @@ type SaleLine = { variantId: string | number | null; units: number };
 export async function recordSalesOnce(shop: string, eventId: string, topic: string, at: Date, lines: SaleLine[]) {
   const day = utcDay(at);
   return db.$transaction(async (tx) => {
+    if (!await privacyWriteAllowed(tx, shop)) return false;
     const { count } = await tx.processedWebhook.createMany({ data: [{ eventId, topic, shop }], skipDuplicates: true });
     if (count === 0) return false;
     for (const { variantId, units } of lines) {
@@ -99,6 +101,7 @@ export async function backfillSales(admin: AdminApiContext, shop: string, days =
   // Webhooks can arrive twice or concurrently: a per-shop lock serializes backfills, and the
   // completion marker is written with the rows so a half-finished backfill never counts.
   await db.$transaction(async (tx) => {
+    if (!await privacyWriteAllowed(tx, shop)) return;
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${shop}))`;
     await tx.dailySales.deleteMany({ where: { shop, day: { gte: utcDay(since) } } });
     await tx.dailySales.createMany({ data: rows });

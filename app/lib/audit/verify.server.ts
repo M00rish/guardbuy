@@ -1,5 +1,6 @@
 import { paymentStatus } from "../payments/status";
 import db from "../../db.server";
+import { privacyBlocked } from "../privacy/state.server";
 import { usd } from "../format";
 import type { AuditEntry } from "../policy/schema";
 import { RULE_LABELS } from "../policy/rules";
@@ -53,7 +54,7 @@ export async function verifyPayment(rawId: string): Promise<PaymentProof> {
   const id = rawId.trim();
   if (!ID.test(id)) return { found: false };
   const row = await findPayment(id);
-  if (!row) return { found: false };
+  if (!row || await privacyBlocked(row.shop)) return { found: false };
 
   const log = await auditEntries(row.shop);
   const chain = await verifyChain(row.shop);

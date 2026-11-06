@@ -5,7 +5,7 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import db from "../db.server";
-import { authenticate } from "../shopify.server";
+import { privateAdmin } from "../lib/merchant/staff.server";
 import { productOverview } from "../lib/merchant/dashboard.server";
 import { auditEntries } from "../lib/audit/log.server";
 import { currentRuleSet } from "../lib/agent/restock.server";
@@ -17,7 +17,7 @@ import { Empty, Unavailable } from "../components/ui";
 // "Manage" opens the product's page to link suppliers and set the preferred one.
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin, session } = await authenticate.admin(request);
+  const { admin, session } = await privateAdmin(request);
   const shop = session.shop;
   const [products, links, supplierCount, log] = await Promise.all([
     productOverview(admin, shop).catch((e) => { console.warn(`[products] Shopify unavailable: ${(e as Error).message}`); return null; }),
@@ -45,7 +45,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session } = await privateAdmin(request);
   const f = await request.formData();
   const variantId = String(f.get("variantId") ?? "");
   if (f.get("intent") !== "toggle" || !/^\d+$/.test(variantId)) return { ok: false, message: "Unknown action" };

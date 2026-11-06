@@ -1,4 +1,5 @@
 import db from "../../db.server";
+import { privacyShopHash } from "../privacy/state.server";
 import type { PaymentLease } from "../agent/payment-lock.server";
 import { canonicalJson, sha256Hex } from "../policy/hash";
 import { AuditEventSchema, type AuditEntry, type AuditEvent } from "../policy/schema";
@@ -24,6 +25,7 @@ export async function appendAuditWhen(shop: string, event: AuditEvent, when?: (l
 
   return db.$transaction(async (tx) => {
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${"audit:" + shop}))`;
+    if ((await tx.privacyBlock.findUnique({ where: { shopHash: privacyShopHash(shop) } }))?.purgedAt) throw new Error("This audit stream was erased for privacy; it cannot be recreated");
     if (lease) {
       const rows = await tx.$queryRaw<{ holder: string; live: boolean }[]>`SELECT "holder", "lockedUntil" > clock_timestamp() AS live FROM "PaymentLock" WHERE "shop" = ${lease.key} FOR UPDATE`;
       if (rows[0]?.holder !== lease.holder || !rows[0].live) throw new Error("Payment lease lost; no new attempt may start");

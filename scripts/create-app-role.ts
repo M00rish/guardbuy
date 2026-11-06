@@ -37,6 +37,8 @@ try {
     `GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ${ROLE}`,
     // The audit log: read and append only.
     `REVOKE UPDATE, DELETE, TRUNCATE ON "AuditEntry" FROM ${ROLE}`,
+    // Privacy fulfillment and lifting suppression require offline owner review.
+    `REVOKE UPDATE, DELETE, TRUNCATE ON "PrivacyRequest", "PrivacyBlock" FROM ${ROLE}`,
     // Migrations are the owner's business.
     `REVOKE ALL ON "_prisma_migrations" FROM ${ROLE}`,
     // Tables added by future migrations (created by the owner) get the same read/write access;

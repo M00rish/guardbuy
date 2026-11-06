@@ -6,7 +6,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { z } from "zod";
 
 import db from "../db.server";
-import { authenticate } from "../shopify.server";
+import { privateAdmin } from "../lib/merchant/staff.server";
 import { auditEntries } from "../lib/audit/log.server";
 import { currentRuleSet } from "../lib/agent/restock.server";
 import { saveSupplier } from "../lib/suppliers/directory.server";
@@ -18,7 +18,7 @@ import { ago, Empty } from "../components/ui";
 const RECENT_CHANGE_MS = 14 * 86_400_000;
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session } = await privateAdmin(request);
   const [suppliers, log] = await Promise.all([
     db.supplier.findMany({ where: { shop: session.shop }, orderBy: { name: "asc" }, include: { _count: { select: { products: true } } } }),
     auditEntries(session.shop),
@@ -39,7 +39,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 const slug = (name: string) => name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session } = await privateAdmin(request);
   const f = await request.formData();
   const name = String(f.get("name") ?? "").trim();
   const paypalEmail = String(f.get("paypalEmail") ?? "").trim();
