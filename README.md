@@ -125,6 +125,8 @@ Deployment: add the explicit mapping before starting this version with payments 
 
 Checks: `npx tsx scripts/check-paypal-binding.ts` covers store/account binding and startup configuration without provider I/O. The multi-process/Postgres suite also exercises the actual executor with a simulated provider to prove refused identities send zero capture requests.
 
+Start production with `npm run start`. Its logger preload keeps request methods, paths and response status while omitting every query parameter, including Shopify session tokens and PayPal return identities. Do not bypass the preload by invoking `react-router-serve` directly. `node scripts/check-access-logs.mjs` exercises the logger with real local HTTP requests. This does not remove historical deployment logs; review prior exposure and credential rotation separately under ISM-133.
+
 ## Try it
 
 **Judges:** open the demo store in one tab and `/apps/guardbuy` in another. The public dashboard is read-only and shows actual managed stock, today’s test-order count (UTC), recorded restock decisions, and supplier payment outcomes. Place a test checkout order in the storefront and watch the stock change. All visitors see the same store; this is no longer a per-judge simulated sandbox.
