@@ -1,15 +1,17 @@
 import type { AuditEntry, AuditEvent } from "../policy/schema";
 
 export class DeliveryRefused extends Error {}
-const FAILED = new Set(["FAILED", "RETURNED", "BLOCKED", "REFUNDED", "REVERSED", "DENIED", "DECLINED"]);
+const FAILED = new Set(["FAILED", "RETURNED", "BLOCKED", "REFUNDED", "REVERSED", "DENIED", "DECLINED", "CANCELED", "CANCELLED"]);
 export type Delivery = {
   decisionSeq: number; variantId: string; sku: string; supplierId: string; ordered: number;
-  received: number; remaining: number; payment: "pending" | "paid" | "failed";
+  received: number; closed: number; remaining: number; revision: number; partialRefund: boolean;
+  expectedAt: string | null; estimateSource: "supplier" | "merchant" | null; overdue: boolean;
+  payment: "pending" | "paid" | "failed";
   pending?: AuditEntry & { event: Extract<AuditEvent, { type: "receipt_started" }> };
 };
 
 /** Physical receipts are independent of payment status; refunds never erase received goods. */
-export function deliveries(log: AuditEntry[]): Delivery[] {
+export function deliveries(log: AuditEntry[], now = new Date()): Delivery[] {
   return log.flatMap((decision): Delivery[] => {
     if (decision.event.type !== "decision") return [];
     const proposal = log.find((e) => e.seq === (decision.event.type === "decision" ? decision.event.proposalSeq : -1))?.event;
@@ -33,7 +35,27 @@ export function deliveries(log: AuditEntry[]): Delivery[] {
     const received = [...unique.values()].reduce((sum, e) => sum + (e.event.type === "receipt_received" ? e.event.quantity : 0), 0);
     const pending = forDecision.find((e): e is NonNullable<Delivery["pending"]> => e.event.type === "receipt_started" && !completedIds.has(e.event.receiptId));
     const p = proposal.proposal;
-    return [{ decisionSeq: decision.seq, variantId: p.variantId!, sku: p.sku, supplierId: p.supplierId, ordered: p.quantity, received, remaining: Math.max(0, p.quantity - received), payment: status === "SUCCESS" || status === "COMPLETED" ? "paid" : FAILED.has(status) || status.includes("REFUND") ? "failed" : "pending", pending }];
+    const changes = forDecision.filter((e) => ["receipt_started", "receipt_received", "receipt_rejected", "delivery_estimate_updated", "delivery_remainder_closed"].includes(e.event.type));
+    const closed = [...new Map(forDecision.filter((e) => e.event.type === "delivery_remainder_closed").map((e) => [e.event.type === "delivery_remainder_closed" ? e.event.updateId : "", e])).values()]
+      .reduce((sum, e) => sum + (e.event.type === "delivery_remainder_closed" ? e.event.quantity : 0), 0);
+    const remaining = Math.max(0, p.quantity - received - closed);
+    const override = changes.filter((e) => e.event.type === "delivery_estimate_updated").at(-1)?.event;
+    // Start supplier lead time at first positive settlement, not at an unconfirmed batch response.
+    const settled = capture?.event.type === "order_captured" && capture.event.status === "COMPLETED" ? capture
+      : log.find((e) => e.event.type === "payout_status" && e.event.payoutSeq === payout?.seq && e.event.status === "SUCCESS"
+        || e.event.type === "order_status" && capture?.event.type === "order_captured" && e.event.orderId === capture.event.orderId && e.event.status === "COMPLETED");
+    let expectedAt: string | null = null;
+    let estimateSource: Delivery["estimateSource"] = null;
+    if (override?.type === "delivery_estimate_updated") { expectedAt = override.expectedAt; estimateSource = "merchant"; }
+    else if (settled && p.supplierLeadTimeDays !== undefined) {
+      const day = Date.parse(settled.at.slice(0, 10) + "T00:00:00Z") + (p.supplierLeadTimeDays + 1) * 86_400_000 - 1;
+      if (Number.isFinite(day) && Math.abs(day) <= 8.64e15) { expectedAt = new Date(day).toISOString(); estimateSource = "supplier"; }
+    }
+    const partialRefund = status === "PARTIALLY_REFUNDED";
+    const payment = status === "SUCCESS" || status === "COMPLETED" || partialRefund ? "paid" : FAILED.has(status) || status.includes("REFUND") ? "failed" : "pending";
+    return [{ decisionSeq: decision.seq, variantId: p.variantId!, sku: p.sku, supplierId: p.supplierId, ordered: p.quantity,
+      received, closed, remaining, revision: changes.at(-1)?.seq ?? (payout ?? capture)!.seq, partialRefund,
+      expectedAt, estimateSource, overdue: remaining > 0 && payment === "paid" && !!expectedAt && now.getTime() > Date.parse(expectedAt), payment, pending }];
   });
 }
 

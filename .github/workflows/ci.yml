@@ -6,8 +6,8 @@ on:
   pull_request:
 
 jobs:
-  check:
-    name: Typecheck + policy checks
+  typecheck:
+    name: Typecheck
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -18,8 +18,35 @@ jobs:
       - run: npm ci
       - run: npx prisma generate
       - run: npm run typecheck
+
+  tests:
+    name: Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: offline-only
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma generate
       # Offline, deterministic checks (no database, PayPal or Gemini needed)
       - run: npx tsx scripts/check-deliveries.ts
+      - run: npx tsx scripts/check-incoming-stock.ts
       - run: npx tsx scripts/check-public-demo.ts
       - run: npx tsx scripts/check-payout-refresh.ts
       - run: npx tsx scripts/check-payment-attempts.ts
@@ -34,109 +61,47 @@ jobs:
       - run: npx tsx scripts/check-scoreboard.ts
       - run: node --import tsx scripts/check-checkpoints.ts
 
-  unpaid-approvals-db:
-    name: Unpaid approvals on Postgres
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: postgres:16-alpine
+      - name: Create and migrate isolated test databases
         env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: offline-only
-          POSTGRES_DB: guardbuy_ism135_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      DATABASE_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism135_test
-      DIRECT_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism135_test
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npx prisma generate
-      - run: npx prisma migrate deploy
-      - run: npx tsx scripts/check-unpaid-approvals-db.ts
-
-  payment-workers:
-    name: Payment safety across processes
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    services:
-      postgres:
-        image: postgres:16-alpine
+          POSTGRES_CONTAINER_ID: ${{ job.services.postgres.id }}
+        run: |
+          for test_database in guardbuy_ism135_test guardbuy_ism43_test guardbuy_ism42_test guardbuy_ism15_test; do
+            docker exec "$POSTGRES_CONTAINER_ID" createdb -U postgres "$test_database"
+            test_database_url="postgresql://postgres:offline-only@127.0.0.1:5432/$test_database"
+            DATABASE_URL="$test_database_url" DIRECT_URL="$test_database_url" npx prisma migrate deploy
+          done
+      - name: Build for production HTTP checks
+        run: npm run build
+      - name: Unpaid approvals on Postgres
         env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: offline-only
-          POSTGRES_DB: guardbuy_ism43_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      DATABASE_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism43_test
-      DIRECT_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism43_test
-      GUARDBUY_TEST_EVIDENCE_PATH: payment-workers-results.json
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npx prisma generate
-      - run: npx prisma migrate deploy
-      - run: npx tsx scripts/check-payment-workers.ts
+          DATABASE_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism135_test
+          DIRECT_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism135_test
+        run: npx tsx scripts/check-unpaid-approvals-db.ts
+      - name: Payment safety across processes
+        env:
+          DATABASE_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism43_test
+          DIRECT_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism43_test
+          GUARDBUY_TEST_EVIDENCE_PATH: payment-workers-results.json
+        run: npx tsx scripts/check-payment-workers.ts
+      - name: Privacy webhooks and owner erasure
+        env:
+          DATABASE_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism42_test
+          DIRECT_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism42_test
+          GUARDBUY_PRIVACY_EVIDENCE_PATH: privacy-results.json
+          GUARDBUY_PRIVACY_SERVER_LOG: privacy-server.log
+        run: npx tsx scripts/check-privacy.ts
+      - name: Incoming stock and receipt lifecycle
+        env:
+          DATABASE_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism15_test
+          DIRECT_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism15_test
+          GUARDBUY_INCOMING_EVIDENCE_PATH: incoming-stock-results.json
+        run: npx tsx scripts/check-delivery-lifecycle-db.ts
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: payment-workers-proof
           path: payment-workers-results.json
-
-  privacy:
-    name: Privacy webhooks and owner erasure
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: offline-only
-          POSTGRES_DB: guardbuy_ism42_test
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-    env:
-      DATABASE_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism42_test
-      DIRECT_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism42_test
-      GUARDBUY_PRIVACY_EVIDENCE_PATH: privacy-results.json
-      GUARDBUY_PRIVACY_SERVER_LOG: privacy-server.log
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 22
-          cache: npm
-      - run: npm ci
-      - run: npx prisma generate
-      - run: npx prisma migrate deploy
-      - run: npm run build
-      - run: npx tsx scripts/check-privacy.ts
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -144,3 +109,10 @@ jobs:
           path: |
             privacy-results.json
             privacy-server.log
+          if-no-files-found: ignore
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: incoming-stock-proof
+          path: incoming-stock-results.json
+          if-no-files-found: ignore

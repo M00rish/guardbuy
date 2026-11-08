@@ -50,8 +50,8 @@ export function productStatus(
       return { label: `${payment ? paymentStatus(log, payment).label : "Payment failed"} · check Approvals`, tone: "critical" };
     }
   }
-  const delivery = deliveries(log).find((d) => d.variantId === p.variantId && (d.remaining > 0 || d.pending) && (d.payment !== "failed" || d.pending));
-  if (delivery) return { label: delivery.pending ? "Receipt needs confirmation" : delivery.payment === "pending" ? `Payment pending · ${delivery.remaining} on order` : `${delivery.remaining} incoming · awaiting delivery`, tone: "info" };
+  const delivery = deliveries(log, now).find((d) => d.variantId === p.variantId && (d.remaining > 0 || d.pending) && (d.payment !== "failed" || d.pending));
+  if (delivery) return { label: delivery.pending ? "Receipt needs confirmation" : delivery.payment === "pending" ? `Payment pending · ${delivery.remaining} on order` : `${delivery.remaining} incoming · ${delivery.overdue ? "overdue" : delivery.partialRefund ? "partial refund · review delivery" : "awaiting delivery"}`, tone: delivery.overdue || delivery.partialRefund ? "warning" : "info" };
   if (!p.managed) return { label: "Not managed", tone: "neutral" };
   const last = log
     .filter((e) => e.event.type === "proposal" && !e.event.scenario && (e.event.proposal.variantId ? e.event.proposal.variantId === p.variantId : e.event.proposal.sku === p.sku))

@@ -1,6 +1,6 @@
 import db from "../../db.server";
 import { approvalExpired, approvalStates } from "./approval-state";
-import { deliveries } from "../inventory/deliveries";
+import { deliveries, incomingFor } from "../inventory/deliveries";
 import { appendAudit, appendAuditWhen, auditEntries } from "../audit/log.server";
 import type { StockCheck } from "../inventory/trigger.server";
 import { paypal } from "../paypal/client.server";
@@ -19,7 +19,7 @@ import { proposePurchase } from "./proposer.server";
 // how far a restock got and why it stopped. Failures are logged too, never dropped silently.
 
 const DAY_MS = 86_400_000;
-const OPEN_RESTOCK_MS = 3 * DAY_MS; // a paid or pending restock covers the SKU for this long (until stock-in-transit tracking)
+const OPEN_RESTOCK_MS = 3 * DAY_MS; // legacy SKU-only cooldown; variant incoming stock remains held until receipt or explicit closure
 const RETRY_AFTER_BLOCK_MS = 60 * 60_000; // after a blocked proposal or failed payment, wait before trying again
 const RETRY_AFTER_LLM_FAILURE_MS = 15 * 60_000; // after the LLM failed or timed out
 const RETRY_AFTER_REJECT_MS = DAY_MS; // the merchant said no: don't ask again the same day
@@ -310,8 +310,8 @@ export function skipReason(item: { variantId: string; sku: string }, log: AuditE
     const p = d?.type === "decision" ? log.find((e) => e.seq === d.proposalSeq)?.event : undefined;
     if (p?.type === "proposal" && (p.proposal.variantId ? p.proposal.variantId === item.variantId : p.proposal.sku === item.sku)) return `purchase #${state.decisionSeq} needs attention in Approvals before a replacement restock`;
   }
-  const outstanding = deliveries(log).find((d) => d.variantId === item.variantId && (d.remaining > 0 || d.pending) && (d.payment !== "failed" || d.pending));
-  if (outstanding) return `restock #${outstanding.decisionSeq} is already open: ${outstanding.remaining} units awaiting delivery${outstanding.pending ? " (receipt needs confirmation)" : ""}`;
+  const outstanding = deliveries(log, now).find((d) => d.variantId === item.variantId && (d.remaining > 0 || d.pending) && (d.payment !== "failed" || d.pending));
+  if (outstanding) return `restock #${outstanding.decisionSeq} is already open: ${outstanding.remaining} units awaiting delivery${outstanding.pending ? " (receipt needs confirmation)" : outstanding.overdue ? " (overdue; still incoming)" : ""}`;
   const same = (r: { variantId?: string; sku: string }) => (r.variantId ? r.variantId === item.variantId : r.sku === item.sku);
   const last = log
     .filter((e) => (e.event.type === "proposal" || e.event.type === "proposal_failed") && !e.event.scenario) // injection tests don't count
@@ -378,8 +378,11 @@ async function restock(shop: string, check: StockCheck, lease: PaymentLease, job
     const skip = skipReason(check, log);
     if (skip) return { outcome: "skipped", reason: skip };
   }
-  if (check.daysOfCover >= rules.reorderBelowDaysOfCover) {
-    return { outcome: "skipped", reason: `${check.daysOfCover.toFixed(1)} days of cover is above the rule's ${rules.reorderBelowDaysOfCover}` };
+  // Incoming may have changed since the stock read (for example, a receipt or explicit closure).
+  const incoming = incomingFor(log, check.variantId);
+  const coverage = check.perDay > 0 ? Math.max(0, check.available + incoming) / check.perDay : check.daysOfCover;
+  if (coverage >= rules.reorderBelowDaysOfCover) {
+    return { outcome: "skipped", reason: `${coverage.toFixed(1)} days of ${incoming ? "projected " : ""}cover is above the rule's ${rules.reorderBelowDaysOfCover}` };
   }
 
   // 1. The LLM proposes (untrusted). GuardBuy adds who gets paid; the LLM never supplies it.
@@ -387,8 +390,8 @@ async function restock(shop: string, check: StockCheck, lease: PaymentLease, job
     let proposal: RecordedProposal;
     try {
       const proposed = await proposePurchase({ check, rules, offers });
-      const payee = offers.find((o) => o.supplierId === proposed.supplierId)?.paypalEmail;
-      proposal = { ...proposed, variantId: check.variantId, payeeEmail: payee || undefined };
+      const offer = offers.find((o) => o.supplierId === proposed.supplierId);
+      proposal = { ...proposed, variantId: check.variantId, payeeEmail: offer?.paypalEmail || undefined, supplierLeadTimeDays: offer?.leadTimeDays };
     } catch (e) {
       const reason = errorText(e);
       await appendAuditWhen(shop, { type: "proposal_failed", sku: check.sku, variantId: check.variantId, reason }, () => true, lease);
