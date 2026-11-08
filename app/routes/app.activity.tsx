@@ -1,3 +1,4 @@
+import { purchaseEntries, purchaseParam } from "../lib/alerts/projection";
 import { refreshPayouts } from "../lib/paypal/reconcile.server";
 import { PayoutRefresh } from "../components/payout-refresh";
 import { useState } from "react";
@@ -18,9 +19,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, actor } = await adminWithStaff(request);
   const payoutRefresh = await refreshPayouts(session.shop);
   const [log, names] = await Promise.all([auditEntries(session.shop), feedNames(session.shop)]);
+  const purchase = purchaseParam(request.url);
+  const seqs = purchase === null ? null : purchaseEntries(log, purchase);
   return {
+    purchase,
     payoutRefresh,
-    feed: toFeed(log, actor, names),
+    feed: toFeed(log, actor, names).filter(f => !seqs || seqs.has(f.seq)),
     chain: await verifyChain(session.shop),
     head: log.at(-1)?.hash ?? null,
     checkedAt: new Date().toISOString(),
@@ -38,7 +42,7 @@ const IN_VIEW: Record<View, (kind: string) => boolean> = {
 };
 
 export default function Activity() {
-  const { feed, chain, head, checkedAt, verifyBase, payoutRefresh } = useLoaderData<typeof loader>();
+  const { purchase, feed, chain, head, checkedAt, verifyBase, payoutRefresh } = useLoaderData<typeof loader>();
   const revalidator = useRevalidator();
   const [view, setView] = useState<View>("all");
   const now = Date.now();
@@ -47,6 +51,7 @@ export default function Activity() {
   return (
     <s-page heading="Activity" inlineSize="large">
       <PayoutRefresh state={payoutRefresh} />
+      {purchase !== null && <s-section><s-banner tone="info" heading={`History for purchase #${purchase}`}><s-link href={`/app/approvals?purchase=${purchase}`}>Current approval and recovery state</s-link> · <s-link href="/app/activity">Show all activity</s-link></s-banner></s-section>}
       <s-section>
         <s-stack gap="base">
           <s-stack direction="inline" gap="base" alignItems="center">

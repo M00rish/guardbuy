@@ -313,3 +313,7 @@ The Deliveries page shows estimates, overdue status, partial refunds, explicit c
 Delivery management and receipts share the database coordination lock and conditionally append against current receipt/revision state. Stale tabs, duplicate updates and pending/uncertain receipts cannot release quantities twice. Privacy-suppressed shops cannot start delivery management or receipt adjustments. No database migration, new Shopify scopes, secrets or paid services are needed beyond the parent PRs.
 
 Validation: `npx tsx scripts/check-incoming-stock.ts` exercises the pure lifecycle and `scripts/check-delivery-lifecycle-db.ts` uses the actual management/receipt services against disposable local `guardbuy_ism15_test` Postgres with simulated Shopify adjustments. The ordinary receipt/idempotency checks and multi-process payment/job suite remain in CI. Hosted sandbox acceptance is separate from these local checks.
+
+### Optional Telegram alerts
+
+[Setup, delivery semantics and manual acceptance](docs/telegram-alerts.md). Telegram is opt-in per shop and globally disabled by default. The running server sends minimal state-aware notifications through a durable outbox, independent of an open browser. Unknown delivery outcomes require explicit duplicate-message consent before retrying; notification delivery never changes payment state. Free-host sleeping delays delivery until the server wakes. No bot webhook, external scheduler or hosted deployment is activated by this change.

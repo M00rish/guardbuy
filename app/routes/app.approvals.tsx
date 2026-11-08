@@ -1,3 +1,4 @@
+import { purchaseParam } from "../lib/alerts/projection";
 import { refreshPayouts } from "../lib/paypal/reconcile.server";
 import { PayoutRefresh } from "../components/payout-refresh";
 import { useEffect } from "react";
@@ -22,14 +23,15 @@ import { ago, Empty, plural, Row } from "../components/ui";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await privateAdmin(request);
+  const purchase = purchaseParam(request.url);
   // Settle PayPal orders first (capture approved ones, close expired or cancelled ones), so the queue is current.
   // A status-only refresh must not capture an approved Order.
-  if (new URL(request.url).searchParams.get("payoutRefresh") !== "1") {
+  if (purchase === null && new URL(request.url).searchParams.get("payoutRefresh") !== "1") {
     await sweepPayPalOrders(session.shop).catch(() => console.warn("[approvals] PayPal sweep failed"));
   }
   const payoutRefresh = await refreshPayouts(session.shop);
   const [cards, names] = await Promise.all([approvalQueue(session.shop), feedNames(session.shop)]);
-  return { payoutRefresh, cards: cards.map((c) => ({ ...c, productTitle: names.product(c.sku) ?? c.sku })) };
+  return { payoutRefresh, purchase, cards: cards.filter(c => purchase === null || c.decisionSeq === purchase).map((c) => ({ ...c, productTitle: names.product(c.sku) ?? c.sku })) };
 };
 
 type ActionResult = { ok: boolean; message: string; approveUrl?: string };
@@ -84,10 +86,11 @@ const pct = (n: number) => `${n >= 0 ? "+" : ""}${Math.round(n)}%`;
 type Card = ApprovalCard & { productTitle: string };
 
 export default function Approvals() {
-  const { cards, payoutRefresh } = useLoaderData<typeof loader>();
+  const { cards, payoutRefresh, purchase } = useLoaderData<typeof loader>();
   return (
     <s-page heading="Approvals" inlineSize="large">
       <PayoutRefresh state={payoutRefresh} />
+      {purchase !== null && <s-section><s-banner tone="info" heading={`Purchase #${purchase}`}>{cards.length ? "Current approval and recovery state for this purchase." : "This purchase no longer needs action here. It may be settled, declined, or expired."} <s-link href={`/app/activity?purchase=${purchase}`}>View purchase history</s-link> · <s-link href="/app/approvals">Show all approvals</s-link></s-banner></s-section>}
       <s-section><s-text>After payment, track incoming stock and record received goods in </s-text><s-link href="/app/deliveries">Deliveries</s-link><s-text>.</s-text></s-section>
       {cards.length === 0 ? (
         <s-section>

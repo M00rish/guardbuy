@@ -65,12 +65,14 @@ export type ChainCheck = { valid: true; length: number } | { valid: false; broke
 
 /** Recomputes every hash from the start. Any edited, deleted or reordered row is detected. */
 export async function verifyChain(shop: string): Promise<ChainCheck> {
-  const entries = await auditEntries(shop);
+  const rows = await db.auditEntry.findMany({ where: { shop }, orderBy: { seq: "asc" } });
+  const entries = rows.map(r => ({ ...r, at: r.at.toISOString() }));
   let prev = GENESIS_HASH;
   for (const [i, e] of entries.entries()) {
     if (e.seq !== i) return { valid: false, brokenAtSeq: i, reason: `missing entry ${i}` };
     if (e.prevHash !== prev) return { valid: false, brokenAtSeq: e.seq, reason: "prevHash does not match previous entry" };
-    const expected = entryHash(prev, { seq: e.seq, shop: e.shop, at: e.at, event: e.event });
+    if (!AuditEventSchema.safeParse(e.event).success) return { valid: false, brokenAtSeq: e.seq, reason: "entry schema is invalid" };
+    const expected = sha256Hex(prev + canonicalJson({ seq: e.seq, shop: e.shop, at: e.at, event: e.event }));
     if (expected !== e.hash) return { valid: false, brokenAtSeq: e.seq, reason: "entry content was changed" };
     prev = e.hash;
   }

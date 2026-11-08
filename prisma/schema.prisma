@@ -186,3 +186,48 @@ model PrivacyBlock {
   createdAt DateTime @default(now())
   purgedAt DateTime?
 }
+
+// Opt-in private Telegram routing. Pairing tokens are hashed, expire after ten minutes.
+model AlertChannel {
+  shop String @id
+  generation String @default(cuid())
+  enabled Boolean @default(false)
+  chatId String?
+  tokenHash String? @unique
+  expiresAt DateTime?
+  pendingChatId String?
+  attempts Int @default(0)
+  createdAt DateTime @default(now())
+  cursors AlertCursor[]
+  messages MerchantAlert[]
+}
+
+model AlertCursor {
+  shop String
+  subject String
+  state String
+  revision Int @default(1)
+  channel AlertChannel @relation(fields: [shop], references: [shop], onDelete: Cascade)
+  @@id([shop, subject])
+}
+
+// No purchase payload, credentials, provider identifiers or raw error bodies are stored here.
+model MerchantAlert {
+  id String @id @default(cuid())
+  shop String
+  generation String
+  subject String
+  revision Int
+  kind String
+  state String
+  decisionSeq Int?
+  status String @default("pending")
+  attempts Int @default(0)
+  availableAt DateTime @default(now())
+  lockedUntil DateTime?
+  sentAt DateTime?
+  createdAt DateTime @default(now())
+  channel AlertChannel @relation(fields: [shop], references: [shop], onDelete: Cascade)
+  @@unique([shop, subject, revision])
+  @@index([status, availableAt])
+}

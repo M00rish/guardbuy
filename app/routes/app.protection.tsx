@@ -16,8 +16,9 @@ import { Empty, Metric, Metrics } from "../components/ui";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await privateAdmin(request);
-  const log = await auditEntries(session.shop);
-  const [score, chain, share] = await Promise.all([scoreboard(session.shop, log), verifyChain(session.shop), shareVerifyDetails(session.shop)]);
+  const chain = await verifyChain(session.shop);
+  const log = chain.valid ? await auditEntries(session.shop) : [];
+  const [score, share] = await Promise.all([scoreboard(session.shop, log), shareVerifyDetails(session.shop)]);
   const lastPayment = log.filter((e) => e.event.type === "payout" || e.event.type === "order_captured").at(-1);
   const lastId = lastPayment?.event.type === "payout" ? lastPayment.event.payoutBatchId : lastPayment?.event.type === "order_captured" ? lastPayment.event.orderId : null;
   return { demoAvailable: demoEnabled(session.shop, { enabled: process.env.GUARDBUY_PUBLIC_DEMO_ENABLED, shop: process.env.GUARDBUY_DEMO_STORE, paypalBase: process.env.PAYPAL_API_BASE }), ...score, chain, share, verifyUrl: process.env.SHOPIFY_APP_URL ? `${process.env.SHOPIFY_APP_URL}/verify${lastId ? `?id=${lastId}` : ""}` : null };
@@ -39,6 +40,7 @@ export default function Protection() {
 
   return (
     <s-page heading="Protection" inlineSize="large">
+      {!chain.valid && <s-section><s-banner tone="critical" heading="Audit-log verification failed">Entry #{chain.brokenAtSeq}: {chain.reason}. Purchase metrics below are unavailable and shown as zero. Investigate before approving any purchases.</s-banner></s-section>}
       <s-section>
         <Metrics>
           <Metric label="Purchases checked" value={String(real.decisions)} detail="Every one by every rule" />

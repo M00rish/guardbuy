@@ -1,0 +1,28 @@
+# Telegram alerts (ISM-36)
+
+Optional and disabled by default. One private chat per shop. Notifications never approve, resume, capture or retry a payment; only the authenticated app/PayPal flows can do that.
+
+## Operator setup
+
+1. Create a bot through Telegram @BotFather. Keep its token in the hosting service's secret manager. Set `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME` (without @), `TELEGRAM_WEBHOOK_SECRET` (32–256 random URL-safe characters), `SHOPIFY_API_KEY`, and `TELEGRAM_ALERTS_ENABLED=true`. A malformed configuration disables both the worker and webhook. Do not put secrets in issue comments, command history, screenshots or browser JavaScript.
+2. Apply database migrations and deploy the reviewed build. Register the public HTTPS endpoint `https://<app-host>/telegram/webhook` with Telegram `setWebhook`, supplying the matching `secret_token` and `allowed_updates=["message"]`. Use a trusted operator script or API client reading secrets directly from the environment; don't paste a token-bearing URL into a terminal or ticket. This PR does not register a webhook or deploy.
+3. In authenticated GuardBuy → Alerts, select Connect Telegram. Open the generated ten-minute link, press Start in the private bot chat, and enter its six-digit connection code back in GuardBuy. Alerts start only after that confirmation. Forwarding a link alone cannot enable routing. Five incorrect code submissions lock that connection; start a new one. Reconnecting invalidates the previous link, chat and queued history.
+4. Test the private chat and authenticated Shopify app links on desktop and mobile. External links use Shopify's embedded-admin URL rooted at the configured API key. A notification purchase link selects the current approval/recovery card and skips the existing automatic Orders capture sweep; settled/expired purchases show a history link. Confirm the installed app's navigation behavior manually.
+
+## Delivery and recovery
+
+The independent server worker scans persisted audit history every 15 seconds and drains the durable outbox roughly every 1.2 seconds. No open browser is needed. The server **must remain running**: a sleeping free Render instance cannot send until it wakes. There is no external scheduler or wake service. After restart, current unresolved states are reconstructed from the audit log.
+
+The scan prioritizes approval, unknown/unpaid/pending payments, definite failures/returns, restock preparation failures and broken audit chains. Unknown requests get a ten-second grace period, normal submitted payments fifteen minutes. Definite failures and restock failures have a seven-day lookback; unresolved financial outcomes remain eligible after approval expiry. Demo/scenario proposals are excluded. Transitions are deduplicated per purchase; resolved queue entries are cancelled. Current state, subscription generation and privacy suppression are checked again before sending. Notifications do not acquire payment leases or write payment/audit records.
+
+Telegram has **no sendMessage idempotency key**. An explicit API rejection with code 429 or 5xx backs off (respecting bounded retry_after), for at most five attempts. Permanent rejections show Delivery failed. A timeout, lost response, invalid response or expired sending lease shows **Delivery unconfirmed**, with no automatic replay: the message might have arrived. In Alerts, the merchant must accept a possible duplicate notification before retrying. Such a retry is revalidated against the current purchase state and cannot retry its payment. If a pairing message fails, start a new connection.
+
+Messages use fixed text, a shop/app link and an internal purchase reference only. They omit product/supplier text, supplier emails, payment/account IDs, amounts, credentials, provider error bodies and approval/capture URLs. Link previews are disabled and content protection requested. Telegram necessarily receives routing IDs and the app link. It has its own retention and privacy terms.
+
+Disconnect, uninstall and shop-redaction remove the channel, outbox and dedup cursors. Owner erasure also deletes these records; database privacy triggers prevent recreation after suppression. A request already handed to Telegram cannot be recalled. Notification history has a thirty-day cutoff cleaned during scans; pairing records expire after ten minutes and are removed by the running worker. Dedup cursors remain until disconnect so old unresolved states do not produce repeated alerts after history cleanup.
+
+## Verification and manual acceptance
+
+`npx tsx scripts/check-alerts.ts` refuses anything except loopback Postgres database `guardbuy_ism36_test`. It sets explicit fake credentials and uses a loopback Telegram fixture; the test-origin override is honored only under NODE_ENV=test plus the explicit test opt-in. Tests exercise pairing, concurrency, background delivery, privacy, state transitions and ambiguous-send recovery with real migrated Postgres. CI retains exactly the **Typecheck** and **Tests** jobs and attaches `telegram-alerts-proof`.
+
+Manual checks after an approved deployment: pair a private Telegram chat; close GuardBuy; create an approval; follow the alert into that exact purchase; confirm opening it moves no money; check failed/returned and uncertain-payment wording and original-payment recovery; settle/decline before following an older alert; stop/restart the server; test disconnect/reconnect; verify another store/staff account cannot see or act on the purchase. Use sandbox payments and test data. Live bot delivery and Shopify embedded navigation remain owner acceptance checks.
