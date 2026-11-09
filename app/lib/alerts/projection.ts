@@ -109,7 +109,7 @@ export const ALERT_TEXT: Record<string, string> = {
   restock:
     "A restock could not be prepared. Open GuardBuy Activity to review it.",
   integrity:
-    "GuardBuy audit-log verification failed. Open Protection and investigate before approving purchases.",
+    "GuardBuy audit-log verification failed. Open Activity and investigate before approving purchases.",
 };
 
 export function purchaseParam(url: string) {

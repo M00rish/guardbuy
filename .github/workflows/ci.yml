@@ -65,7 +65,7 @@ jobs:
         env:
           POSTGRES_CONTAINER_ID: ${{ job.services.postgres.id }}
         run: |
-          for test_database in guardbuy_ism135_test guardbuy_ism43_test guardbuy_ism42_test guardbuy_ism15_test guardbuy_ism36_test; do
+          for test_database in guardbuy_ism135_test guardbuy_ism43_test guardbuy_ism42_test guardbuy_ism15_test guardbuy_ism36_test guardbuy_ism141_test; do
             docker exec "$POSTGRES_CONTAINER_ID" createdb -U postgres "$test_database"
             test_database_url="postgresql://postgres:offline-only@127.0.0.1:5432/$test_database"
             DATABASE_URL="$test_database_url" DIRECT_URL="$test_database_url" npx prisma migrate deploy
@@ -102,6 +102,11 @@ jobs:
           DIRECT_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism36_test
           GUARDBUY_ALERT_EVIDENCE_PATH: alerts-results.json
         run: npx tsx scripts/check-alerts.ts
+      - name: Consolidated merchant navigation
+        env:
+          DATABASE_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism141_test
+          DIRECT_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism141_test
+        run: npx tsx scripts/check-navigation.ts
       - uses: actions/upload-artifact@v4
         if: always()
         with:

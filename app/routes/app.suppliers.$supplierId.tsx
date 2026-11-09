@@ -52,7 +52,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const f = await request.formData();
   if (f.get("intent") === "remove") {
     await removeSupplier(session.shop, id);
-    return redirect("/app/suppliers");
+    return redirect("/app/products?tab=suppliers");
   }
   const name = String(f.get("name") ?? "").trim();
   const paypalEmail = String(f.get("paypalEmail") ?? "").trim();
@@ -76,7 +76,7 @@ export default function Supplier() {
 
   return (
     <s-page heading={s.name} inlineSize="large">
-      <s-link slot="breadcrumb-actions" href="/app/suppliers">Suppliers</s-link>
+      <s-link slot="breadcrumb-actions" href="/app/products?tab=suppliers">Suppliers</s-link>
 
       {s.emailChangedAt && (
         <s-banner tone="warning" heading={`PayPal email changed on ${date(s.emailChangedAt)}`}>
@@ -90,7 +90,7 @@ export default function Supplier() {
           <Row label="In your rules">
             {s.approved === null ? <s-text tone="neutral">No rules signed yet</s-text>
               : s.approved ? <s-badge tone="success">Approved: the agent may buy from them</s-badge>
-              : <s-stack direction="inline" gap="small-200" alignItems="center"><s-badge tone="caution">Not approved: purchases are blocked</s-badge><s-link href="/app/rules">Edit rules</s-link></s-stack>}
+              : <s-stack direction="inline" gap="small-200" alignItems="center"><s-badge tone="caution">Not approved: purchases are blocked</s-badge><s-link href="/app/rules?tab=rules">Edit rules</s-link></s-stack>}
           </Row>
           <Row label="Added"><s-text>{date(s.addedAt)}</s-text></Row>
           <fetcher.Form method="post">

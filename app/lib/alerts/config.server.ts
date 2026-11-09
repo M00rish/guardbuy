@@ -24,12 +24,10 @@ export function merchantLink(shop: string, kind: string, decisionSeq?: number) {
   if (!config || !/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/.test(shop))
     throw new Error("Invalid alert destination");
   const store = shop.slice(0, -".myshopify.com".length);
-  const path =
-    kind === "integrity"
-      ? "protection"
-      : kind === "restock"
-        ? "activity"
-        : "approvals";
+  const activity = kind === "integrity" || kind === "restock";
+  const params = new URLSearchParams(activity ? {} : { tab: "approvals" });
+  if (decisionSeq !== undefined) params.set("purchase", String(decisionSeq));
   // Same embedded-admin root as Shopify SDK buildEmbeddedAppUrl; no bearer token in the link.
-  return `https://admin.shopify.com/store/${store}/apps/${config.apiKey}/app/${path}${decisionSeq === undefined ? "" : `?purchase=${decisionSeq}`}`;
+  const query = params.size ? `?${params}` : "";
+  return `https://admin.shopify.com/store/${store}/apps/${config.apiKey}/app/${activity ? "activity" : "rules"}${query}`;
 }
