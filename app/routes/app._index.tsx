@@ -1,3 +1,4 @@
+import { currentProblems } from "../lib/merchant/current-problems";
 import { budgetSummary } from "../lib/payments/status";
 import { useEffect, useState } from "react";
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
@@ -34,7 +35,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const running = ready && agentOn(log);
   const signed = log.filter((e) => e.event.type === "ruleset_signed").at(-1);
   const firstPurchase = log.some((e) => e.event.type === "payout" || e.event.type === "order_captured");
-  const recentFailure = log.filter((e) => e.event.type === "payment_failed" || e.event.type === "proposal_failed").filter((e) => Date.now() - Date.parse(e.at) < 86_400_000 && !("scenario" in e.event && e.event.scenario));
+  const problems = currentProblems(log);
 
   return {
     ready,
@@ -57,7 +58,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     attacksBlocked: score.attacks.blocked + score.attacks.flagged,
     chain,
     head: log.at(-1)?.hash ?? null,
-    failures: recentFailure.length,
+    problems,
     firstPurchase,
     products: products && products.map((p) => ({ ...p, cover: Number.isFinite(p.cover) ? Number(p.cover.toFixed(1)) : null, status: productStatus(log, p, rules, running) })),
     recent: toFeed(log, actor, names).filter((f) => f.kind !== "status").slice(0, 6),
@@ -135,9 +136,11 @@ export default function Home() {
               <s-link href="/app/rules?tab=approvals">Review now</s-link>
             </s-banner>
           )}
-          {d.failures > 0 && (
-            <s-banner tone="critical" heading={`${plural(d.failures, "problem")} in the last 24 hours`}>
-              A payment or an AI call failed; GuardBuy retries automatically. <s-link href="/app/activity">See activity</s-link>
+          {d.problems.payments + d.problems.proposals > 0 && (
+            <s-banner tone="critical" heading={`${plural(d.problems.payments + d.problems.proposals, "current problem")}`}>
+              {d.problems.payments > 0 && <s-paragraph>Review unpaid purchases in <s-link href="/app/rules?tab=approvals">Approvals</s-link>. Check the original payment status before retrying.</s-paragraph>}
+              {d.problems.proposals > 0 && <s-paragraph>An AI proposal failed. Review the error in Activity before trying another restock.</s-paragraph>}
+              <s-link href="/app/activity">See activity and failure history</s-link>
             </s-banner>
           )}
           {lowBalance && (

@@ -1,3 +1,4 @@
+import { PaymentSafetyRefusal } from "./safety-refusal";
 import { deliveries } from "../inventory/deliveries";
 import type { AuditEntry, AuditEvent } from "../policy/schema";
 
@@ -121,10 +122,10 @@ export async function runPaymentAttempt(candidate: Attempt, ports: Ports): Promi
   if ((ports.now ?? Date.now)() >= Date.parse(attempt.retryUntil)) throw new PaymentPending();
   // Safety checks may refuse a replay that could otherwise perform a first payment. Keep the reservation.
   try { await ports.beforeSend(attempt); }
-  catch {
+  catch (error) {
     if (fresh && !attempt.previouslyUncertain) {
       await ports.append({ type: "payment_outcome", decisionSeq: attempt.decisionSeq, attemptId: attempt.attemptId, status: "failed" });
-      throw new PaymentRejected("Payment was not submitted because current safety checks or account access could not be confirmed.");
+      throw new PaymentRejected(error instanceof PaymentSafetyRefusal ? error.message : "Payment was not submitted because current safety checks or account access could not be confirmed.");
     }
     throw new PaymentPending();
   }

@@ -37,7 +37,7 @@ const pass = (name: string) => {
 };
 await build({
   stdin: {
-    contents: `export {loader as products,action as productsAction} from './app/routes/app.products._index';export {loader as rules,action as rulesAction} from './app/routes/app.rules';export {loader as activity,action as activityAction} from './app/routes/app.activity';export {loader as oldSuppliers,action as oldSupplierAction} from './app/routes/app.suppliers._index';export {loader as oldApprovals,action as oldApprovalAction} from './app/routes/app.approvals';export {loader as oldProtection,action as oldProtectionAction} from './app/routes/app.protection';export {action as productAction} from './app/routes/app.products.$variantId';export {action as supplierAction} from './app/routes/app.suppliers.$supplierId';`,
+    contents: `export {approvePurchase as realApprove} from './app/lib/agent/approvals.server.ts';export {loader as products,action as productsAction} from './app/routes/app.products._index';export {loader as rules,action as rulesAction} from './app/routes/app.rules';export {loader as activity,action as activityAction} from './app/routes/app.activity';export {loader as oldSuppliers,action as oldSupplierAction} from './app/routes/app.suppliers._index';export {loader as oldApprovals,action as oldApprovalAction} from './app/routes/app.approvals';export {loader as oldProtection,action as oldProtectionAction} from './app/routes/app.protection';export {action as productAction} from './app/routes/app.products.$variantId';export {action as supplierAction} from './app/routes/app.suppliers.$supplierId';`,
     resolveDir: root,
     loader: "ts",
   },
@@ -291,7 +291,8 @@ try {
     (e: unknown) =>
       e instanceof Response && e.headers.get("Location") === "/app",
   );
-  const signed = await routes.rules(args("/app/rules"));
+  assert.equal((await routes.rules(args("/app/rules?payoutRefresh=1"))).tab, "approvals");
+  const signed = await routes.rules(args("/app/rules?tab=rules"));
   assert.equal(signed.tab, "rules");
   assert.equal(signed.approvals, null);
   assert.equal(signed.rules.history[0].by, "you");
@@ -310,7 +311,7 @@ try {
   assert.equal((await auditEntries(shop)).length, 2);
   assert.equal(counters.__navigationSweeps ?? 0, 0);
   pass(
-    "Rules default tab validates and signs with staff history; visiting or signing never captures payments",
+    "Explicit Rules tab validates and signs with staff history; visiting or signing never captures payments",
   );
   await appendAudit(shop, {
     type: "proposal",
@@ -351,6 +352,19 @@ try {
   pass(
     "Purchase-specific approvals and status refresh preserve the no-capture rule; queue visits retain their existing sweep",
   );
+  Object.assign(process.env, { PAYPAL_CLIENT_ID: "offline-client", PAYPAL_CLIENT_SECRET: "offline-secret", GUARDBUY_PAYPAL_STORES: JSON.stringify({[shop]:{clientId:"offline-client",payerIds:["OFFLINEPAYER"]}}) });
+  await db.managedProduct.updateMany({where:{shop},data:{managed:false}});
+  const originalFetch = globalThis.fetch; let outbound = 0;
+  globalThis.fetch = async () => { outbound++; throw new Error("Provider access forbidden in product-off test"); };
+  try {
+    const refusal = await routes.realApprove(shop, 3, "shopify-staff:offline-staff");
+    assert.equal(refusal.paid, false);assert.match(refusal.message, /restocking is switched off/);assert.equal(outbound,0);
+    const persisted = await routes.rules(args("/app/rules?tab=approvals&purchase=3"));
+    assert.equal(persisted.approvals.cards[0].status,"payment_failed");
+    assert.match(persisted.approvals.cards[0].paymentReason,/Turn it on in Products & suppliers/);
+    assert.ok(!(await auditEntries(shop)).some(e=>e.event.type==="payout"));
+  } finally { globalThis.fetch = originalFetch; }
+  pass("Confirmed product-off refusal persists a useful reason without a single provider request");
   for (const intent of ["approve", "retry", "paypal", "resume"])
     await routes.rulesAction(
       args("/app/rules?tab=approvals", { intent, decisionSeq: "3" }),

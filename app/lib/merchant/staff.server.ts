@@ -1,7 +1,10 @@
+import { redirect } from "react-router";
+import { needsShopifyEntry } from "./app-entry";
 import { assertPrivacyActive } from "../privacy/state.server";
 import { authenticate } from "../../shopify.server";
 
 export async function privateAdmin(request: Request) {
+  if (needsShopifyEntry(request)) throw redirect("/auth/login");
   const ctx = await authenticate.admin(request);
   await assertPrivacyActive(ctx.session.shop);
   return ctx;

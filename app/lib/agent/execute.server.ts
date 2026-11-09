@@ -1,6 +1,7 @@
 import db from "../../db.server";
 import { assertPrivacyActive } from "../privacy/state.server";
 import { appendAuditWhen, auditEntries } from "../audit/log.server";
+import { PaymentSafetyRefusal } from "../payments/safety-refusal";
 import { paypal } from "../paypal/client.server";
 import { allowedStorePayer, paypalStoreBinding } from "../paypal/config.server";
 import { runPayPalTool } from "../paypal/toolkit.server";
@@ -140,13 +141,14 @@ async function recheckAtPayment(shop: string, decisionSeq: number, opts: { appro
     throw new ExecutionRefused(`Decision ${decisionSeq} expired: approvals are valid for 48 hours`);
   }
   const rules = currentRuleSet(log);
-  if (!rules) throw new ExecutionRefused("No signed rules");
+  if (!rules) throw new PaymentSafetyRefusal("rules_unsigned");
   if (!opts.approvedByPerson && !agentOn(log)) throw new ExecutionRefused("The agent is paused");
 
-  const [managed, offers, balance] = await Promise.all([
-    proposal.variantId ? isManaged(shop, proposal.variantId) : Promise.resolve(false),
+  const managed = proposal.variantId ? await isManaged(shop, proposal.variantId) : false;
+  if (!managed) throw new PaymentSafetyRefusal("product_off");
+  const [offers, balance] = await Promise.all([
     proposal.variantId ? offersForVariant(shop, proposal.variantId) : Promise.resolve([]),
-    paypalBalanceCents({ shop, decisionSeq }),
+    paypalBalanceCents({ shop, decisionSeq }, { reportAccessFailure: true }),
   ]);
   const fresh = evaluate(proposal, rules, policyContext(proposal, log, balance, { managed, offers, suppliers: await supplierRoster(shop) }, new Date(), decisionSeq));
   const reasons = (verdict: string) => fresh.checks.filter((c) => c.outcome === verdict).map((c) => c.detail).join("; ");

@@ -49,7 +49,7 @@ export function ApprovalsPanel({ data }: { data: ApprovalPageData }) {
   const { cards, payoutRefresh, purchase } = data;
   return (
     <s-stack gap="base">
-      <PayoutRefresh state={payoutRefresh} />
+      <PayoutRefresh state={payoutRefresh} watch={cards.some(card => card.status === "payment_pending")} />
       {purchase !== null && (
         <s-section>
           <s-banner tone="info" heading={`Purchase #${purchase}`}>

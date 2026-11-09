@@ -57,6 +57,7 @@ jobs:
       - run: npx tsx scripts/check-verify-status.ts
       - run: npx tsx scripts/check-payment-http.ts
       - run: npx tsx scripts/check-paypal-errors.ts
+      - run: npx tsx scripts/check-merchant-feedback.ts
       - run: npx tsx scripts/check-policy.ts
       - run: npx tsx scripts/check-scoreboard.ts
       - run: node --import tsx scripts/check-checkpoints.ts
@@ -106,7 +107,9 @@ jobs:
         env:
           DATABASE_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism141_test
           DIRECT_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism141_test
-        run: npx tsx scripts/check-navigation.ts
+        run: |
+          npx tsx scripts/check-navigation.ts
+          npx tsx scripts/check-app-entry.ts
       - uses: actions/upload-artifact@v4
         if: always()
         with:
