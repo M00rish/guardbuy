@@ -95,9 +95,9 @@ export default function Home() {
   const busy = fetcher.state !== "idle";
   const steps = [
     { done: d.setup.managedProducts > 0, label: "Switch on the products GuardBuy may restock", why: "GuardBuy only ever buys products you switch on.", action: "Choose products", href: "/app/products" },
-    { done: d.setup.suppliers > 0, label: "Add your suppliers", why: "GuardBuy only pays suppliers you add, at the PayPal email you enter.", action: "Add a supplier", href: "/app/suppliers" },
+    { done: d.setup.suppliers > 0, label: "Add your suppliers", why: "GuardBuy only pays suppliers you add, at the PayPal email you enter.", action: "Add a supplier", href: "/app/products?tab=suppliers" },
     { done: d.setup.managedWithSuppliers > 0, label: "Link a supplier to each product", why: "Tells the agent who sells each product, and at what price.", action: "Link suppliers", href: "/app/products?view=managed" },
-    { done: !!d.rules, label: "Sign your spending rules", why: "Signing activates automatic purchases within your limits. Flagged purchases still wait for your approval.", action: "Review and sign rules", href: "/app/rules" },
+    { done: !!d.rules, label: "Sign your spending rules", why: "Signing activates automatic purchases within your limits. Flagged purchases still wait for your approval.", action: "Review and sign rules", href: "/app/rules?tab=rules" },
   ];
   const doneSteps = steps.filter((s) => s.done).length;
   const next = steps.findIndex((s) => !s.done);
@@ -112,7 +112,7 @@ export default function Home() {
           {d.running ? "Pause agent" : "Resume agent"}
         </s-button>
       )}
-      <s-button slot="secondary-actions" href="/app/rules">Edit rules</s-button>
+      <s-button slot="secondary-actions" href="/app/rules?tab=rules">Edit rules</s-button>
 
       {/* Status, alerts (only when needed) and the key numbers */}
       <s-section>
@@ -132,7 +132,7 @@ export default function Home() {
           )}
           {d.waiting > 0 && (
             <s-banner tone="warning" heading={`${plural(d.waiting, "purchase")} waiting for your approval`}>
-              <s-link href="/app/approvals">Review now</s-link>
+              <s-link href="/app/rules?tab=approvals">Review now</s-link>
             </s-banner>
           )}
           {d.failures > 0 && (
@@ -156,8 +156,8 @@ export default function Home() {
               <Metric label="Reserved" value={usd(d.budget.reserved)} detail="Pending payments and unexpired approval commitments" />
               <Metric label="Remaining budget" value={usd(d.budget.remaining)} detail={d.budget.over ? `${usd(d.budget.over)} over the cap; review Approvals` : "Cap minus spent and reserved"} />
               <Metric label="PayPal balance after commitments" value={d.balanceCents === null ? "Unavailable" : usd(d.balanceCents)} detail={d.balanceCents === null ? "PayPal unavailable. Refresh this page; check Approvals before retrying a payment." : d.rules ? `Floor ${usd(d.rules.cashFloorCents)}` : undefined} badge={lowBalance ? { tone: "caution", label: "Low" } : undefined} />
-              <Metric label="Waiting for you" value={String(d.waiting)} detail={d.waiting ? "Open Approvals" : "Nothing to approve"} href={d.waiting ? "/app/approvals" : undefined} />
-              <Metric label="Stopped by your rules" value={String(d.blocked.count)} detail={d.blocked.count ? `${usd(d.blocked.cents)} not spent` : "Nothing blocked yet"} href="/app/protection" />
+              <Metric label="Waiting for you" value={String(d.waiting)} detail={d.waiting ? "Open Approvals" : "Nothing to approve"} href={d.waiting ? "/app/rules?tab=approvals" : undefined} />
+              <Metric label="Stopped by your rules" value={String(d.blocked.count)} detail={d.blocked.count ? `${usd(d.blocked.cents)} not spent` : "Nothing blocked yet"} href="/app/activity" />
             </s-grid>
             </s-query-container>
           )}
@@ -224,10 +224,10 @@ export default function Home() {
               <s-text tone="neutral">
                 {d.signed ? `Signed by ${d.signed.by} · ${new Date(d.signed.at).toLocaleDateString(undefined, { month: "short", day: "numeric" })}` : "Not signed yet"}
               </s-text>
-              <s-link href="/app/rules">Edit rules</s-link>
+              <s-link href="/app/rules?tab=rules">Edit rules</s-link>
             </s-stack>
             <s-stack gap="small-200">
-              <s-heading>Protection</s-heading>
+              <s-heading>Audit trail</s-heading>
               <s-stack direction="inline" gap="small-200" alignItems="center">
                 <s-text tone="neutral">Audit log</s-text>
                 <s-badge tone={d.chain.valid ? "success" : "critical"}>
@@ -237,7 +237,6 @@ export default function Home() {
               <Row label="Fingerprint"><s-text>{d.head ? d.head.slice(0, 16) : "None yet"}</s-text></Row>
               <Row label="Blocked"><s-text>{`${plural(d.blocked.count, "purchase")}${d.attacksBlocked > 0 ? ` · ${plural(d.attacksBlocked, "attack")} stopped in tests` : ""}`}</s-text></Row>
               <s-stack direction="inline" gap="base">
-                <s-link href="/app/protection">Protection details</s-link>
                 <s-link href="/app/activity">Verify the log</s-link>
               </s-stack>
             </s-stack>

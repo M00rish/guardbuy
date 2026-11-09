@@ -235,7 +235,7 @@ try {
   assert.match(calls.at(-1)!.text, /waiting for your approval/);
   assert.match(
     calls.at(-1)!.text,
-    /admin.shopify.com\/store\/.*\/apps\/offline-api-key\/app\/approvals\?purchase=1/,
+    /admin.shopify.com\/store\/.*\/apps\/offline-api-key\/app\/rules\?tab=approvals&purchase=1/,
   );
   assert.ok(!/SECRET|secret@|UNTRUSTED|offline_token/.test(calls.at(-1)!.text));
   assert.deepEqual(await auditEntries(shop), before);

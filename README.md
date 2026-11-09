@@ -147,9 +147,9 @@ Public requests never send payments, capture orders, reconcile PayPal or change 
 6. Verify a POST to the public proxy API returns 405, a non-enabled store cannot access either route, and dashboard JSON contains no personal data or payment credentials. Test stock/order API errors: show unavailable or stale data, never an invented zero.
 7. Reset stock only through Shopify Admin or the authenticated backend reset tooling. Never delete production audit history to rerun a demo. Use the isolated environment planned in ISM-137 for repeatable fixture resets.
 
-**Optional attack tests:** enabled demo-store staff can open Protection → Open private demo attack tests (`/app/attack-tests`). Tests use an authenticated staff-specific record namespace, not the real shop’s inventory or orders. The real AI attack and explicitly simulated “AI fooled” options remain separate, and neither pays suppliers. Refresh results after the background AI run finishes. These tests may consume AI API usage.
+**Optional attack tests:** enabled demo-store staff can open Rules & Approvals → Rules → Open private demo attack tests (`/app/attack-tests`). Tests use an authenticated staff-specific record namespace, not the real shop’s inventory or orders. The real AI attack and explicitly simulated “AI fooled” options remain separate, and neither pays suppliers. Refresh results after the background AI run finishes. These tests may consume AI API usage.
 
-**Merchant admin:** Home, Products & suppliers, Suppliers, Rules, Approvals, Activity (audit log) and Protection (rules at work, attack results, public verification settings).
+**Merchant admin:** Home, Products & suppliers (Products and Suppliers tabs), Rules & Approvals (Approvals and Rules tabs), Deliveries, Activity (audit log and public verification settings), and Alerts.
 
 **Public verify page:** `/verify?id=<PayPal payout or order id>` shows whether a payment is on a store's audit log, which signed rules allowed it, and whether the log is intact.
 

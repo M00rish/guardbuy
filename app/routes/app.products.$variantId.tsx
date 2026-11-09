@@ -134,7 +134,7 @@ export default function ProductSuppliers() {
           <s-box paddingBlockEnd="base">
             <s-banner tone="info" heading="Some suppliers aren't approved in your rules">
               The agent may still consider them, but any purchase from them is blocked until you approve them in{" "}
-              <s-link href="/app/rules">your rules</s-link>.
+              <s-link href="/app/rules?tab=rules">your rules</s-link>.
             </s-banner>
           </s-box>
         )}
@@ -180,7 +180,7 @@ export default function ProductSuppliers() {
       <s-section heading="Link a supplier">
         {p.available.length === 0 ? (
           <s-text tone="neutral">
-            Every supplier you added is linked already. <s-link href="/app/suppliers">Add another supplier</s-link>
+            Every supplier you added is linked already. <s-link href="/app/products?tab=suppliers">Add another supplier</s-link>
           </s-text>
         ) : (
           <fetcher.Form method="post">
