@@ -74,11 +74,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 type View = "all" | "money" | "you" | "blocked" | "ai";
-const IN_VIEW: Record<View, (kind: string) => boolean> = {
+const IN_VIEW: Record<View, (kind: string, byYou?: boolean) => boolean> = {
   all: () => true,
   money: (k) => k === "paid" || k === "paypal" || k === "status",
-  you: (k) =>
-    k === "approval" || k === "approved" || k === "declined" || k === "rules",
+  you: (_kind, byYou) => byYou === true,
   blocked: (k) => k === "block" || k === "failed" || k === "slipped",
   ai: (k) =>
     k === "proposed" || k === "attack" || k === "resisted" || k === "flagged",
@@ -100,7 +99,7 @@ export default function Activity() {
   const revalidator = useRevalidator();
   const [view, setView] = useState<View>("all");
   const now = Date.now();
-  const shown = feed.filter((f) => IN_VIEW[view](f.kind)).slice(0, 200);
+  const shown = feed.filter((f) => IN_VIEW[view](f.kind, f.byYou)).slice(0, 200);
 
   return (
     <s-page heading="Activity" inlineSize="large">
@@ -164,8 +163,8 @@ export default function Activity() {
               },
               {
                 id: "you",
-                label: "You",
-                count: feed.filter((f) => IN_VIEW.you(f.kind)).length,
+                label: "Your actions",
+                count: feed.filter((f) => IN_VIEW.you(f.kind, f.byYou)).length,
               },
               {
                 id: "blocked",

@@ -3,7 +3,8 @@ import { approvalExpired, approvalStates } from "./approval-state";
 import { deliveries, incomingFor } from "../inventory/deliveries";
 import { appendAudit, appendAuditWhen, auditEntries } from "../audit/log.server";
 import type { StockCheck } from "../inventory/trigger.server";
-import { paypal } from "../paypal/client.server";
+import { PaymentSafetyRefusal } from "../payments/safety-refusal";
+import { paypal, PayPalError } from "../paypal/client.server";
 import { evaluate, SPLIT_WINDOW_HOURS, type PolicyContext } from "../policy/engine";
 import { hashOf } from "../policy/hash";
 import { RuleSetSchema, type AuditEntry, type RecordedProposal, type RuleSet } from "../policy/schema";
@@ -78,7 +79,7 @@ export function signRuleSet(shop: string, rules: RuleSet, signedBy: string) {
  * report's "as of" time are subtracted; a burst of purchases can't all see the same stale balance.
  * (Demo: one PayPal account serves every shop, so payments from all shops count.)
  */
-export async function paypalBalanceCents(exclude?: { shop: string; decisionSeq: number }): Promise<number | null> {
+export async function paypalBalanceCents(exclude?: { shop: string; decisionSeq: number }, options: { reportAccessFailure?: boolean } = {}): Promise<number | null> {
   try {
     const res = await paypal<{ as_of_time?: string; balances?: { currency: string; available_balance?: { value: string } }[] }>(
       "/v1/reporting/balances?currency_code=USD",
@@ -87,6 +88,7 @@ export async function paypalBalanceCents(exclude?: { shop: string; decisionSeq: 
     if (usd === undefined) return null;
     return adjustForLag(Math.round(Number(usd) * 100), res.as_of_time ? new Date(res.as_of_time) : null, exclude);
   } catch (e) {
+    if (options.reportAccessFailure && e instanceof PayPalError && (e.status === 401 || e.status === 403)) throw new PaymentSafetyRefusal("account_access");
     console.warn(`[restock] balance unavailable: ${(e as Error).message}`);
     return null;
   }

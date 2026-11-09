@@ -154,7 +154,7 @@ export function DeliveriesPage({ data }: { data: Data }) {
                     </s-stack></s-table-cell>
                     <s-table-cell><s-stack gap="small-200">{canReceive
                       ? <s-button variant="tertiary" disabled={busy} onClick={() => open(row)}>{row.pending ? "Confirm receipt" : "Receive"}</s-button>
-                      : <s-button variant="tertiary" href="/app/activity">View activity</s-button>}
+                      : <s-button variant="tertiary" href={`/app/activity?purchase=${row.decisionSeq}`}>View activity</s-button>}
                     {row.remaining > 0 && !row.pending && row.payment !== "pending" && <s-button variant="tertiary" disabled={busy} onClick={() => openManagement(row)}>Manage delivery</s-button>}
                     </s-stack></s-table-cell>
                   </s-table-row>;

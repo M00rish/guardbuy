@@ -15,9 +15,9 @@ import { ApprovalsPanel } from "../components/approval-page";
 
 export const loader = async (args: LoaderFunctionArgs) => {
   const tab =
-    new URL(args.request.url).searchParams.get("tab") === "approvals"
-      ? "approvals"
-      : "rules";
+    new URL(args.request.url).searchParams.get("tab") === "rules"
+      ? "rules"
+      : "approvals";
   // Editing rules must not invoke the approval page's existing Order capture sweep.
   return {
     tab,
