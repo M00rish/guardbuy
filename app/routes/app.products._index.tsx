@@ -35,24 +35,26 @@ export default function ProductsAndSuppliers() {
   const data = useLoaderData<typeof loader>();
   return (
     <s-page heading="Products & suppliers" inlineSize="large">
-      <s-section>
-        <s-stack direction="inline" gap="base">
-          <s-button
-            href="/app/products"
-            variant={data.tab === "products" ? "secondary" : "tertiary"}
-          >
-            Products
-          </s-button>
-          <s-button
-            href="/app/products?tab=suppliers"
-            variant={data.tab === "suppliers" ? "secondary" : "tertiary"}
-          >
-            Suppliers
-          </s-button>
-        </s-stack>
-      </s-section>
-      {data.products && <ProductsPanel data={data.products} />}
-      {data.suppliers && <SuppliersPanel data={data.suppliers} />}
+      <s-stack gap="base">
+        <s-section>
+          <s-stack direction="inline" gap="base">
+            <s-button
+              href="/app/products"
+              variant={data.tab === "products" ? "secondary" : "tertiary"}
+            >
+              Products
+            </s-button>
+            <s-button
+              href="/app/products?tab=suppliers"
+              variant={data.tab === "suppliers" ? "secondary" : "tertiary"}
+            >
+              Suppliers
+            </s-button>
+          </s-stack>
+        </s-section>
+        {data.products && <ProductsPanel data={data.products} />}
+        {data.suppliers && <SuppliersPanel data={data.suppliers} />}
+      </s-stack>
     </s-page>
   );
 }

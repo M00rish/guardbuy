@@ -36,24 +36,26 @@ export default function RulesAndApprovals() {
   const data = useLoaderData<typeof loader>();
   return (
     <s-page heading="Rules & Approvals" inlineSize="large">
-      <s-section>
-        <s-stack direction="inline" gap="base">
-          <s-button
-            href="/app/rules?tab=approvals"
-            variant={data.tab === "approvals" ? "secondary" : "tertiary"}
-          >
-            Approvals
-          </s-button>
-          <s-button
-            href="/app/rules?tab=rules"
-            variant={data.tab === "rules" ? "secondary" : "tertiary"}
-          >
-            Rules
-          </s-button>
-        </s-stack>
-      </s-section>
-      {data.approvals && <ApprovalsPanel data={data.approvals} />}
-      {data.rules && <RulesEditor data={data.rules} />}
+      <s-stack gap="base">
+        <s-section>
+          <s-stack direction="inline" gap="base">
+            <s-button
+              href="/app/rules?tab=approvals"
+              variant={data.tab === "approvals" ? "secondary" : "tertiary"}
+            >
+              Approvals
+            </s-button>
+            <s-button
+              href="/app/rules?tab=rules"
+              variant={data.tab === "rules" ? "secondary" : "tertiary"}
+            >
+              Rules
+            </s-button>
+          </s-stack>
+        </s-section>
+        {data.approvals && <ApprovalsPanel data={data.approvals} />}
+        {data.rules && <RulesEditor data={data.rules} />}
+      </s-stack>
     </s-page>
   );
 }

@@ -39,7 +39,7 @@ export function ProductsPanel({ data }: { data: ProductsPageData }) {
   const count = (v: View) => products.filter((p) => inView(p, v)).length;
 
   return (
-    <>
+    <s-stack gap="base">
       {supplierCount === 0 && (
         <s-banner tone="info" heading="Add your suppliers first">
           GuardBuy can only buy from suppliers you add, with the PayPal email
@@ -182,6 +182,6 @@ export function ProductsPanel({ data }: { data: ProductsPageData }) {
           )}
         </s-stack>
       </s-section>
-    </>
+    </s-stack>
   );
 }

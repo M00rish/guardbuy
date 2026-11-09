@@ -17,7 +17,7 @@ export function SuppliersPanel({ data }: { data: SuppliersPageData }) {
   }, [add.state, add.data, shopify]);
 
   return (
-    <>
+    <s-stack gap="base">
       <s-section heading="Add a supplier">
         <add.Form method="post" action="/app/products?tab=suppliers">
           <input type="hidden" name="intent" value="add-supplier" />
@@ -97,6 +97,6 @@ export function SuppliersPanel({ data }: { data: SuppliersPageData }) {
           </s-table>
         )}
       </s-section>
-    </>
+    </s-stack>
   );
 }

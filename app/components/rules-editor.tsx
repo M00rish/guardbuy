@@ -91,7 +91,7 @@ export function RulesEditor({ data }: { data: RulesPageData }) {
   );
 
   return (
-    <>
+    <s-stack gap="base">
       <s-section>
         {signed && current ? (
           <s-stack direction="inline" gap="small-200" alignItems="center">
@@ -118,148 +118,151 @@ export function RulesEditor({ data }: { data: RulesPageData }) {
         onChange={reread}
       >
         <input type="hidden" name="intent" value="sign-rules" />
-        <s-section heading="When to buy, and how much">
-          <s-query-container>
-            <s-grid
-              gridTemplateColumns="@container (inline-size <= 640px) 1fr, 1fr 1fr 1fr"
-              gap="base"
-            >
-              {field(
-                "reorderBelowDaysOfCover",
-                "Restock when stock lasts fewer than (days)",
-                "Based on each product's recent sales",
-                { min: 1, step: 1 },
-              )}
-              {field(
-                "targetDaysOfCover",
-                "Buy enough for (days)",
-                "The agent's suggested quantity aims for this",
-                { min: 1, step: 1 },
-              )}
-              {field(
-                "maxQuantityMultiple",
-                "Largest order (times the usual)",
-                "Blocks orders this many times above a supplier’s usual order",
-                { min: 1, step: 0.5 },
-              )}
-            </s-grid>
-          </s-query-container>
-        </s-section>
-
-        <s-section heading="Money">
-          <s-query-container>
-            <s-grid
-              gridTemplateColumns="@container (inline-size <= 640px) 1fr, 1fr 1fr 1fr"
-              gap="base"
-            >
-              {field(
-                "approvalAbove",
-                "Ask me above ($)",
-                "Bigger purchases wait in Approvals",
-                { min: 0, step: 1 },
-              )}
-              {field(
-                "weeklySpendCap",
-                "Last 7 days spending cap ($)",
-                "Rolling 7 days, all suppliers",
-                { min: 0, step: 1 },
-              )}
-              {field(
-                "cashFloor",
-                "Keep at least this in PayPal ($)",
-                "Purchases that would go below are blocked",
-                { min: 0, step: 1 },
-              )}
-              {field(
-                "priceTolerance",
-                "Price increase without asking ($ per unit)",
-                "Above the price you entered or last approved",
-                { min: 0, step: 0.05 },
-              )}
-              {field(
-                "maxPurchasesPer24h",
-                "Purchases per 24 hours",
-                "Across all products",
-                { min: 1, step: 1 },
-              )}
-            </s-grid>
-          </s-query-container>
-        </s-section>
-
-        <s-section heading="Approved suppliers">
-          <s-stack gap="small-200">
-            {suppliers.length === 0 ? (
-              <Empty
-                heading="No suppliers yet"
-                action={{
-                  label: "Add a supplier",
-                  href: "/app/products?tab=suppliers",
-                }}
+        <s-stack gap="base">
+          <s-section heading="When to buy, and how much">
+            <s-query-container>
+              <s-grid
+                gridTemplateColumns="@container (inline-size <= 640px) 1fr, 1fr 1fr 1fr"
+                gap="base"
               >
-                GuardBuy can only buy from suppliers you add and approve here.
-              </Empty>
-            ) : (
-              suppliers.map((s) => (
-                <s-checkbox
-                  key={s.id}
-                  name="allow"
-                  value={s.id}
-                  label={s.name}
-                  details={
-                    s.products
-                      ? `Linked to ${s.products} ${s.products === 1 ? "product" : "products"}`
-                      : "Not linked to any product yet"
-                  }
-                  {...(saved.allow.includes(s.id) ? { checked: true } : {})}
-                />
-              ))
-            )}
-            {errors.allow && suppliers.length > 0 ? (
-              <s-text tone="critical">{errors.allow}</s-text>
-            ) : (
-              <s-text tone="neutral">
-                Purchases from any supplier you do not select are blocked, even
-                if it is linked to a product.
-              </s-text>
-            )}
-          </s-stack>
-        </s-section>
+                {field(
+                  "reorderBelowDaysOfCover",
+                  "Restock when stock lasts fewer than (days)",
+                  "Based on each product's recent sales",
+                  { min: 1, step: 1 },
+                )}
+                {field(
+                  "targetDaysOfCover",
+                  "Buy enough for (days)",
+                  "The agent's suggested quantity aims for this",
+                  { min: 1, step: 1 },
+                )}
+                {field(
+                  "maxQuantityMultiple",
+                  "Largest order (times the usual)",
+                  "Blocks orders this many times above a supplier’s usual order",
+                  { min: 1, step: 0.5 },
+                )}
+              </s-grid>
+            </s-query-container>
+          </s-section>
 
-        <s-section heading="In plain words">
-          <s-stack gap="base">
-            <s-text>{rulesSummary(form, names)}</s-text>
-            <s-stack direction="inline" gap="base" alignItems="center">
-              <s-button
-                type="submit"
-                variant="primary"
-                disabled={busy || !canSign}
-                {...(busy ? { loading: true } : {})}
+          <s-section heading="Money">
+            <s-query-container>
+              <s-grid
+                gridTemplateColumns="@container (inline-size <= 640px) 1fr, 1fr 1fr 1fr"
+                gap="base"
               >
-                {signed ? "Sign updated rules" : "Sign these rules"}
-              </s-button>
-              {changed && signed && (
-                <s-badge tone="caution">Unsaved changes</s-badge>
-              )}
-              {signed && changed && (
-                <s-button
-                  variant="tertiary"
-                  disabled={busy}
-                  onClick={() => {
-                    setFormKey((k) => k + 1);
-                    setForm(saved);
+                {field(
+                  "approvalAbove",
+                  "Ask me above ($)",
+                  "Bigger purchases wait in Approvals",
+                  { min: 0, step: 1 },
+                )}
+                {field(
+                  "weeklySpendCap",
+                  "Last 7 days spending cap ($)",
+                  "Rolling 7 days, all suppliers",
+                  { min: 0, step: 1 },
+                )}
+                {field(
+                  "cashFloor",
+                  "Keep at least this in PayPal ($)",
+                  "Purchases that would go below are blocked",
+                  { min: 0, step: 1 },
+                )}
+                {field(
+                  "priceTolerance",
+                  "Price increase without asking ($ per unit)",
+                  "Above the price you entered or last approved",
+                  { min: 0, step: 0.05 },
+                )}
+                {field(
+                  "maxPurchasesPer24h",
+                  "Purchases per 24 hours",
+                  "Across all products",
+                  { min: 1, step: 1 },
+                )}
+              </s-grid>
+            </s-query-container>
+          </s-section>
+
+          <s-section heading="Approved suppliers">
+            <s-stack gap="small-200">
+              {suppliers.length === 0 ? (
+                <Empty
+                  heading="No suppliers yet"
+                  action={{
+                    label: "Add a supplier",
+                    href: "/app/products?tab=suppliers",
                   }}
                 >
-                  Discard
-                </s-button>
+                  GuardBuy can only buy from suppliers you add and approve here.
+                </Empty>
+              ) : (
+                suppliers.map((s) => (
+                  <s-checkbox
+                    key={s.id}
+                    name="allow"
+                    value={s.id}
+                    label={s.name}
+                    details={
+                      s.products
+                        ? `Linked to ${s.products} ${s.products === 1 ? "product" : "products"}`
+                        : "Not linked to any product yet"
+                    }
+                    {...(saved.allow.includes(s.id) ? { checked: true } : {})}
+                  />
+                ))
+              )}
+              {errors.allow && suppliers.length > 0 ? (
+                <s-text tone="critical">{errors.allow}</s-text>
+              ) : (
+                <s-text tone="neutral">
+                  Purchases from any supplier you do not select are blocked,
+                  even if it is linked to a product.
+                </s-text>
               )}
             </s-stack>
-            <s-text tone="neutral">
-              Signing activates automatic purchases within these limits. Flagged
-              purchases still need approval. These rules, their fingerprint and
-              your staff identity are recorded in the audit log.
-            </s-text>
-          </s-stack>
-        </s-section>
+          </s-section>
+
+          <s-section heading="In plain words">
+            <s-stack gap="base">
+              <s-text>{rulesSummary(form, names)}</s-text>
+              <s-stack direction="inline" gap="base" alignItems="center">
+                <s-button
+                  type="submit"
+                  variant="primary"
+                  disabled={busy || !canSign}
+                  {...(busy ? { loading: true } : {})}
+                >
+                  {signed ? "Sign updated rules" : "Sign these rules"}
+                </s-button>
+                {changed && signed && (
+                  <s-badge tone="caution">Unsaved changes</s-badge>
+                )}
+                {signed && changed && (
+                  <s-button
+                    variant="tertiary"
+                    disabled={busy}
+                    onClick={() => {
+                      setFormKey((k) => k + 1);
+                      setForm(saved);
+                    }}
+                  >
+                    Discard
+                  </s-button>
+                )}
+              </s-stack>
+              <s-text tone="neutral">
+                Signing activates automatic purchases within these limits.
+                Flagged purchases still need approval. These rules, their
+                fingerprint and your staff identity are recorded in the audit
+                log.
+              </s-text>
+            </s-stack>
+          </s-section>
+        </s-stack>
       </fetcher.Form>
 
       {history.length > 0 && (
@@ -306,6 +309,6 @@ export function RulesEditor({ data }: { data: RulesPageData }) {
           </s-link>
         </s-section>
       )}
-    </>
+    </s-stack>
   );
 }
