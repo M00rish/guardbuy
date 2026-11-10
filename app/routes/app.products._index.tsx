@@ -34,7 +34,7 @@ export const action = async (args: ActionFunctionArgs) => {
 export default function ProductsAndSuppliers() {
   const data = useLoaderData<typeof loader>();
   return (
-    <s-page heading="Products & suppliers" inlineSize="large">
+    <s-page heading="Products & Suppliers" inlineSize="large">
       <s-stack gap="base">
         <s-section>
           <s-stack direction="inline" gap="base">

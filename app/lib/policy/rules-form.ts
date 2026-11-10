@@ -25,19 +25,19 @@ export function rulesFormErrors(f: RulesForm): FormErrors {
   atLeast("reorderBelowDaysOfCover", 1, "Enter at least 1 day");
   atLeast("targetDaysOfCover", 1, "Enter at least 1 day");
   atLeast("maxQuantityMultiple", 1, "Enter at least 1 (the usual order)");
-  atLeast("approvalAbove", 0, "Enter an amount (0 means every purchase waits for you)");
+  atLeast("approvalAbove", 0, "Enter an amount (0 means purchases above $0 need approval)");
   atLeast("weeklySpendCap", 0.01, "Enter an amount above $0");
   atLeast("cashFloor", 0, "Enter an amount ($0 or more)");
-  atLeast("priceTolerance", 0, "Enter an amount per unit ($0 means any increase waits for you)");
+  atLeast("priceTolerance", 0, "Enter an amount per unit ($0 means any increase needs approval)");
   if (!(Number.isInteger(n(f.maxPurchasesPer24h)) && n(f.maxPurchasesPer24h) >= 1)) e.maxPurchasesPer24h = "Enter a whole number, at least 1";
 
   if (!e.targetDaysOfCover && !e.reorderBelowDaysOfCover && n(f.targetDaysOfCover) <= n(f.reorderBelowDaysOfCover)) {
-    e.targetDaysOfCover = "Must be more days than the restock point, or every order is too small to matter";
+    e.targetDaysOfCover = "Enter more days than the restock point.";
   }
   if (!e.approvalAbove && !e.weeklySpendCap && n(f.approvalAbove) > n(f.weeklySpendCap)) {
-    e.approvalAbove = "Can't be above the weekly cap: purchases that size would be blocked, not sent to you";
+    e.approvalAbove = "Approval required above cannot exceed the 7-day spending cap.";
   }
-  if (f.allow.length === 0) e.allow = "Tick at least one supplier, or every purchase is blocked";
+  if (f.allow.length === 0) e.allow = "Select at least one supplier; otherwise purchases are blocked.";
   return e;
 }
 
@@ -48,10 +48,10 @@ export function rulesSummary(f: RulesForm, supplierNames: string[]) {
   const who = supplierNames.length === 0 ? "no supplier (everything is blocked)" : supplierNames.length === 1 ? supplierNames[0] : `${supplierNames.slice(0, -1).join(", ")} and ${supplierNames.at(-1)}`;
   return [
     `When a product has less than ${days("reorderBelowDaysOfCover")} of stock left, the agent proposes enough for ${days("targetDaysOfCover")}.`,
-    `Purchases up to ${money("approvalAbove")} go through on their own; bigger ones wait for you.`,
-    `At most ${money("weeklySpendCap")} a week and ${f.maxPurchasesPer24h || "…"} purchases a day, never leaving less than ${money("cashFloor")} in PayPal.`,
+    `Purchases up to ${money("approvalAbove")} can pay automatically when all rules allow them; larger purchases need approval.`,
+    `Spent and reserved purchases count toward a rolling 7-day spending cap of ${money("weeklySpendCap")}, with at most ${f.maxPurchasesPer24h || "…"} purchases per 24 hours and a minimum PayPal balance of ${money("cashFloor")}.`,
     `Only from ${who}, at no more than ${f.maxQuantityMultiple || "…"}× the usual quantity.`,
-    `A price more than ${money("priceTolerance")} per unit above the one you accepted waits for you once; approving it makes it your new price.`,
+    `A price more than ${money("priceTolerance")} per unit above the one you accepted needs approval once; approving it makes it your new price.`,
   ].join(" ");
 }
 

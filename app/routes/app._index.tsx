@@ -1,3 +1,4 @@
+import { COPY, APPROVAL_LABEL } from "../lib/wording";
 import { currentProblems } from "../lib/merchant/current-problems";
 import { budgetSummary } from "../lib/payments/status";
 import { useEffect, useState } from "react";
@@ -77,7 +78,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     if (!/^\d+$/.test(variantId)) return { ok: false, message: "Unknown product" };
     const on = f.get("managed") === "true";
     await setManaged(session.shop, { variantId, sku: String(f.get("sku") || "") || null, title: String(f.get("title") ?? "") }, on);
-    return { ok: true, message: on ? "GuardBuy will restock this product" : "Product switched off" };
+    return { ok: true, message: on ? "Automatic restocking enabled" : "Automatic restocking disabled" };
   }
   return { ok: false, message: "Unknown action" };
 };
@@ -123,12 +124,12 @@ export default function Home() {
             <s-text tone="neutral">
               {d.running
                 ? `Restocks your switched-on products within your signed rules. Purchases above ${d.rules?.approvalAbove} wait for you.`
-                : d.paused ? "Nothing is proposed or bought until you resume it." : `${doneSteps} of 4 setup steps done. Nothing is bought before setup is finished.`}
+                : d.paused ? "New restock proposals are paused. Check existing purchases in Rules & Approvals." : `${doneSteps} of 4 setup steps done. Nothing is bought before setup is finished.`}
             </s-text>
           </s-stack>
           {!d.chain.valid && (
             <s-banner tone="critical" heading="The audit log failed verification">
-              Entry #{d.chain.brokenAtSeq}: {d.chain.reason}. <s-link href="/app/activity">Open activity</s-link>
+              Entry #{d.chain.brokenAtSeq}: {d.chain.reason}. <s-link href="/app/activity">View activity</s-link>
             </s-banner>
           )}
           {d.waiting > 0 && (
@@ -140,27 +141,27 @@ export default function Home() {
             <s-banner tone="critical" heading={`${plural(d.problems.payments + d.problems.proposals, "current problem")}`}>
               {d.problems.payments > 0 && <s-paragraph>Review unpaid purchases in <s-link href="/app/rules?tab=approvals">Approvals</s-link>. Check the original payment status before retrying.</s-paragraph>}
               {d.problems.proposals > 0 && <s-paragraph>An AI proposal failed. Review the error in Activity before trying another restock.</s-paragraph>}
-              <s-link href="/app/activity">See activity and failure history</s-link>
+              <s-link href="/app/activity">View activity</s-link>
             </s-banner>
           )}
           {lowBalance && (
-            <s-banner tone="warning" heading="PayPal balance is close to your cash floor">
+            <s-banner tone="warning" heading="PayPal balance is close to your minimum">
               Purchases that would take the balance below {usd(d.rules!.cashFloorCents)} are blocked.
             </s-banner>
           )}
           {d.ready && (
             <s-query-container>
             <s-grid gridTemplateColumns="@container (inline-size <= 640px) 1fr 1fr, 1fr 1fr 1fr 1fr" gap="base">
-              <Metric label="Spent · Last 7 days" value={usd(d.spentCents)} detail={capCents ? `of ${usd(capCents)} rolling 7-day cap` : undefined}>
+              <Metric label="Spent · last 7 days" value={usd(d.spentCents)} detail={capCents ? `of ${usd(capCents)} rolling 7-day cap` : undefined}>
                 {capCents > 0 && (
                   <s-text>{`Committed: ${usd(d.budget.committed)} of ${usd(capCents)}`}</s-text>
                 )}
               </Metric>
               <Metric label="Reserved" value={usd(d.budget.reserved)} detail="Pending payments and unexpired approval commitments" />
-              <Metric label="Remaining budget" value={usd(d.budget.remaining)} detail={d.budget.over ? `${usd(d.budget.over)} over the cap; review Approvals` : "Cap minus spent and reserved"} />
-              <Metric label="PayPal balance after commitments" value={d.balanceCents === null ? "Unavailable" : usd(d.balanceCents)} detail={d.balanceCents === null ? "PayPal unavailable. Refresh this page; check Approvals before retrying a payment." : d.rules ? `Floor ${usd(d.rules.cashFloorCents)}` : undefined} badge={lowBalance ? { tone: "caution", label: "Low" } : undefined} />
-              <Metric label="Waiting for you" value={String(d.waiting)} detail={d.waiting ? "Open Approvals" : "Nothing to approve"} href={d.waiting ? "/app/rules?tab=approvals" : undefined} />
-              <Metric label="Stopped by your rules" value={String(d.blocked.count)} detail={d.blocked.count ? `${usd(d.blocked.cents)} not spent` : "Nothing blocked yet"} href="/app/activity" />
+              <Metric label="Remaining budget" value={usd(d.budget.remaining)} detail={d.budget.over ? `${usd(d.budget.over)} over the cap; review purchases in Rules & Approvals` : "Cap minus spent and reserved"} />
+              <Metric label="PayPal balance after commitments" value={d.balanceCents === null ? "Unavailable" : usd(d.balanceCents)} detail={d.balanceCents === null ? "PayPal unavailable. Refresh this page; check Approvals before retrying a payment." : d.rules ? `Minimum PayPal balance: ${usd(d.rules.cashFloorCents)}` : undefined} badge={lowBalance ? { tone: "caution", label: "Low" } : undefined} />
+              <Metric label={APPROVAL_LABEL.waiting} value={String(d.waiting)} detail={d.waiting ? "Review purchases" : "Nothing to approve"} href={d.waiting ? "/app/rules?tab=approvals" : undefined} />
+              <Metric label="Blocked purchases" value={String(d.blocked.count)} detail={d.blocked.count ? `${usd(d.blocked.cents)} in blocked proposals` : "Nothing blocked yet"} href="/app/activity" />
             </s-grid>
             </s-query-container>
           )}
@@ -201,9 +202,9 @@ export default function Home() {
         <s-section heading="You're live">
           <s-stack gap="small-200">
             <s-text>
-              {`When a switched-on product has less than ${plural(d.rules.reorderBelow, "day")} of stock left, the agent proposes a restock. Up to ${d.rules.approvalAbove} it buys right away and pays the supplier through PayPal; above that, and for the first purchase from a new supplier, it waits for you in Approvals.`}
+              {`When a switched-on product has less than ${plural(d.rules.reorderBelow, "day")} of stock left, the agent proposes a restock. Up to ${d.rules.approvalAbove} it may submit payment through PayPal when all rules allow it; purchases needing approval wait in Rules & Approvals. Payment is confirmed separately.`}
             </s-text>
-            <s-text tone="neutral">Stock is checked on every sale and once an hour. Every step is written to the audit log, which you can verify in Activity.</s-text>
+            <s-text tone="neutral">Stock is checked on every sale and once an hour. Every step is recorded in the audit log, which you can verify in Activity.</s-text>
           </s-stack>
         </s-section>
       )}
@@ -217,9 +218,9 @@ export default function Home() {
               <s-heading>Your rules</s-heading>
               {d.rules && (
                 <>
-                  <Row label="Ask me above"><s-text>{d.rules.approvalAbove}</s-text></Row>
-                  <Row label="Weekly cap"><s-text>{usd(d.rules.weeklyCapCents)}</s-text></Row>
-                  <Row label="Keep in PayPal"><s-text>{usd(d.rules.cashFloorCents)}</s-text></Row>
+                  <Row label={COPY.approvalAbove}><s-text>{d.rules.approvalAbove}</s-text></Row>
+                  <Row label={COPY.spendingCap}><s-text>{usd(d.rules.weeklyCapCents)}</s-text></Row>
+                  <Row label={COPY.cashFloor}><s-text>{usd(d.rules.cashFloorCents)}</s-text></Row>
                   <Row label="Restock below"><s-text>{`${plural(d.rules.reorderBelow, "day")} of stock`}</s-text></Row>
                   <Row label="May buy from"><s-text>{d.rules.allowlist.join(", ")}</s-text></Row>
                 </>
@@ -234,7 +235,7 @@ export default function Home() {
               <s-stack direction="inline" gap="small-200" alignItems="center">
                 <s-text tone="neutral">Audit log</s-text>
                 <s-badge tone={d.chain.valid ? "success" : "critical"}>
-                  {d.chain.valid ? `Intact · ${d.chain.length} ${d.chain.length === 1 ? "entry" : "entries"}` : `Broken at #${d.chain.brokenAtSeq}`}
+                  {d.chain.valid ? `Audit log intact · ${d.chain.length} ${d.chain.length === 1 ? "entry" : "entries"}` : `Broken at entry #${d.chain.brokenAtSeq}`}
                 </s-badge>
               </s-stack>
               <Row label="Fingerprint"><s-text>{d.head ? d.head.slice(0, 16) : "None yet"}</s-text></Row>
@@ -313,7 +314,7 @@ export default function Home() {
             </s-table-body>
           </s-table>
         )}
-        <s-box paddingBlockStart="small-200"><s-link href="/app/activity">All activity</s-link></s-box>
+        <s-box paddingBlockStart="small-200"><s-link href="/app/activity">View all activity</s-link></s-box>
       </s-section>
       <s-section><s-paragraph><s-link href="/privacy" target="_blank">Privacy policy</s-link> · What GuardBuy reads, shares and retains.</s-paragraph></s-section>
     </s-page>

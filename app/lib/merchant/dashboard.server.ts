@@ -6,6 +6,7 @@ import { approvalStates } from "../agent/approval-state";
 import { unknownPaymentDecisions } from "../payments/attempts";
 import { deliveries } from "../inventory/deliveries";
 import type { AuditEntry, RuleSet } from "../policy/schema";
+import { APPROVAL_LABEL, PAYMENT_LABEL } from "../wording";
 import { paypalBalanceCents } from "../agent/restock.server";
 import { daysOfCover, salesPerDay, variantKey } from "../inventory/sales.server";
 
@@ -38,7 +39,7 @@ export function productStatus(
   for (const seq of unknownPaymentDecisions(log)) {
     const d = log.find((e) => e.seq === seq)?.event;
     const proposal = d?.type === "decision" ? log.find((e) => e.seq === d.proposalSeq)?.event : undefined;
-    if (proposal?.type === "proposal" && proposal.proposal.variantId === p.variantId) return { label: "Payment reserved · check Approvals", tone: "warning" };
+    if (proposal?.type === "proposal" && proposal.proposal.variantId === p.variantId) return { label: `${PAYMENT_LABEL.unknown} · review purchase`, tone: "warning" };
   }
   for (const state of approvalStates(log, now).filter((s) => s.status === "payment_failed")) {
     const d = log.find((e) => e.seq === state.decisionSeq)?.event;
@@ -47,12 +48,12 @@ export function productStatus(
     const newer = log.some((e) => e.seq > (proposalEntry?.seq ?? -1) && e.event.type === "proposal" && !e.event.scenario && e.event.proposal.variantId === p.variantId);
     if (!newer && proposal?.type === "proposal" && proposal.proposal.variantId === p.variantId) {
       const payment = log.find((e) => (e.event.type === "payout" || e.event.type === "order_captured") && e.event.decisionSeq === state.decisionSeq);
-      return { label: `${payment ? paymentStatus(log, payment).label : "Payment failed"} · check Approvals`, tone: "critical" };
+      return { label: `${payment ? paymentStatus(log, payment).label : PAYMENT_LABEL.failed} · review purchase`, tone: "critical" };
     }
   }
   const delivery = deliveries(log, now).find((d) => d.variantId === p.variantId && (d.remaining > 0 || d.pending) && (d.payment !== "failed" || d.pending));
   if (delivery) return { label: delivery.pending ? "Receipt needs confirmation" : delivery.payment === "pending" ? `Payment pending · ${delivery.remaining} on order` : `${delivery.remaining} incoming · ${delivery.overdue ? "overdue" : delivery.partialRefund ? "partial refund · review delivery" : "awaiting delivery"}`, tone: delivery.overdue || delivery.partialRefund ? "warning" : "info" };
-  if (!p.managed) return { label: "Not managed", tone: "neutral" };
+  if (!p.managed) return { label: "Automatic restocking disabled", tone: "neutral" };
   const last = log
     .filter((e) => e.event.type === "proposal" && !e.event.scenario && (e.event.proposal.variantId ? e.event.proposal.variantId === p.variantId : e.event.proposal.sku === p.sku))
     .at(-1);
@@ -63,18 +64,18 @@ export function productStatus(
     const paid = of("payout") ?? of("order_captured");
     const total = d?.event.type === "decision" ? `$${(d.event.decision.totalCents / 100).toFixed(2)}` : "";
     if (paid) { const state = paymentStatus(log, paid); return { label: `${state.label} · ${total}`, tone: state.tone, at: paid.at }; }
-    if (of("rejected")) return { label: "You declined the restock", tone: "neutral", at: of("rejected")!.at };
+    if (of("rejected")) return { label: "Purchase declined", tone: "neutral", at: of("rejected")!.at };
     if (of("payment_failed")) return { label: "Payment failed · check Activity", tone: "critical", at: of("payment_failed")!.at };
     const created = of("order_created");
     const closed = created?.event.type === "order_created" && log.some((e) => e.event.type === "order_closed" && created.event.type === "order_created" && e.event.orderId === created.event.orderId);
-    if (created && !closed) return { label: "Waiting for PayPal approval", tone: "warning", at: last.at };
-    if (d?.event.type === "decision" && d.event.decision.verdict === "approval") return { label: `Waiting for your approval · ${total}`, tone: "warning", at: last.at };
+    if (created && !closed) return { label: APPROVAL_LABEL.paypal_pending, tone: "warning", at: last.at };
+    if (d?.event.type === "decision" && d.event.decision.verdict === "approval") return { label: `${APPROVAL_LABEL.waiting} · ${total}`, tone: "warning", at: last.at };
     if (d?.event.type === "decision" && d.event.decision.verdict === "block") return { label: "Blocked by your rules", tone: "critical", at: last.at };
   }
   if (rules && p.cover < rules.reorderBelowDaysOfCover) {
-    return agentRunning ? { label: "Low · restock on next stock change", tone: "info" } : { label: "Low · agent is off", tone: "warning" };
+    return agentRunning ? { label: "Low stock · awaiting restock check", tone: "info" } : { label: "Low stock · agent paused", tone: "warning" };
   }
-  return { label: "OK", tone: "success" };
+  return { label: "Stock sufficient", tone: "success" };
 }
 
 type VariantsQuery = {

@@ -6,6 +6,7 @@ import {
   useRevalidator,
 } from "react-router";
 import type { RefreshState } from "../lib/paypal/payout-refresh";
+import { COPY } from "../lib/wording";
 import { readableTime } from "../lib/format";
 
 export function PayoutRefresh({
@@ -100,7 +101,7 @@ export function PayoutRefresh({
           checks are limited to once a minute.
         </s-text>
         <s-button onClick={refresh} disabled={state.running || busy || cooling}>
-          Refresh payout statuses
+          {COPY.refreshPayouts}
         </s-button>
       </s-stack>
     </s-section>

@@ -42,14 +42,14 @@ export default function Verify() {
         {proof && !proof.found && (
           <section className={styles.result}>
             <span className={styles.none}>Not found</span>
-            <p className={styles.note}>No GuardBuy payment has this ID. Check that you copied the whole PayPal ID.</p>
+            <p className={styles.note}>No payment is available to verify with this ID. Check that you copied the whole PayPal ID.</p>
           </section>
         )}
 
         {proof?.found && (
           <section className={styles.result}>
             <span className={proof.chain.valid ? styles.ok : styles.bad}>
-              {proof.chain.valid ? "Verified: on the log, chain intact" : "Warning: the audit log failed verification"}
+              {proof.chain.valid ? "Audit log intact" : "Audit log verification failed"}
             </span>
             {proof.demo && <span className={styles.none} style={{ marginLeft: 8 }}>Demo session</span>}
 
@@ -81,7 +81,7 @@ export default function Verify() {
                   <div className={styles.title}>#{s.seq} · {s.step}</div>
                   <div className={styles.meta}>{when(s.at)}{s.note ? ` · ${s.note}` : ""}</div>
                   <div className={`${styles.meta} ${styles.mono}`}>fingerprint {short(s.hash)} · follows {short(s.prevHash)}</div>
-                  {s.step === "Rules checked it" && proof.details && (
+                  {s.step === "Rules checked" && proof.details && (
                     <ul className={styles.checks}>
                       {proof.details.checks.map((c) => <li key={c.rule}>{c.outcome === "auto" ? "✓" : c.outcome === "approval" ? "!" : "✕"} {c.rule}: {c.detail}</li>)}
                     </ul>

@@ -68,7 +68,7 @@ export const toggleProduct = async ({ request }: ActionFunctionArgs) => {
   );
   return {
     ok: true,
-    message: on ? "GuardBuy will restock this product" : "Product switched off",
+    message: on ? "Automatic restocking enabled" : "Automatic restocking disabled",
   };
 };
 

@@ -232,7 +232,7 @@ try {
     1,
   );
   await Promise.all([deliverOne(), deliverOne()]);
-  assert.match(calls.at(-1)!.text, /waiting for your approval/);
+  assert.match(calls.at(-1)!.text, /Needs approval\./);
   assert.match(
     calls.at(-1)!.text,
     /admin.shopify.com\/store\/.*\/apps\/offline-api-key\/app\/rules\?tab=approvals&purchase=1/,

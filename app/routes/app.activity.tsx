@@ -99,7 +99,9 @@ export default function Activity() {
   const revalidator = useRevalidator();
   const [view, setView] = useState<View>("all");
   const now = Date.now();
-  const shown = feed.filter((f) => IN_VIEW[view](f.kind, f.byYou)).slice(0, 200);
+  const shown = feed
+    .filter((f) => IN_VIEW[view](f.kind, f.byYou))
+    .slice(0, 200);
 
   return (
     <s-page heading="Activity" inlineSize="large">
@@ -168,7 +170,7 @@ export default function Activity() {
               },
               {
                 id: "blocked",
-                label: "Blocked",
+                label: "Blocked & failed",
                 count: feed.filter((f) => IN_VIEW.blocked(f.kind)).length,
               },
               {
@@ -207,26 +209,39 @@ export default function Activity() {
                     <s-table-cell>
                       <s-stack gap="small-200">
                         <s-text>{f.title}</s-text>
-                        {f.detail && <s-text tone="neutral">{f.detail}</s-text>}
-                        {f.verifyId && verifyBase && (
-                          <s-link
-                            href={verifyBase + encodeURIComponent(f.verifyId)}
-                            target="_blank"
-                          >
-                            Verify this payment publicly
-                          </s-link>
-                        )}
-                        {f.untrusted && (
-                          <s-box
-                            padding="small-200"
-                            background="subdued"
-                            borderRadius="base"
-                          >
-                            <s-text type="strong">
-                              {f.untrustedLabel ?? "Untrusted text"}
-                            </s-text>
-                            <s-paragraph>{f.untrusted}</s-paragraph>
-                          </s-box>
+                        {(f.detail ||
+                          (f.verifyId && verifyBase) ||
+                          f.untrusted) && (
+                          <details>
+                            <summary>View details</summary>
+                            <s-stack gap="small-200">
+                              {f.detail && (
+                                <s-text tone="neutral">{f.detail}</s-text>
+                              )}
+                              {f.verifyId && verifyBase && (
+                                <s-link
+                                  href={
+                                    verifyBase + encodeURIComponent(f.verifyId)
+                                  }
+                                  target="_blank"
+                                >
+                                  Verify this payment publicly
+                                </s-link>
+                              )}
+                              {f.untrusted && (
+                                <s-box
+                                  padding="small-200"
+                                  background="subdued"
+                                  borderRadius="base"
+                                >
+                                  <s-text type="strong">
+                                    {f.untrustedLabel ?? "Untrusted text"}
+                                  </s-text>
+                                  <s-paragraph>{f.untrusted}</s-paragraph>
+                                </s-box>
+                              )}
+                            </s-stack>
+                          </details>
                         )}
                       </s-stack>
                     </s-table-cell>

@@ -55,11 +55,11 @@ export default function App() {
         <ul className={styles.features}>
           <li>
             <h2>The AI proposes, your rules decide</h2>
-            <p>Spending caps, approved suppliers, price and quantity limits, a cash floor. A deterministic engine checks every purchase; the AI can’t change the rules or pick who gets paid.</p>
+            <p>Spending caps, approved suppliers, price and quantity limits, and a minimum PayPal balance. A deterministic engine checks every purchase; the AI can’t change the rules or pick who gets paid.</p>
           </li>
           <li className={styles.money}>
             <h2>PayPal pays your suppliers</h2>
-            <p>Small restocks pay automatically. Bigger ones wait for you, in GuardBuy or inside PayPal with buyer protection.</p>
+            <p>Purchases allowed by all your rules can pay automatically. Purchases needing approval wait in GuardBuy or PayPal. Buyer protection depends on PayPal eligibility and the payment route.</p>
           </li>
           <li>
             <h2>A log you can verify</h2>
@@ -72,7 +72,7 @@ export default function App() {
             <label className={styles.label} htmlFor="shop">Install on your store</label>
             <div className={styles.row}>
               <input className={styles.input} id="shop" type="text" name="shop" placeholder="your-store.myshopify.com" autoComplete="off" />
-              <button className={styles.button} type="submit">Continue</button>
+              <button className={styles.button} type="submit">Continue in Shopify</button>
             </div>
             {errors?.shop && <p className={styles.error}>{errors.shop}</p>}
           </Form>

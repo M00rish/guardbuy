@@ -6,8 +6,8 @@ import { toFeed, usd } from "../audit/feed.server";
 import { scoreboard } from "../agent/scoreboard.server";
 import { currentRuleSet, defaultRuleSet, paypalBalanceCents, policyContext, runRestock, signRuleSet } from "../agent/restock.server";
 import { evaluate } from "../policy/engine";
-import { RuleSetSchema, type AuditEntry } from "../policy/schema";
-import { ATTACKS, attackById } from "../suppliers/attacks";
+import { RuleSetSchema } from "../policy/schema";
+import { ATTACKS } from "../suppliers/attacks";
 import { OFFERS } from "../suppliers/catalog";
 import { isManaged, offersForVariant, seedDemoCatalog, supplierRoster } from "../suppliers/directory.server";
 
@@ -91,7 +91,7 @@ export async function judgeState(shop: string, judgeId: string) {
         `Price ${usd(c.unitPriceCents)}${c.acceptedUnitPriceCents ? ` (accepted price ${usd(c.acceptedUnitPriceCents)})` : ""}`,
         `Quantity ${c.quantity}${c.usualQuantity ? ` (usual ${c.usualQuantity})` : ""}`,
         `Pays the supplier's PayPal account on file`, // the email itself stays private
-        ...c.needsApprovalBecause.map((r) => `Needs you: ${r.detail}`),
+        ...c.needsApprovalBecause.map((r) => `Needs approval: ${r.detail}`),
       ],
       aiExplanation: c.aiExplanation,
       waitingForPayPal: c.status === "paypal_pending",

@@ -1,3 +1,4 @@
+import { COPY } from "../lib/wording";
 import { isRouteErrorResponse, useRouteError } from "react-router";
 
 // Error page for admin routes. Shopify's auth responses (thrown Responses) are re-thrown so the
@@ -12,8 +13,8 @@ export function PageError() {
     <s-page heading="Something didn't load" inlineSize="large">
       <s-section>
         <s-stack gap="base">
-          <s-banner tone="warning" heading="Shopify or PayPal didn't answer in time">
-            This is usually brief. Nothing was bought or paid, and the agent keeps following your rules.
+          <s-banner tone="warning" heading="Page unavailable">
+            {COPY.loadError}
           </s-banner>
           <s-stack direction="inline" gap="base">
             <s-button variant="primary" onClick={() => window.location.reload()}>Try again</s-button>

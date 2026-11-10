@@ -1,3 +1,4 @@
+import { readableTime } from "../lib/format";
 import { useState } from "react";
 import type {
   ActionFunctionArgs,
@@ -74,10 +75,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         String(form.get("id") ?? ""),
         form.get("acceptDuplicate") === "yes",
       ))
-        ? "Notification queued again. Its current purchase state will be checked before sending."
-        : "Confirm the duplicate-notification warning before retrying an eligible notification.",
+        ? "Alert queued again. Its current purchase state will be checked before sending."
+        : "Confirm the duplicate-alert warning before retrying an eligible alert.",
     };
-  return { message: "Unknown action." };
+  return { message: "This action is not available. Refresh the page and try again." };
 };
 const STATUS: Record<string, string> = {
   pending: "Queued",
@@ -100,7 +101,7 @@ export default function Alerts() {
       <s-section heading="Telegram">
         <s-stack gap="base">
           <s-text>
-            Get notified when a purchase needs approval, a payment needs
+            Get alerts when a purchase needs approval, a payment needs
             attention, a restock fails, or the audit log fails verification.
             Review and approve purchases only in GuardBuy and PayPal.
           </s-text>
@@ -171,26 +172,26 @@ export default function Alerts() {
           )}
           <s-text>
             Alerts run in the background while GuardBuy’s server is running.
-            Disconnecting removes the routing and queued notifications; a
+            Disconnecting removes the routing and queued alerts; a
             message already being sent may still arrive.
           </s-text>
         </s-stack>
       </s-section>
-      <s-section heading="Recent notifications">
+      <s-section heading="Recent alerts">
         <s-stack gap="base">
           <s-text>
             A delivery marked unconfirmed may already have arrived. Retrying can
-            send a duplicate notification. Notification delivery never changes
+            send a duplicate alert. Alert delivery never changes
             payment state.
           </s-text>
           <s-checkbox
-            label="I understand retrying may send a duplicate notification"
+            label="I understand retrying may send a duplicate alert"
             checked={acceptDuplicate}
             onChange={(e) => setAcceptDuplicate(e.currentTarget.checked)}
           />
           {data.messages.length === 0 && (
             <s-text>
-              No notifications yet. Delivery history is kept for up to 30 days.
+              No alerts yet. Delivery history is kept for up to 30 days.
             </s-text>
           )}
           {data.messages.map((m) => (
@@ -203,9 +204,9 @@ export default function Alerts() {
                   {m.decisionSeq === null
                     ? ""
                     : `Purchase #${m.decisionSeq} · `}
-                  {ALERT_TEXT[m.kind] ?? "Notification"}
+                  {ALERT_TEXT[m.kind] ?? "Alert"}
                 </s-text>
-                <s-text>{new Date(m.createdAt).toISOString()}</s-text>
+                <s-text>{readableTime(new Date(m.createdAt).toISOString())}</s-text>
                 {(m.status === "uncertain" || m.status === "failed") && (
                   <s-button
                     disabled={busy || !acceptDuplicate}
@@ -216,7 +217,7 @@ export default function Alerts() {
                       )
                     }
                   >
-                    Retry notification
+                    Retry alert
                   </s-button>
                 )}
               </s-stack>

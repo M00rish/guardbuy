@@ -1,3 +1,4 @@
+import { APPROVAL_LABEL, PAYMENT_LABEL } from "../wording";
 import { approvalStates } from "../agent/approval-state";
 import { settledPaymentFailure } from "../payments/attempts";
 import type { AuditEntry } from "../policy/schema";
@@ -95,13 +96,13 @@ export function attention(log: AuditEntry[], now = new Date()): Attention[] {
 
 export const ALERT_TEXT: Record<string, string> = {
   waiting:
-    "Purchase waiting for your approval. Review it in GuardBuy; approvals happen only in the app.",
+    `${APPROVAL_LABEL.waiting}. Review the purchase in GuardBuy; alerts cannot approve purchases.`,
   paypal_pending:
-    "Purchase waiting for approval in PayPal. Open GuardBuy to review the original purchase.",
+    `${APPROVAL_LABEL.paypal_pending}. Open GuardBuy to review the original purchase.`,
   payment_unknown:
-    "Awaiting PayPal confirmation. The original payment remains reserved. Do not create a replacement payment; check or resume the original in GuardBuy.",
+    `${PAYMENT_LABEL.unknown}. The original payment remains reserved. Do not create a replacement payment; check or resume the original in GuardBuy.`,
   payment_pending:
-    "Payment submitted; PayPal confirmation is still pending. The original payment remains reserved. Check its current status in GuardBuy before taking further action.",
+    `${PAYMENT_LABEL.pending}. The original payment remains reserved. Check its current status in GuardBuy before taking further action.`,
   failed:
     "Payment failed or was returned. Review the provider evidence and current recovery options in GuardBuy before arranging any replacement.",
   unpaid:

@@ -1,3 +1,4 @@
+import { PAYMENT_LABEL } from "../lib/wording";
 import { useCallback, useEffect, useRef, useState, type ElementRef } from "react";
 import { useFetcher, useRevalidator, useSearchParams } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
@@ -11,9 +12,9 @@ type Card = Data["cards"][number];
 function deliveryStatus(card: Card) {
   if (card.pending) return { label: "Confirm receipt", tone: "warning" as const };
   if (card.remaining === 0) return { label: card.closed ? card.received ? "Remainder closed" : "Delivery closed" : "Received", tone: card.closed ? "neutral" as const : "success" as const };
-  if (card.payment === "failed") return { label: "Payment needs review", tone: "critical" as const };
-  if (card.payment === "pending") return { label: "Payment pending", tone: "caution" as const };
-  if (card.partialRefund) return { label: "Partial refund", tone: "warning" as const };
+  if (card.payment === "failed") return { label: "Payment needs attention", tone: "critical" as const };
+  if (card.payment === "pending") return { label: PAYMENT_LABEL.pending, tone: "caution" as const };
+  if (card.partialRefund) return { label: PAYMENT_LABEL.partiallyRefunded, tone: "warning" as const };
   if (card.overdue) return { label: "Overdue", tone: "warning" as const };
   if (card.received > 0) return { label: "Partially received", tone: "info" as const };
   return { label: "Awaiting delivery", tone: "info" as const };
@@ -112,9 +113,9 @@ export function DeliveriesPage({ data }: { data: Data }) {
   const pageLink = (number: number) => `/app/deliveries?${new URLSearchParams({ ...(view === "all" ? {} : { view }), page: String(number) })}`;
 
   return (
-    <s-page heading="Supplier deliveries" inlineSize="large">
+    <s-page heading="Deliveries" inlineSize="large">
       <s-button slot="primary-action" variant="primary" disabled={busy || revalidator.state !== "idle"} onClick={() => revalidator.revalidate()}
-        {...(revalidator.state !== "idle" ? { loading: true } : {})}>Refresh status</s-button>
+        {...(revalidator.state !== "idle" ? { loading: true } : {})}>Refresh delivery status</s-button>
       <s-button slot="secondary-actions" href="/app/activity">View activity</s-button>
       <s-section>
         <s-stack gap="base">
@@ -214,7 +215,7 @@ export function DeliveriesPage({ data }: { data: Data }) {
             <s-banner tone="warning" heading="Confirm the existing receipt">Stock may already have been added. This retries the same receipt without adding it twice.</s-banner>
             <s-text>{`${card.pending.quantity} units in this receipt. Quantity and location are fixed until the outcome is confirmed.`}</s-text>
           </> : <>
-            {card.locationError || card.locations.length === 0 ? <s-banner tone="warning" heading="Receiving locations unavailable">Close this dialog and refresh status. Check the app’s inventory permissions if locations still cannot be loaded.</s-banner> : <>
+            {card.locationError || card.locations.length === 0 ? <s-banner tone="warning" heading="Receiving locations unavailable">Close this dialog and refresh delivery status. Check the app’s inventory permissions if locations still cannot be loaded.</s-banner> : <>
               <s-number-field label="Quantity received" value={quantity} min={1} max={card.remaining} step={1} disabled={busy}
                 details={`Up to ${card.remaining} units outstanding. Enter only what arrived.`}
                 onInput={(event) => { setQuantity(event.currentTarget.value); setError(""); }} />

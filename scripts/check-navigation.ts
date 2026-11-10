@@ -361,7 +361,7 @@ try {
     assert.equal(refusal.paid, false);assert.match(refusal.message, /restocking is switched off/);assert.equal(outbound,0);
     const persisted = await routes.rules(args("/app/rules?tab=approvals&purchase=3"));
     assert.equal(persisted.approvals.cards[0].status,"payment_failed");
-    assert.match(persisted.approvals.cards[0].paymentReason,/Turn it on in Products & suppliers/);
+    assert.match(persisted.approvals.cards[0].paymentReason,/Turn it on in Products & Suppliers/);
     assert.ok(!(await auditEntries(shop)).some(e=>e.event.type==="payout"));
   } finally { globalThis.fetch = originalFetch; }
   pass("Confirmed product-off refusal persists a useful reason without a single provider request");

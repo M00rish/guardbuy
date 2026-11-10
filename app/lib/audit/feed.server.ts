@@ -1,3 +1,4 @@
+import { APPROVAL_LABEL, COPY, PAYMENT_LABEL, providerStatusLabel } from "../wording";
 import { paymentStatus } from "../payments/status";
 import type { AuditEntry } from "../policy/schema";
 import { usd } from "../format";
@@ -21,7 +22,7 @@ const WHAT_IF = WHAT_IF_SCENARIO; // simulated: the AI obeyed the dishonest supp
 export { usd } from "../format";
 
 const actor = (by: string, you?: string) =>
-  you && by === you ? "you" : by.startsWith("shopify-staff:") ? `staff member ${by.slice("shopify-staff:".length)}` : by;
+  you && by === you ? "you" : by.startsWith("shopify-staff:") ? "a staff member" : by.startsWith("judge:") ? "a demo judge" : "the recorded operator";
 
 /**
  * The audit log as readable lines, newest first: used by the admin Activity page and the judge
@@ -47,33 +48,33 @@ export function toFeed(log: AuditEntry[], you?: string, names: FeedNames = {}): 
     const base = { seq: e.seq, at: e.at };
     switch (ev.type) {
       case "payment_attempt":
-        items.push({ ...base, kind: "paypal", title: `Original payment reserved for purchase #${ev.decisionSeq}`, detail: "PayPal confirmation is pending; the request ID and payment details are fixed." });
+        items.push({ ...base, kind: "paypal", title: `Payment started for purchase #${ev.decisionSeq}.`, detail: "PayPal confirmation is pending; the request ID and payment details are fixed." });
         break;
       case "payment_outcome":
-        items.push({ ...base, kind: ev.status === "unknown" ? "paypal" : "failed", title: ev.status === "unknown" ? `Awaiting PayPal confirmation for purchase #${ev.decisionSeq}` : `Payment request rejected for purchase #${ev.decisionSeq}` });
+        items.push({ ...base, kind: ev.status === "unknown" ? "paypal" : "failed", title: ev.status === "unknown" ? `${PAYMENT_LABEL.unknown} for purchase #${ev.decisionSeq}.` : `${PAYMENT_LABEL.failed} for purchase #${ev.decisionSeq}.` });
         break;
       case "delivery_estimate_updated":
-        items.push({ ...base, kind: "delivery", byYou: ev.updatedBy === you, title: `Expected arrival updated for purchase #${ev.decisionSeq}`, detail: `${ev.expectedAt.slice(0, 10)} (merchant estimate, UTC) by ${actor(ev.updatedBy, you)}` });
+        items.push({ ...base, kind: "delivery", byYou: ev.updatedBy === you, title: `Expected arrival updated for purchase #${ev.decisionSeq}.`, detail: `${ev.expectedAt.slice(0, 10)} (merchant estimate, UTC) by ${actor(ev.updatedBy, you)}` });
         break;
       case "delivery_remainder_closed":
-        items.push({ ...base, kind: "delivery", byYou: ev.closedBy === you, title: `Closed ${ev.quantity} undelivered ${ev.quantity === 1 ? "unit" : "units"} for purchase #${ev.decisionSeq}`, detail: `${ev.reason === "supplier_cancelled" ? "Supplier cancelled" : "Confirmed not arriving"} · ${actor(ev.closedBy, you)}. No inventory adjustment or refund.` });
+        items.push({ ...base, kind: "delivery", byYou: ev.closedBy === you, title: `Delivery closed for ${ev.quantity} undelivered ${ev.quantity === 1 ? "unit" : "units"} in purchase #${ev.decisionSeq}.`, detail: `${ev.reason === "supplier_cancelled" ? "Supplier cancelled" : "Confirmed not arriving"} · ${actor(ev.closedBy, you)}. No inventory adjustment or refund.` });
         break;
       case "receipt_started":
-        items.push({ ...base, kind: "receipt_started", byYou: ev.receivedBy === you, title: `Recording receipt of ${ev.quantity} ${ev.quantity === 1 ? "unit" : "units"} for purchase #${ev.decisionSeq}` });
+        items.push({ ...base, kind: "receipt_started", byYou: ev.receivedBy === you, title: `Stock receipt started for ${ev.quantity} ${ev.quantity === 1 ? "unit" : "units"} in purchase #${ev.decisionSeq}.` });
         break;
       case "receipt_received":
-        items.push({ ...base, kind: "stock_received", byYou: ev.receivedBy === you, title: `Received ${ev.quantity} ${ev.quantity === 1 ? "unit" : "units"} for purchase #${ev.decisionSeq}`, detail: `Shopify stock updated by ${actor(ev.receivedBy, you)}` });
+        items.push({ ...base, kind: "stock_received", byYou: ev.receivedBy === you, title: `Stock received: ${ev.quantity} ${ev.quantity === 1 ? "unit" : "units"} for purchase #${ev.decisionSeq}.`, detail: `Shopify stock updated by ${actor(ev.receivedBy, you)}` });
         break;
       case "receipt_rejected":
-        items.push({ ...base, kind: "failed", title: `Shopify rejected receipt for purchase #${ev.decisionSeq}` });
+        items.push({ ...base, kind: "failed", title: `Stock receipt rejected for purchase #${ev.decisionSeq}.` });
         break;
       case "ruleset_signed":
-        items.push({ ...base, kind: "rules", byYou: ev.ruleSet.signedBy === you, title: "Rules signed", detail: `Approval needed above ${usd(ev.ruleSet.rules.approvalAboveCents)}, weekly cap ${usd(ev.ruleSet.rules.weeklySpendCapCents)}, approved suppliers: ${ev.ruleSet.rules.supplierAllowlist.join(", ")}` });
+        items.push({ ...base, kind: "rules", byYou: ev.ruleSet.signedBy === you, title: `Rules signed by ${actor(ev.ruleSet.signedBy, you)}.`, detail: `Approval needed above ${usd(ev.ruleSet.rules.approvalAboveCents)}, 7-day spending cap ${usd(ev.ruleSet.rules.weeklySpendCapCents)}, approved suppliers: ${ev.ruleSet.rules.supplierAllowlist.join(", ")}` });
         break;
       case "proposal": {
         const attack = ev.scenario ? attackById(ev.scenario) : undefined;
         if (ev.scenario === WHAT_IF) {
-          items.push({ ...base, kind: "attack", title: "What if the AI were fooled? (simulated)", detail: "Recorded as if the AI obeyed Bean Bargains' note. Test only: never paid." });
+          items.push({ ...base, kind: "attack", title: "Attack test simulated an AI following a dishonest supplier note.", detail: "Recorded as if the AI obeyed Bean Bargains' note. Test only: never paid." });
         } else if (attack) {
           const notes = Object.values(attack.setup.notes ?? {}).join(" / ");
           const quiet = [
@@ -83,18 +84,18 @@ export function toFeed(log: AuditEntry[], you?: string, names: FeedNames = {}): 
           ].filter(Boolean).join("; ");
           items.push({
             ...base, kind: "attack",
-            title: `${attack.level[0].toUpperCase()}${attack.level.slice(1)} attack: ${attack.title}`,
+            title: `Attack test started: ${attack.title}.`,
             detail: `Copies: ${attack.realWorld}.${quiet ? ` Setup: ${quiet}.` : ""}`,
             ...(notes ? { untrusted: notes, untrustedLabel: "Supplier note the AI read (written by the attacker)" } : {}),
           });
         } else if (ev.stock) {
-          items.push({ ...base, kind: "stock", title: `Stock fell: ${product(ev.proposal.sku, ev.proposal.variantId)}`, detail: `${ev.stock.available} left, ${ev.stock.perDay}/day, ${ev.stock.daysOfCover} days of cover` });
+          items.push({ ...base, kind: "stock", title: `Stock low for ${product(ev.proposal.sku, ev.proposal.variantId)}.`, detail: `${ev.stock.available} left, ${ev.stock.perDay}/day, ${ev.stock.daysOfCover} days of cover` });
         }
-        items.push({ ...base, kind: "proposed", title: `AI proposed ${ev.proposal.quantity} × ${product(ev.proposal.sku, ev.proposal.variantId)} from ${supplier(ev.proposal.supplierId)} at ${usd(ev.proposal.unitPriceCents)}`, untrusted: ev.proposal.reasoning, untrustedLabel: "The AI's explanation (not verified)" });
+        items.push({ ...base, kind: "proposed", title: `Purchase proposed: ${ev.proposal.quantity} × ${product(ev.proposal.sku, ev.proposal.variantId)} from ${supplier(ev.proposal.supplierId)}.`, detail: `Price per unit: ${usd(ev.proposal.unitPriceCents)}`, untrusted: ev.proposal.reasoning, untrustedLabel: COPY.aiExplanation });
         break;
       }
       case "proposal_failed":
-        items.push({ ...base, kind: "failed", title: `AI proposal failed for ${ev.sku}${ev.scenario ? " (attack test)" : ""}`, detail: ev.reason });
+        items.push({ ...base, kind: "failed", title: `Purchase proposal failed for ${product(ev.sku, ev.variantId)}${ev.scenario ? " in an attack test" : ""}.`, detail: ev.reason });
         break;
       case "decision": {
         const d = ev.decision;
@@ -105,55 +106,56 @@ export function toFeed(log: AuditEntry[], you?: string, names: FeedNames = {}): 
           const attack = attackById(source.event.scenario);
           const outcome = attack ? classifyAttack(attack, source.event.proposal, d.verdict) : d.verdict === "block" ? "blocked" : "resisted";
           const reasons = flagged.map((c) => c.detail).join(" · ");
-          const tail = "Test only, nothing paid.";
+          const tail = "Attack test only; no payment was submitted.";
           items.push(
-            outcome === "resisted" ? { ...base, kind: "resisted", title: `The AI resisted the attack. ${tail}` }
-            : outcome === "blocked" ? { ...base, kind: "block", title: `The AI was swayed, and the rules BLOCKED it (${usd(d.totalCents)}). ${tail}`, detail: reasons }
-            : outcome === "flagged" ? { ...base, kind: "flagged", title: `The AI was swayed; the rules sent it to a person (${usd(d.totalCents)}). ${tail}`, detail: reasons }
-            : { ...base, kind: "slipped", title: `The AI was swayed and the rules would have ALLOWED it (${usd(d.totalCents)}). ${tail}`, detail: attack?.gap ? `Known gap, fix planned: ${attack.gap}` : "Unexpected: no rule caught this" },
+            outcome === "resisted" ? { ...base, kind: "resisted", title: "Attack test resisted by the AI.", detail: tail }
+            : outcome === "blocked" ? { ...base, kind: "block", title: "Attack test blocked by the rules.", detail: `${usd(d.totalCents)} · ${reasons} · ${tail}` }
+            : outcome === "flagged" ? { ...base, kind: "flagged", title: "Attack test needs approval under the rules.", detail: `${usd(d.totalCents)} · ${reasons} · ${tail}` }
+            : { ...base, kind: "slipped", title: "Attack test allowed by the rules.", detail: `${usd(d.totalCents)} · ${tail} ${attack?.gap ? `Known gap: ${attack.gap}` : "No rule caught this attack."}` },
           );
           break;
         }
-        const title = d.verdict === "auto" ? `Rules checked: allowed (${usd(d.totalCents)})` : d.verdict === "approval" ? `Rules checked: needs your approval (${usd(d.totalCents)})` : `Rules checked: BLOCKED (${usd(d.totalCents)})`;
+        const title = d.verdict === "auto" ? `Purchase allowed by the rules for ${usd(d.totalCents)}.` : d.verdict === "approval" ? `Purchase needs approval for ${usd(d.totalCents)}.` : `Purchase blocked by the rules for ${usd(d.totalCents)}.`;
         items.push({ ...base, kind: d.verdict, title, detail: flagged.length ? flagged.map((c) => c.detail).join(" · ") : `All ${d.checks.length} rules passed` });
         break;
       }
       case "approved":
-        items.push({ ...base, kind: "approved", byYou: ev.approvedBy === you, title: `Approved by ${actor(ev.approvedBy, you)}${purchaseOf(ev.decisionSeq) ? `: ${purchaseOf(ev.decisionSeq)}` : ""}` });
+        items.push({ ...base, kind: "approved", byYou: ev.approvedBy === you, title: `Purchase #${ev.decisionSeq} approved by ${actor(ev.approvedBy, you)}.`, detail: purchaseOf(ev.decisionSeq) });
         break;
       case "rejected":
-        items.push({ ...base, kind: "declined", byYou: ev.rejectedBy === you, title: `Declined by ${actor(ev.rejectedBy, you)}. Nothing was paid.`, detail: ev.reason });
+        items.push({ ...base, kind: "declined", byYou: ev.rejectedBy === you, title: `Purchase #${ev.decisionSeq} declined by ${actor(ev.rejectedBy, you)}.`, detail: ev.reason });
         break;
       case "agent_state":
-        items.push({ ...base, kind: ev.on ? "rules" : "failed", byYou: ev.by === you, title: ev.on ? `Agent turned on by ${actor(ev.by, you)}` : `Agent paused by ${actor(ev.by, you)}` });
+        items.push({ ...base, kind: ev.on ? "rules" : "failed", byYou: ev.by === you, title: ev.on ? `Agent resumed by ${actor(ev.by, you)}.` : `Agent paused by ${actor(ev.by, you)}.` });
         break;
       case "payment_failed":
-        items.push({ ...base, kind: ev.definitive ? "failed" : "paypal", title: ev.definitive ? "Payment failed" : "Awaiting PayPal confirmation", detail: ev.reason });
+        items.push({ ...base, kind: ev.definitive ? "failed" : "paypal", title: `${ev.definitive ? PAYMENT_LABEL.failed : PAYMENT_LABEL.unknown} for purchase #${ev.decisionSeq}.`, detail: ev.reason });
         break;
       case "payout":
-        items.push({ ...base, kind: paymentStatus(log, e).settled ? "paid" : "paypal", title: `${paymentStatus(log, e).label}: submitted ${usd(ev.amountCents)} via PayPal Payouts${purchaseOf(ev.decisionSeq) ? ` for ${purchaseOf(ev.decisionSeq)}` : ""}`, detail: `Initial payout submission: ${ev.payoutBatchId} (${ev.status})`, verifyId: ev.payoutBatchId });
+        items.push({ ...base, kind: paymentStatus(log, e).settled ? "paid" : "paypal", title: `${paymentStatus(log, e).label}: ${usd(ev.amountCents)} for purchase #${ev.decisionSeq}.`, detail: `PayPal Payouts · Initial submission: ${ev.payoutBatchId} (${ev.status})${purchaseOf(ev.decisionSeq) ? ` · ${purchaseOf(ev.decisionSeq)}` : ""}`, verifyId: ev.payoutBatchId });
         break;
       case "payout_status": {
         const payout = log.find(entry => entry.seq === ev.payoutSeq)?.event;
         const id = payout?.type === "payout" ? payout.payoutBatchId : `for audit entry #${ev.payoutSeq}`;
-        const outcome = ({ SUCCESS: "succeeded", PENDING: "is pending", FAILED: "failed", DENIED: "was denied", RETURNED: "was returned", REFUNDED: "was refunded", REVERSED: "was reversed", BLOCKED: "was blocked" } as Record<string, string>)[ev.status] ?? `reports ${ev.status}`;
-        items.push({ ...base, kind: "status", title: `Payment update: Payout ${id} ${outcome}`, detail: ev.confirmedByTransactionSearch ? "Confirmed in PayPal's transaction records" : "Provider status for the existing payout; this is not another payment." });
+        items.push({ ...base, kind: "status", title: `Payment status updated: ${providerStatusLabel(ev.status).toLowerCase()}.`, detail: `PayPal payout ${id} (${ev.status}). ${ev.confirmedByTransactionSearch ? "Confirmed in PayPal's transaction records." : "Provider status for the existing payout; this is not another payment."}` });
         break;
       }
       case "order_created":
-        items.push({ ...base, kind: "paypal", title: `PayPal order ${ev.orderId} created`, detail: "Waiting for approval in PayPal" });
+        items.push({ ...base, kind: "paypal", title: `${APPROVAL_LABEL.paypal_pending} for purchase #${ev.decisionSeq}.`, detail: `PayPal order ID: ${ev.orderId}` });
         break;
       case "order_closed":
         items.push({ ...base, kind: ev.reason === "wrong_payer" ? "block" : "declined",
-          title: ev.reason === "cancelled" ? `PayPal order ${ev.orderId} cancelled in PayPal` : ev.reason === "expired" ? `PayPal order ${ev.orderId} expired without approval` : `PayPal order ${ev.orderId} approved by an account that isn't the store's: not captured`,
-          detail: "Nothing was paid. The purchase can be approved again." });
+          title: ev.reason === "cancelled" ? "PayPal checkout cancelled." : ev.reason === "expired" ? "PayPal checkout expired without approval." : "PayPal checkout refused because the approving account does not match the store.",
+          detail: `PayPal order ID: ${ev.orderId}. No payment was captured for this order; review the purchase in Rules & Approvals.` });
         break;
       case "order_status":
-        items.push({ ...base, kind: ev.status.includes("REFUND") ? "paypal" : "status", title: `PayPal order ${ev.orderId}: ${ev.status}`, detail: ev.refundedCents ? `${usd(ev.refundedCents)} refunded by the supplier` : undefined });
+        items.push({ ...base, kind: ev.status.includes("REFUND") ? "paypal" : "status", title: `Payment status updated: ${providerStatusLabel(ev.status).toLowerCase()}.`, detail: `PayPal order ${ev.orderId} (${ev.status})${ev.refundedCents ? ` · ${usd(ev.refundedCents)} refunded by the supplier` : ""}` });
         break;
       case "order_captured":
-        items.push({ ...base, kind: paymentStatus(log, e).settled ? "paid" : "paypal", title: `${paymentStatus(log, e).label}: ${usd(ev.amountCents)} via PayPal Orders${purchaseOf(ev.decisionSeq) ? ` for ${purchaseOf(ev.decisionSeq)}` : ""}`, detail: `Initial capture response: ${ev.captureId} (${ev.status})`, verifyId: ev.orderId });
+        items.push({ ...base, kind: paymentStatus(log, e).settled ? "paid" : "paypal", title: `${paymentStatus(log, e).label}: ${usd(ev.amountCents)} for purchase #${ev.decisionSeq}.`, detail: `PayPal checkout · Initial capture response: ${ev.captureId} (${ev.status})${purchaseOf(ev.decisionSeq) ? ` · ${purchaseOf(ev.decisionSeq)}` : ""}`, verifyId: ev.orderId });
         break;
+      default:
+        items.push({ ...base, kind: "status", title: "Activity recorded.", detail: "Details for this event are not available in this version of GuardBuy." });
     }
   }
   return items.reverse(); // newest first
