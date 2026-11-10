@@ -21,7 +21,10 @@ export async function planInsightView(
     AbortSignal.timeout(25_000),
     ...(signal ? [signal] : []),
   ]);
-  for (const entry of modelChain().slice(0, 2)) {
+  // A slow/unavailable free model must leave time for the remaining providers.
+  // Keep the whole request bounded while allowing the fourth configured fallback.
+  for (const entry of modelChain().slice(0, 4)) {
+    if (deadline.aborted) break;
     const split = entry.indexOf(":"),
       provider = entry.slice(0, split),
       id = entry.slice(split + 1);
@@ -42,8 +45,9 @@ export async function planInsightView(
         output: Output.object({ schema: InsightPlanSchema }),
         temperature: 0,
         maxRetries: 0,
-        abortSignal: deadline,
-        maxOutputTokens: 512,
+        abortSignal: AbortSignal.any([deadline, AbortSignal.timeout(6_000)]),
+        // Reasoning models spend part of this budget before producing the JSON.
+        maxOutputTokens: 2048,
       });
       return InsightPlanSchema.parse(output);
     } catch {
