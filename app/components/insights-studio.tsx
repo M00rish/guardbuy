@@ -304,7 +304,7 @@ export default function InsightsStudio({
               select: setView,
               plan: async (prompt, signal) => {
                 const token = await shopify.idToken();
-                const response = await fetch("/app/insights", {
+                const response = await fetch("/app/insights/plan", {
                   method: "POST",
                   headers: {
                     "Content-Type": "application/json",
