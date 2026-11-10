@@ -25,19 +25,19 @@ export const SHELL = `
 <div class="gb">
   <span class="badge">Live demo store · PayPal sandbox</span>
   <h1>Buy in the store.<br>Watch GuardBuy respond.</h1>
-  <p class="lead">Place a test order in another tab. Watch available stock change, then follow the AI restock proposal, policy decision and supplier payment here.</p>
+  <p class="lead">Place a test order in another tab. Watch available stock change, then follow the AI restock proposal, rules decision and supplier payment here.</p>
   <div class="actions">
     <a class="button primary" href="/collections/all" target="_blank" rel="noopener">Open the store ↗</a>
     <button class="button" id="gb-refresh" type="button">Refresh dashboard</button>
     <span class="muted" id="gb-updated" role="status" aria-live="polite">Loading live data…</span>
   </div>
   <p class="muted">Use the test checkout configured by the demo host. Customer checkout and GuardBuy’s supplier payment are separate transactions.</p>
-  <div class="steps">Store checkout → stock change → AI proposal → policy checks → merchant review if required → supplier payment</div>
+  <div class="steps">Store checkout → stock change → AI proposal → rules checks → merchant review if required → supplier payment</div>
   <div class="stats" id="gb-stats"></div>
   <p id="gb-agent" class="muted"></p>
   <div class="columns">
     <section class="card"><h2>Managed store stock</h2><div id="gb-stock">Loading…</div><p class="muted">Available units across locations. Reorder levels depend on sales history and the merchant’s rules.</p></section>
-    <section class="card"><h2>Supplier payment outcomes</h2><div id="gb-payments">Loading…</div><p class="muted">Latest recorded PayPal sandbox outcomes, across this store’s restock history. They are not customer checkout payments.</p><p class="muted">The merchant checks statuses in Activity or Approvals. This public page does not refresh PayPal, approve purchases, or send money.</p></section>
+    <section class="card"><h2>Supplier payment outcomes</h2><div id="gb-payments">Loading…</div><p class="muted">Latest recorded PayPal sandbox outcomes, across this store’s restock history. They are not customer checkout payments.</p><p class="muted">The merchant checks statuses in Activity or Rules & Approvals. This public page does not refresh PayPal, approve purchases, or send money.</p></section>
   </div>
   <section class="card" style="margin-top:24px"><h2>Restock activity</h2><p class="muted">Latest 30 recorded steps, newest first. Attack simulations are excluded. This is a shared store view, not a private session or proof that a particular order caused a payment.</p><ol id="gb-timeline"></ol></section>
   <div class="notice"><strong>What to expect</strong><p>Stock changes arrive through Shopify webhooks. A restock starts only when the product is managed, the agent is on, stock is below its threshold, and no existing restock blocks a new one. AI and payment processing can take time.</p><p class="muted">Paying a supplier does not immediately replenish inventory. Stock increases when the merchant records received goods. Merchant approvals and attack tests stay inside the authenticated GuardBuy app.</p></div>
@@ -55,7 +55,7 @@ export const SHELL = `
     [[orderCount, "Test orders today · UTC"], [data.stock ? data.stock.products.length : "Unavailable", "Managed variants shown"], [data.decisions.proposals, "Restock proposals · all time"], [data.payments.total, "Supplier payment records · all time"]].forEach(function (pair) {
       var card = el("div", "card stat"); card.append(el("strong", null, pair[0]), el("span", "muted", pair[1])); stats.appendChild(card);
     });
-    document.getElementById("gb-agent").textContent = (data.agentRunning ? "Agent enabled." : "Agent paused or rules not configured.") + " Policy decisions so far: " + data.decisions.automatic + " automatic, " + data.decisions.review + " required review, " + data.decisions.blocked + " blocked.";
+    document.getElementById("gb-agent").textContent = (data.agentRunning ? "Agent enabled." : "Agent paused or rules not configured.") + " Rules decisions so far: " + data.decisions.automatic + " automatic, " + data.decisions.review + " needed approval, " + data.decisions.blocked + " blocked.";
     var stock = document.getElementById("gb-stock"); stock.replaceChildren();
     if (!data.stock) stock.appendChild(el("p", null, "Stock is temporarily unavailable. Try refreshing."));
     else {
@@ -76,7 +76,7 @@ export const SHELL = `
       });
     }
     var payments = document.getElementById("gb-payments"); payments.replaceChildren();
-    [[data.payments.successful, "successful"], [data.payments.pending, "pending / unconfirmed"], [data.payments.failed, "failed / blocked"], [data.payments.refunded, "returned / refunded / reversed"]].forEach(function (pair) { payments.appendChild(el("p", null, pair[0] + " " + pair[1])); });
+    [[data.payments.successful, "Paid"], [data.payments.pending, "Payment pending or awaiting confirmation"], [data.payments.failed, "Payment failed"], [data.payments.refunded, "Returned or refunded"]].forEach(function (pair) { payments.appendChild(el("p", null, pair[0] + " " + pair[1])); });
     var timeline = document.getElementById("gb-timeline"); timeline.replaceChildren();
     if (!data.timeline.length) timeline.appendChild(el("li", "muted", "No restock activity yet. Place a test order for a prepared product to begin."));
     data.timeline.forEach(function (item) { var li = el("li"); li.append(el("div", null, item.text), el("span", "muted", new Date(item.at).toLocaleString())); timeline.appendChild(li); });

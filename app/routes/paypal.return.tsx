@@ -33,7 +33,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     const status = await runPayPalTool<{ status: string }>("get_order", { id: orderId }).then((o) => o.status, () => "UNKNOWN");
     if (["CREATED", "PAYER_ACTION_REQUIRED", "VOIDED"].includes(status)) {
       try { await closeOrder(found.shop, found.decisionSeq, orderId, "cancelled"); }
-      catch { return page("Awaiting confirmation", "The original payment is still reserved. Check it in GuardBuy before taking another action.", 409); }
+      catch { return page("Payment awaiting confirmation", "The original payment is still reserved. Check it in GuardBuy before taking another action.", 409); }
     } else return page("Check payment status", "PayPal has not confirmed that this order is cancelled. Its reservation remains in GuardBuy.", 409);
     return page("Not approved", "You cancelled in PayPal, so nothing was paid. The purchase is back in GuardBuy's Approvals, where you can approve, decline or try PayPal again.");
   }
@@ -41,11 +41,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   try {
     const entry = await captureApprovalOrder(found.shop, found.decisionSeq);
     const amount = entry.event.type === "order_captured" ? `$${(entry.event.amountCents / 100).toFixed(2)}` : "";
-    if (entry.event.type === "order_captured" && entry.event.status !== "COMPLETED") return page("Payment awaiting confirmation", "PayPal recorded the payment, but it is not yet confirmed complete. Check its status in GuardBuy.");
-    return page("Purchase approved and paid", `PayPal paid the supplier ${amount}. It's recorded in GuardBuy's audit log as entry #${entry.seq}.`);
+    if (entry.event.type === "order_captured" && entry.event.status !== "COMPLETED") return page("Payment pending", "PayPal recorded the payment, but it is not yet confirmed complete. Check its status in GuardBuy.");
+    return page("Paid", `PayPal paid the supplier ${amount}. It's recorded in GuardBuy's audit log as entry #${entry.seq}.`);
   } catch (e) {
     console.error("[orders] Capture outcome could not be confirmed");
     const msg = (e instanceof ExecutionRefused || e instanceof PaymentPending || e instanceof PaymentRouteRefused) ? escape(e.message) : "The original payment outcome is not confirmed. Check the purchase in GuardBuy before retrying.";
-    return page("Payment not completed", msg, 409);
+    return page("Payment needs attention", msg, 409);
   }
 };

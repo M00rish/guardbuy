@@ -1,5 +1,7 @@
 // Shared Polaris-native building blocks for GuardBuy's admin pages (browser-safe: no server code).
 
+import { APPROVAL_LABEL, COPY } from "../lib/wording";
+
 export type Tone = "success" | "caution" | "warning" | "critical" | "info" | "neutral";
 
 /** "just now", "5 min ago", "3 h ago", "yesterday", "2 days ago" */
@@ -25,7 +27,7 @@ export const FEED_TONE: Record<string, Tone> = {
 };
 export const FEED_LABEL: Record<string, string> = {
   receipt_started: "Receipt started", stock_received: "Stock received", delivery: "Delivery update",
-  paid: "Paid", approved: "Approved", auto: "Allowed", block: "Blocked", failed: "Failed", approval: "Needs you", declined: "Declined",
+  paid: "Paid", approved: "Approved", auto: "Allowed", block: "Blocked", failed: "Failed", approval: APPROVAL_LABEL.waiting, declined: "Declined",
   stock: "Low stock", proposed: "AI proposed", rules: "Rules", paypal: "PayPal", attack: "Attack test", resisted: "Resisted",
   flagged: "Flagged", slipped: "Gap", status: "Payment update",
 };
@@ -111,7 +113,7 @@ export function Unavailable({ what }: { what: string }) {
   return (
     <s-banner tone="warning" heading={`Couldn't load ${what}`}>
       <s-stack gap="small-200">
-        <s-text>Shopify or PayPal didn’t answer in time. Nothing was bought or paid.</s-text>
+        <s-text>{COPY.loadError}</s-text>
         <s-box><s-button onClick={() => window.location.reload()}>Try again</s-button></s-box>
       </s-stack>
     </s-banner>

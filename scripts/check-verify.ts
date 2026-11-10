@@ -48,7 +48,7 @@ ok(!(await verifyPayment("'; drop table--")).found, "malformed id -> not found")
 
 const auto = await verifyPayment("VERIFYCHECKAUTO1");
 ok(auto.found && auto.chain.valid && auto.how === "automatic" && auto.paidBy === "PayPal Payouts", "automatic payment verified, chain intact");
-ok(auto.found && auto.steps.map((s) => s.step).join(" > ") === "Rules signed > AI proposed the purchase > Rules checked it > Paid via PayPal Payouts > PayPal status update", `steps: ${auto.found ? auto.steps.map((s) => s.step).join(" > ") : ""}`);
+ok(auto.found && auto.steps.map((s) => s.step).join(" > ") === "Rules signed > AI proposed the purchase > Rules checked > Submitted via PayPal Payouts > PayPal status update", `steps: ${auto.found ? auto.steps.map((s) => s.step).join(" > ") : ""}`);
 ok(auto.found && auto.details === null, "details hidden by default");
 ok(!JSON.stringify(auto).includes(EMAIL) && !JSON.stringify(auto).includes("4123.45") && !JSON.stringify(auto).includes("4,123"), "no email or balance in the hashes-only result");
 

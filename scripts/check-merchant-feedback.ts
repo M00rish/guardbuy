@@ -160,14 +160,14 @@ assert.equal(feed.find((e) => e.seq === started.seq)?.kind, "receipt_started");
 assert.equal(feed.find((e) => e.seq === received.seq)?.kind, "stock_received");
 assert.match(
   feed.find((e) => e.seq === received.seq)!.title,
-  /Received 1 unit for/,
+  /Stock received: 1 unit for/,
 );
 assert.ok(feed.filter((e) => e.byYou).some((e) => e.seq === started.seq));
 assert.ok(feed.filter((e) => e.byYou).some((e) => e.seq === received.seq));
 assert.ok(!other.find((e) => e.seq === received.seq)?.byYou);
 assert.ok(
   feed.some(
-    (e) => e.title === "Payment update: Payout ACTUAL-PAYOUT-ID succeeded",
+    (e) => e.title === "Payment status updated: paid." && e.detail?.includes("ACTUAL-PAYOUT-ID"),
   ),
 );
 assert.equal(readableTime("2026-11-09T18:00:00Z"), "9 Nov 2026, 18:00:00 UTC");

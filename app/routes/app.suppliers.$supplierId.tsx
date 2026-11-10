@@ -60,7 +60,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   if (!z.email().safeParse(paypalEmail).success) return { ok: false, message: "Enter a valid PayPal email" };
   await saveSupplier(session.shop, { id, name, paypalEmail });
   const emailChanged = existing.paypalEmail.toLowerCase() !== paypalEmail.toLowerCase();
-  return { ok: true, message: emailChanged ? "Saved. Purchases proposed before this change won't be paid to the new address." : "Saved" };
+  return { ok: true, message: emailChanged ? "Supplier updated. Existing purchases keep their original PayPal recipient." : "Supplier updated." };
 };
 
 const date = (iso: string) => new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
@@ -89,16 +89,16 @@ export default function Supplier() {
         <s-stack gap="base">
           <Row label="In your rules">
             {s.approved === null ? <s-text tone="neutral">No rules signed yet</s-text>
-              : s.approved ? <s-badge tone="success">Approved: the agent may buy from them</s-badge>
-              : <s-stack direction="inline" gap="small-200" alignItems="center"><s-badge tone="caution">Not approved: purchases are blocked</s-badge><s-link href="/app/rules?tab=rules">Edit rules</s-link></s-stack>}
+              : s.approved ? <s-badge tone="success">Approved in rules</s-badge>
+              : <s-stack direction="inline" gap="small-200" alignItems="center"><s-badge tone="caution">Not approved in rules</s-badge><s-link href="/app/rules?tab=rules">Edit rules</s-link></s-stack>}
           </Row>
           <Row label="Added"><s-text>{date(s.addedAt)}</s-text></Row>
           <fetcher.Form method="post">
             <s-query-container>
               <s-grid gridTemplateColumns="@container (inline-size <= 640px) 1fr, 1fr 1fr auto" gap="base" alignItems="end">
                 <s-text-field label="Name" name="name" value={s.name} />
-                <s-email-field label="PayPal email (where they get paid)" name="paypalEmail" value={s.paypalEmail} />
-                <s-button type="submit" disabled={busy}>Save</s-button>
+                <s-email-field label="Supplier PayPal email" name="paypalEmail" value={s.paypalEmail} />
+                <s-button type="submit" disabled={busy}>Save supplier</s-button>
               </s-grid>
             </s-query-container>
           </fetcher.Form>

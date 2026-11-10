@@ -17,7 +17,7 @@ function add(event: AuditEvent) {
 add({ type: "proposal", proposal: { sku: "private-sku", supplierId: "private-supplier", quantity: 10, unitPriceCents: 100, payeeEmail: "private@example.test", reasoning: "private reasoning" } });
 add({ type: "decision", proposalSeq: 0, decision: { verdict: "auto", checks: [], totalCents: 1000, ruleSetHash: "hash" } });
 payment = add({ type: "payout", decisionSeq: 1, amountCents: 1000, payoutBatchId: "BATCH1234", status: "SUCCESS" });
-for (const [status, label] of [["INITIAL", "Payment pending"], ["SUCCESS", "Paid"], ["RETURNED", "Returned"], ["REFUNDED", "Refunded"], ["FAILED", "Failed"]]) {
+for (const [status, label] of [["INITIAL", "Payment pending"], ["SUCCESS", "Paid"], ["RETURNED", "Returned"], ["REFUNDED", "Refunded"], ["FAILED", "Payment failed"]]) {
   if (status !== "INITIAL") add({ type: "payout_status", payoutSeq: payment, status, confirmedByTransactionSearch: false });
   const proof = await verifyPayment("BATCH1234"); assert.ok(proof.found);
   assert.equal(proof.paymentStatus, label); assert.equal(proof.details, null); assert.ok(proof.chain.valid);

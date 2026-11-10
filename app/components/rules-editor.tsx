@@ -1,3 +1,4 @@
+import { COPY } from "../lib/wording";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFetcher } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
@@ -155,19 +156,19 @@ export function RulesEditor({ data }: { data: RulesPageData }) {
               >
                 {field(
                   "approvalAbove",
-                  "Ask me above ($)",
-                  "Bigger purchases wait in Approvals",
+                  `${COPY.approvalAbove} ($)`,
+                  "Larger purchases need approval in Rules & Approvals",
                   { min: 0, step: 1 },
                 )}
                 {field(
                   "weeklySpendCap",
-                  "Last 7 days spending cap ($)",
+                  `${COPY.spendingCap} ($)`,
                   "Rolling 7 days, all suppliers",
                   { min: 0, step: 1 },
                 )}
                 {field(
                   "cashFloor",
-                  "Keep at least this in PayPal ($)",
+                  `${COPY.cashFloor} ($)`,
                   "Purchases that would go below are blocked",
                   { min: 0, step: 1 },
                 )}
@@ -271,8 +272,8 @@ export function RulesEditor({ data }: { data: RulesPageData }) {
             <s-table-header-row>
               <s-table-header listSlot="primary">Signed</s-table-header>
               <s-table-header>By</s-table-header>
-              <s-table-header format="numeric">Ask me above</s-table-header>
-              <s-table-header format="numeric">Weekly cap</s-table-header>
+              <s-table-header format="numeric">{COPY.approvalAbove}</s-table-header>
+              <s-table-header format="numeric">{COPY.spendingCap}</s-table-header>
               <s-table-header listSlot="secondary">Fingerprint</s-table-header>
             </s-table-header-row>
             <s-table-body>

@@ -73,7 +73,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     case "toggle": {
       const on = f.get("managed") === "true";
       await setManaged(shop, { variantId, sku: String(f.get("sku") || "") || null, title: String(f.get("title") ?? "") }, on);
-      return { ok: true, message: on ? "GuardBuy will restock this product" : "Product switched off" };
+      return { ok: true, message: on ? "Automatic restocking enabled" : "Automatic restocking disabled" };
     }
     case "link": {
       const price = Math.round(Number(f.get("price")) * 100);
@@ -147,7 +147,7 @@ export default function ProductSuppliers() {
               <s-table-header format="numeric">Price per unit</s-table-header>
               <s-table-header format="numeric">Usual order</s-table-header>
               <s-table-header format="numeric">Lead time</s-table-header>
-              <s-table-header listSlot="secondary">Paid at</s-table-header>
+              <s-table-header listSlot="secondary">Supplier PayPal email</s-table-header>
               <s-table-header>Actions</s-table-header>
             </s-table-header-row>
             <s-table-body>

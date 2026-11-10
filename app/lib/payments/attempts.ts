@@ -1,3 +1,4 @@
+import { PAYMENT_LABEL } from "../wording";
 import { PaymentSafetyRefusal } from "./safety-refusal";
 import { deliveries } from "../inventory/deliveries";
 import type { AuditEntry, AuditEvent } from "../policy/schema";
@@ -5,7 +6,7 @@ import type { AuditEntry, AuditEvent } from "../policy/schema";
 export type Attempt = Extract<AuditEvent, { type: "payment_attempt" }>;
 export type PaymentResult = Extract<AuditEvent, { type: "payout" | "order_created" | "order_captured" }>;
 export class PaymentPending extends Error {
-  constructor() { super("Awaiting PayPal confirmation. The original payment remains reserved; do not create a replacement purchase."); }
+  constructor() { super(`${PAYMENT_LABEL.unknown}. The original payment remains reserved; do not create a replacement purchase.`); }
 }
 export class PaymentRejected extends Error {}
 export class PaymentRouteRefused extends Error {}

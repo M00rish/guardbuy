@@ -8,6 +8,7 @@ import type {
   ApprovalActionData,
 } from "../lib/merchant/approval-page.server";
 import styles from "./approval-page.module.css";
+import { APPROVAL_LABEL, COPY } from "../lib/wording";
 import { usd } from "../lib/format";
 import { ago, Empty, plural, Row } from "./ui";
 
@@ -23,15 +24,7 @@ const pct = (n: number) => `${n >= 0 ? "+" : ""}${Math.round(n)}%`;
 type Card = ApprovalCard & { productTitle: string };
 
 function Status({ card }: { card: Card }) {
-  const label = {
-    waiting: "Needs you",
-    paypal_pending: "Waiting for PayPal",
-    payment_unknown: "Awaiting PayPal confirmation",
-    payment_pending: "Payment submitted · pending",
-    payment_failed: card.canRetry
-      ? "Approved · unpaid"
-      : "Payment needs attention",
-  }[card.status];
+  const label = APPROVAL_LABEL[card.status];
   return (
     <s-badge
       tone={
@@ -64,10 +57,10 @@ export function ApprovalsPanel({ data }: { data: ApprovalPageData }) {
           </s-banner>
         </s-section>
       )}
-      <s-section heading="Approval requests">
+      <s-section heading="Purchases needing attention">
         <s-stack gap="base">
           {cards.length === 0 ? (
-            <Empty heading="Nothing is waiting for you">
+            <Empty heading="No purchases need attention">
               Purchases needing approval or payment attention appear here. New
               approvals expire after 48 hours; uncertain payments stay reserved
               until confirmed.
@@ -82,7 +75,7 @@ export function ApprovalsPanel({ data }: { data: ApprovalPageData }) {
               <div
                 className={styles.scroll}
                 role="region"
-                aria-label="Approval requests table"
+                aria-label="Purchases needing attention"
                 // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Allow keyboard scrolling of a wide table.
                 tabIndex={0}
               >
@@ -257,7 +250,7 @@ function ApprovalDetails({ card }: { card: Card }) {
               ` · ${qtyMultiple.toFixed(1)}× the usual ${card.usualQuantity}`}
           </s-text>
         </Row>
-        <Row label="Pays">
+        <Row label="Supplier PayPal email">
           <s-text>{card.payeeEmail ?? "No PayPal email on file"}</s-text>
         </Row>
         <Row label="Other rules">
@@ -267,7 +260,7 @@ function ApprovalDetails({ card }: { card: Card }) {
 
       <s-box padding="base" background="subdued" borderRadius="base">
         <s-stack gap="small-200">
-          <s-text type="strong">The AI’s explanation (not verified)</s-text>
+          <s-text type="strong">{COPY.aiExplanation}</s-text>
           <s-text>{card.aiExplanation}</s-text>
         </s-stack>
       </s-box>
@@ -289,7 +282,7 @@ function ApprovalDetails({ card }: { card: Card }) {
             </s-button>
           )}
           <s-link href={`/app/activity?purchase=${card.decisionSeq}`}>
-            View payment evidence in Activity
+            View payment details in Activity
           </s-link>
           {fetcher.data?.approveUrl && (
             <s-link href={fetcher.data.approveUrl} target="_blank">
@@ -301,11 +294,11 @@ function ApprovalDetails({ card }: { card: Card }) {
         <s-stack gap="base">
           <s-text>
             PayPal has the original payment. Its outcome is still pending; do
-            not submit another payment. Use Refresh payout status above to check
+            not submit another payment. Use the payout status refresh above to check
             for confirmation.
           </s-text>
           <s-link href={`/app/activity?purchase=${card.decisionSeq}`}>
-            View payment evidence in Activity
+            View payment details in Activity
           </s-link>
         </s-stack>
       ) : card.status === "payment_failed" ? (
@@ -341,7 +334,7 @@ function ApprovalDetails({ card }: { card: Card }) {
               </s-button>
             )}
             <s-link href={`/app/activity?purchase=${card.decisionSeq}`}>
-              View payment evidence
+              View payment details in Activity
             </s-link>
           </s-stack>
         </s-stack>
@@ -352,7 +345,7 @@ function ApprovalDetails({ card }: { card: Card }) {
             href={card.paypalApproveUrl}
             target="_blank"
           >
-            Open PayPal to approve
+            Continue in PayPal
           </s-button>
           <s-text tone="neutral">
             GuardBuy records the payment when PayPal sends you back.

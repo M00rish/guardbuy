@@ -1,3 +1,4 @@
+import { APPROVAL_LABEL, PAYMENT_LABEL, providerStatusLabel } from "../wording";
 import { unresolvedPayments } from "../payments/attempts";
 import type { AuditEntry } from "../policy/schema";
 
@@ -25,22 +26,22 @@ export function publicAudit(log: AuditEntry[]) {
   for (const entry of log) {
     const ev = entry.event;
     let text: string | undefined;
-    if (ev.type === "proposal_failed" && !ev.scenario) text = "AI could not complete a restock proposal. Merchant review needed.";
-    if (ev.type === "proposal" && proposals.has(entry.seq)) text = "AI proposed a supplier restock.";
+    if (ev.type === "proposal_failed" && !ev.scenario) text = "Purchase proposal failed; merchant review is needed.";
+    if (ev.type === "proposal" && proposals.has(entry.seq)) text = "Purchase proposed by the AI.";
     if (ev.type === "decision" && decisions.has(entry.seq)) {
-      if (ev.decision.verdict === "auto") { counts.automatic++; text = "Policy checks allowed automatic payment."; }
-      if (ev.decision.verdict === "approval") { counts.review++; text = "Policy checks required merchant review."; }
-      if (ev.decision.verdict === "block") { counts.blocked++; text = "Policy checks blocked this restock."; }
+      if (ev.decision.verdict === "auto") { counts.automatic++; text = "Purchase allowed by the rules."; }
+      if (ev.decision.verdict === "approval") { counts.review++; text = "Purchase needs approval."; }
+      if (ev.decision.verdict === "block") { counts.blocked++; text = "Purchase blocked by the rules."; }
     }
     if ("decisionSeq" in ev && decisions.has(ev.decisionSeq)) {
-      if (ev.type === "payment_outcome") text = ev.status === "unknown" ? "Supplier payment awaits PayPal confirmation; original purchase remains reserved." : "PayPal rejected a supplier payment request.";
-      if (ev.type === "receipt_received") text = `Merchant received ${ev.quantity} units; Shopify inventory updated.`;
-      if (ev.type === "receipt_started") text = "Merchant started recording a delivery receipt.";
-      if (ev.type === "receipt_rejected") text = "Delivery receipt was rejected; inventory was not confirmed updated.";
-      if (ev.type === "approved") text = "Merchant approved a restock.";
-      if (ev.type === "rejected") text = "Merchant declined a restock.";
-      if (ev.type === "payment_failed") text = "Supplier payment attempt failed. Merchant review needed.";
-      if (ev.type === "order_created") text = "Supplier payment awaits merchant approval in PayPal.";
+      if (ev.type === "payment_outcome") text = ev.status === "unknown" ? `${PAYMENT_LABEL.unknown}; the original purchase remains reserved.` : "Payment request rejected by PayPal.";
+      if (ev.type === "receipt_received") text = `Stock received: ${ev.quantity} ${ev.quantity === 1 ? "unit" : "units"}; Shopify stock updated.`;
+      if (ev.type === "receipt_started") text = "Stock receipt started by the merchant.";
+      if (ev.type === "receipt_rejected") text = "Stock receipt rejected; the stock update is not confirmed.";
+      if (ev.type === "approved") text = "Purchase approved by the merchant.";
+      if (ev.type === "rejected") text = "Purchase declined by the merchant.";
+      if (ev.type === "payment_failed") text = `${ev.definitive ? PAYMENT_LABEL.failed : PAYMENT_LABEL.unknown}; merchant review is needed.`;
+      if (ev.type === "order_created") text = `${APPROVAL_LABEL.paypal_pending}.`;
       if (ev.type === "payout") {
         const update = [...log].reverse().find((e) => e.event.type === "payout_status" && e.event.payoutSeq === entry.seq)?.event;
         // Initial payout status is a batch status, not proof of item success.
@@ -52,12 +53,12 @@ export function publicAudit(log: AuditEntry[]) {
         payments.push(payment(update?.type === "order_status" ? update.status : ev.status, ev.amountCents, new Set(["COMPLETED"])));
         text = "Supplier payment capture recorded in PayPal sandbox.";
       }
-      if (ev.type === "order_status") text = `Supplier payment status updated: ${payment(ev.status, 0, new Set(["COMPLETED"])).status}.`;
+      if (ev.type === "order_status") text = `Payment status updated: ${providerStatusLabel(ev.status).toLowerCase()}.`;
     }
     if (ev.type === "payout_status") {
       const original = log.find((e) => e.seq === ev.payoutSeq)?.event;
       if (original?.type === "payout" && decisions.has(original.decisionSeq)) {
-        text = `Supplier payout status updated: ${payment(ev.status, 0, PAYOUT_SUCCESS).status}.`;
+        text = `Payment status updated: ${providerStatusLabel(ev.status).toLowerCase()}.`;
       }
     }
     if (text) timeline.push({ at: entry.at, text });

@@ -29,7 +29,7 @@ export function SuppliersPanel({ data }: { data: SuppliersPageData }) {
             >
               <s-text-field label="Name" name="name" />
               <s-email-field
-                label="PayPal email (where they get paid)"
+                label="Supplier PayPal email"
                 name="paypalEmail"
               />
               <s-button
@@ -54,7 +54,7 @@ export function SuppliersPanel({ data }: { data: SuppliersPageData }) {
           <s-table>
             <s-table-header-row>
               <s-table-header listSlot="primary">
-                Supplier · paid at (PayPal)
+                Supplier · PayPal email
               </s-table-header>
               <s-table-header format="numeric">Products</s-table-header>
               <s-table-header listSlot="secondary">Status</s-table-header>

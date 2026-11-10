@@ -74,10 +74,10 @@ export async function verifyPayment(rawId: string): Promise<PaymentProof> {
   const steps = [
     ...step(rules, "Rules signed"),
     ...step(proposal, "AI proposed the purchase"),
-    ...step(decision, "Rules checked it", decision?.event.type === "decision" ? `verdict: ${decision.event.decision.verdict === "auto" ? "allowed automatically" : decision.event.decision.verdict === "approval" ? "needs a person" : "blocked"}` : undefined),
-    ...step(approved, "A person approved it"),
+    ...step(decision, "Rules checked", decision?.event.type === "decision" ? `verdict: ${decision.event.decision.verdict === "auto" ? "allowed automatically" : decision.event.decision.verdict === "approval" ? "needs approval" : "blocked"}` : undefined),
+    ...step(approved, "Purchase approved"),
     ...step(orderCreated, "PayPal order created for approval in PayPal"),
-    ...step(pay, pay.event.type === "payout" ? "Submitted via PayPal Payouts" : "Capture submitted via PayPal Orders"),
+    ...step(pay, pay.event.type === "payout" ? "Submitted via PayPal Payouts" : "Payment submitted via PayPal checkout"),
     ...statuses.flatMap((s) => step(s, "PayPal status update", s.event.type === "payout_status" ? s.event.status + (s.event.confirmedByTransactionSearch ? " · confirmed in PayPal's records" : "") : s.event.type === "order_status" ? s.event.status : undefined)),
   ].sort((a, b) => a.seq - b.seq);
 
