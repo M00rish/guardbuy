@@ -4,6 +4,7 @@ import { build } from "esbuild";
 import { mkdtemp, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+import { createRequestHandler, type ServerBuild } from "react-router";
 const root = resolve(import.meta.dirname, ".."),
   work = await mkdtemp(resolve(root, "node_modules/.insights-route-"));
 const priorEnv = {
@@ -21,7 +22,8 @@ try {
   fixtures.__insightPlans = [];
   await build({
     stdin: {
-      contents: "export {loader,action} from './app/routes/app.insights';",
+      contents:
+        "export {loader,action} from './app/routes/app.insights'; export * as resource from './app/routes/app.insights.plan';",
       resolveDir: root,
       loader: "ts",
     },
@@ -179,6 +181,79 @@ try {
     503,
   );
   assert.equal(fixtures.__insightPlans.length, 1);
+  // Real React Router request handling (not just calling action directly): a UI
+  // document POST renders HTML, while the component-less endpoint returns JSON.
+  process.env.NODE_ENV = "test";
+  const handler = createRequestHandler(
+    {
+      entry: {
+        module: {
+          default: () =>
+            new Response("<html>Insights UI</html>", {
+              headers: { "Content-Type": "text/html" },
+            }),
+        },
+      },
+      routes: {
+        root: { id: "root", path: "", module: { default: () => null } },
+        insights: {
+          id: "insights",
+          parentId: "root",
+          path: "app/insights",
+          module: { default: () => null, action: routes.action },
+        },
+        plan: {
+          id: "plan",
+          parentId: "insights",
+          path: "plan",
+          module: routes.resource,
+        },
+      },
+      assets: {
+        routes: {},
+        entry: { module: "/entry.js", imports: [] },
+        url: "/manifest.js",
+        version: "test",
+      },
+      future: {},
+      ssr: true,
+      isSpaMode: false,
+      prerender: [],
+      routeDiscovery: { mode: "initial", manifestPath: "/__manifest" },
+      publicPath: "/",
+      assetsBuildDirectory: "build/client",
+    } as unknown as ServerBuild,
+    "test",
+  );
+  const httpReq = (path: string, staff: string, verified = true) =>
+    new Request(`https://local.test${path}`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-staff": staff,
+        ...(verified ? { "x-auth": "verified" } : {}),
+      },
+      body: JSON.stringify({ prompt: "Show pending purchases" }),
+    });
+  const document = await handler(httpReq("/app/insights", "document-test"));
+  assert.match(
+    document.headers.get("content-type") ?? "",
+    /text\/html/,
+    "old fetch target renders a UI document",
+  );
+  const json = await handler(httpReq("/app/insights/plan", "resource-test"));
+  assert.equal(json.status, 200);
+  assert.match(json.headers.get("content-type") ?? "", /application\/json/);
+  assert.equal(json.headers.get("cache-control"), "private, no-store");
+  assert.deepEqual(await json.json(), { view: "pending", refused: false });
+  const unauthenticated = await handler(
+    httpReq("/app/insights/plan", "unauthenticated", false),
+  );
+  assert.equal(
+    unauthenticated.status,
+    401,
+    "resource endpoint retains staff authorization",
+  );
   console.log(
     "PASS insights routes: authentication/staff boundary, shop isolation, chain refusal, bounded strict JSON, no client tools/data, model prompt isolation, rate limit and hosted licence gate.",
   );
