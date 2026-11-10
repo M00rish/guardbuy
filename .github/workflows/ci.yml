@@ -48,6 +48,8 @@ jobs:
       - run: npx tsx scripts/check-deliveries.ts
       - run: npx tsx scripts/check-incoming-stock.ts
       - run: npx tsx scripts/check-public-demo.ts
+      - run: npx tsx scripts/check-insights.ts
+      - run: npx tsx scripts/check-insights-routes.ts
       - run: npx tsx scripts/check-payout-refresh.ts
       - run: npx tsx scripts/check-payment-attempts.ts
       - run: npx tsx scripts/check-unpaid-approvals.ts
