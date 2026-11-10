@@ -112,7 +112,7 @@ export default function ProductSuppliers() {
 
   return (
     <s-page heading={p.title} inlineSize="large">
-      <s-link slot="breadcrumb-actions" href="/app/products">Products & suppliers</s-link>
+      <s-link slot="breadcrumb-actions" href="/app/products">Products & Suppliers</s-link>
 
       <s-section>
         <s-stack direction="inline" gap="base" alignItems="center">

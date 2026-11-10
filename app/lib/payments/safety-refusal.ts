@@ -1,6 +1,6 @@
 const REASONS = {
   product_off:
-    "Payment wasn’t submitted because GuardBuy restocking is switched off for this product. Turn it on in Products & suppliers, then retry this purchase.",
+    "Payment wasn’t submitted because GuardBuy restocking is switched off for this product. Turn it on in Products & Suppliers, then retry this purchase.",
   rules_unsigned:
     "Payment wasn’t submitted because no spending rules are signed. Review and sign your rules before retrying.",
   account_access:
