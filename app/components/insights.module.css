@@ -1,0 +1,72 @@
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+}
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.filters button,
+.filters a {
+  font: inherit;
+  padding: 8px 12px;
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  background: #fff;
+  color: #303030;
+  text-decoration: none;
+  cursor: pointer;
+}
+.filters button[aria-pressed="true"] {
+  background: #e3f1eb;
+  border-color: #007f5f;
+}
+.filters button:focus-visible,
+.filters a:focus-visible {
+  outline: 2px solid #005bd3;
+  outline-offset: 2px;
+}
+.studio {
+  height: 1040px;
+  min-width: 0;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.budget {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px;
+  font:
+    14px/1.4 Arial,
+    sans-serif;
+  color: #303030;
+}
+.budget progress {
+  width: 100%;
+  accent-color: #007f5f;
+  height: 10px;
+}
+.big {
+  font-size: 23px;
+  font-weight: 650;
+}
+.note {
+  font-size: 12px;
+  color: #616161;
+}
+
+@media (max-width: 700px) {
+  .metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .studio {
+    height: 1380px;
+  }
+  .big {
+    font-size: 20px;
+  }
+}

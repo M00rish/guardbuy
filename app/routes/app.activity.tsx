@@ -1,7 +1,7 @@
 import { purchaseEntries, purchaseParam } from "../lib/alerts/projection";
 import { refreshPayouts } from "../lib/paypal/reconcile.server";
 import { PayoutRefresh } from "../components/payout-refresh";
-import { useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
@@ -18,7 +18,9 @@ import { auditEntries, verifyChain } from "../lib/audit/log.server";
 import { toFeed } from "../lib/audit/feed.server";
 import { feedNames } from "../lib/merchant/dashboard.server";
 import { adminWithStaff, privateAdmin } from "../lib/merchant/staff.server";
-import { ago, Empty, FEED_LABEL, FEED_TONE, Filters } from "../components/ui";
+import { ago, Empty, Filters } from "../components/ui";
+
+const ActivityGrid = lazy(() => import("../components/activity-grid"));
 
 // Everything the agent did, from the hash-chained log. "Verify the log" recomputes every hash from
 // the first entry, so an edited, deleted or reordered row shows up as broken.
@@ -98,10 +100,10 @@ export default function Activity() {
   const sharing = useFetcher<typeof action>();
   const revalidator = useRevalidator();
   const [view, setView] = useState<View>("all");
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const now = Date.now();
-  const shown = feed
-    .filter((f) => IN_VIEW[view](f.kind, f.byYou))
-    .slice(0, 200);
+  const shown = feed.filter((f) => IN_VIEW[view](f.kind, f.byYou));
 
   return (
     <s-page heading="Activity" inlineSize="large">
@@ -190,71 +192,12 @@ export default function Activity() {
                 ? "Low stock, the agent's proposals, your rules' decisions and payments show up here as they happen."
                 : "Try All to see everything that happened."}
             </Empty>
+          ) : mounted ? (
+            <Suspense fallback={<s-text>Loading activity…</s-text>}>
+              <ActivityGrid feed={shown} verifyBase={verifyBase} />
+            </Suspense>
           ) : (
-            <s-table>
-              <s-table-header-row>
-                <s-table-header>Type</s-table-header>
-                <s-table-header listSlot="primary">Event</s-table-header>
-                <s-table-header format="numeric">Entry</s-table-header>
-                <s-table-header listSlot="secondary">When</s-table-header>
-              </s-table-header-row>
-              <s-table-body>
-                {shown.map((f) => (
-                  <s-table-row key={`${f.seq}-${f.kind}`}>
-                    <s-table-cell>
-                      <s-badge tone={FEED_TONE[f.kind] ?? "neutral"}>
-                        {FEED_LABEL[f.kind] ?? f.kind}
-                      </s-badge>
-                    </s-table-cell>
-                    <s-table-cell>
-                      <s-stack gap="small-200">
-                        <s-text>{f.title}</s-text>
-                        {(f.detail ||
-                          (f.verifyId && verifyBase) ||
-                          f.untrusted) && (
-                          <details>
-                            <summary>View details</summary>
-                            <s-stack gap="small-200">
-                              {f.detail && (
-                                <s-text tone="neutral">{f.detail}</s-text>
-                              )}
-                              {f.verifyId && verifyBase && (
-                                <s-link
-                                  href={
-                                    verifyBase + encodeURIComponent(f.verifyId)
-                                  }
-                                  target="_blank"
-                                >
-                                  Verify this payment publicly
-                                </s-link>
-                              )}
-                              {f.untrusted && (
-                                <s-box
-                                  padding="small-200"
-                                  background="subdued"
-                                  borderRadius="base"
-                                >
-                                  <s-text type="strong">
-                                    {f.untrustedLabel ?? "Untrusted text"}
-                                  </s-text>
-                                  <s-paragraph>{f.untrusted}</s-paragraph>
-                                </s-box>
-                              )}
-                            </s-stack>
-                          </details>
-                        )}
-                      </s-stack>
-                    </s-table-cell>
-                    <s-table-cell>
-                      <s-text tone="neutral">#{f.seq}</s-text>
-                    </s-table-cell>
-                    <s-table-cell>
-                      <s-text tone="neutral">{ago(f.at, now)}</s-text>
-                    </s-table-cell>
-                  </s-table-row>
-                ))}
-              </s-table-body>
-            </s-table>
+            <s-text>Loading activity…</s-text>
           )}
         </s-stack>
       </s-section>
