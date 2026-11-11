@@ -1,3 +1,5 @@
+import CurrentStateOverview from "./current-state-overview";
+import type { OverviewSelection } from "../lib/insights/overview";
 import { assistantFailureKind } from "../lib/insights/errors";
 import {
   useEffect,
@@ -63,12 +65,7 @@ import {
   type InsightRow,
 } from "../lib/insights/types";
 import { readableTime, usd } from "../lib/format";
-import {
-  ProductsGrid,
-  RecordsGrid,
-  StoreSummary,
-  type DataView,
-} from "./home-data-grid";
+import { ProductsGrid, RecordsGrid, type DataView } from "./home-data-grid";
 import { WorkspaceAssistant } from "./workspace-assistant";
 import styles from "./home-workspace.module.css";
 interface GuardRegistry extends Omit<AgCoreDefaultRegistry, "widgets"> {
@@ -125,50 +122,8 @@ const desktopState: AgReportState<GuardRegistry> = {
   pages: [
     {
       id: "guardbuy",
-      widgets: {
-        outcomes: {
-          type: "column-chart-grouped",
-          dataMapping: {
-            categoryKey: [{ id: "purchases.status" }],
-            valueKey: [{ id: "purchases.count", aggregation: "sum" }],
-          },
-          format: {
-            crossFilter: "filter",
-            title: {
-              enabled: true,
-              typography: { fontSize: 16 },
-              text: "Purchases by current status",
-            },
-          },
-        },
-        trend: {
-          type: "column-chart-grouped",
-          dataMapping: {
-            categoryKey: [{ id: "purchases.supplier" }],
-            valueKey: [
-              { id: "purchases.settled", aggregation: "sum" },
-              { id: "purchases.reserved", aggregation: "sum" },
-            ],
-          },
-          format: {
-            crossFilter: "filter",
-            title: {
-              enabled: true,
-              typography: { fontSize: 16 },
-              text: "Supplier comparison · settled and reserved",
-            },
-            style: {
-              theme: {
-                common: { legend: { enabled: true, position: "bottom" } },
-              },
-            },
-          },
-        },
-        purchases: analysisWidget(),
-      },
+      widgets: { purchases: analysisWidget() },
       widgetLayout: {
-        outcomes: { xTrack: 0, yTrack: 31, xSpan: 10, ySpan: 14 },
-        trend: { xTrack: 10, yTrack: 31, xSpan: 14, ySpan: 14 },
         purchases: { xTrack: 0, yTrack: 0, xSpan: 24, ySpan: 31 },
       },
     },
@@ -211,6 +166,8 @@ export default function InsightsStudio({
   const viewRef = useRef<DataView>(dataView);
   viewRef.current = dataView;
   const [guardQuery, setGuardQuery] = useState<GuardQuery>();
+  const [overviewSelection, setOverviewSelection] =
+    useState<OverviewSelection>();
   const queryResult = useMemo(
     () =>
       guardQuery
@@ -224,20 +181,25 @@ export default function InsightsStudio({
     () => ({
       ...workspace,
       products:
-        queryResult?.products ??
-        (workspace.products
-          ? productAnalytics(snapshot.rows, workspace.products)
-          : null),
+        overviewSelection?.view === "products"
+          ? workspace.products
+            ? productAnalytics(snapshot.rows, workspace.products).filter((p) =>
+                overviewSelection.variantIds.includes(p.variantId),
+              )
+            : null
+          : (queryResult?.products ??
+            (workspace.products
+              ? productAnalytics(snapshot.rows, workspace.products)
+              : null)),
       activity: queryResult?.activity ?? workspace.activity,
       details: queryResult?.details ?? workspace.details,
     }),
-    [workspace, snapshot, queryResult],
+    [workspace, snapshot, queryResult, overviewSelection],
   );
   const [analysis, setAnalysis] = useState<InsightAnalysis>("purchases");
   const [selection, setSelection] = useState<InsightView>("all");
   const [search, setSearch] = useState("");
   const [notice, setNotice] = useState("");
-  const [showCharts, setShowCharts] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [linked, setLinked] = useState(false);
   const [filtered, setFiltered] = useState(false);
@@ -348,6 +310,33 @@ export default function InsightsStudio({
         })),
       });
   }, []);
+  const selectOverview = useCallback(
+    (next: OverviewSelection) => {
+      apiRef.current?.setFilterModel(null);
+      purchaseApiRef.current?.setFilterModel(null);
+      setGuardQuery(undefined);
+      setOverviewSelection(next);
+      setDataView(next.view);
+      setSearch("");
+      setSelection("all");
+      setAnalysis("purchases");
+      setNotice("");
+      resetLinked();
+      requestAnimationFrame(() =>
+        document.getElementById("home-grid-panel")?.scrollIntoView({
+          behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
+            .matches
+            ? "auto"
+            : "smooth",
+          block: "start",
+        }),
+      );
+    },
+    [resetLinked],
+  );
+  useEffect(() => {
+    setOverviewSelection(undefined);
+  }, [snapshot.checkedAt, demo]);
   const resetFilters = () => {
     if (guardQuery && apiRef.current) {
       apiRef.current.applyColumnState({
@@ -360,6 +349,7 @@ export default function InsightsStudio({
       }
     }
     setGuardQuery(undefined);
+    setOverviewSelection(undefined);
     setSearch("");
     setSelection("all");
     apiRef.current?.setFilterModel(null);
@@ -368,6 +358,7 @@ export default function InsightsStudio({
   const changeView = (view: DataView) => {
     setDataView(view);
     setGuardQuery(undefined);
+    setOverviewSelection(undefined);
     setSearch("");
     setNotice("");
     setSelection("all");
@@ -376,10 +367,13 @@ export default function InsightsStudio({
   };
   const shown = useMemo(
     () =>
-      (queryResult?.purchases ?? snapshot.rows).filter((row) =>
-        inInsightView(row, selection),
+      (queryResult?.purchases ?? snapshot.rows).filter(
+        (row) =>
+          inInsightView(row, selection) &&
+          (overviewSelection?.view !== "purchases" ||
+            overviewSelection.purchaseIds.includes(row.purchase)),
       ),
-    [snapshot, selection, queryResult],
+    [snapshot, selection, queryResult, overviewSelection],
   );
   const data = useMemo<AgDataSourcesDefinition<GuardRegistry>>(
     () => ({
@@ -451,31 +445,12 @@ export default function InsightsStudio({
       ...desktopState,
       pages: desktopState.pages.map((page) => ({
         ...page,
-        widgets: showCharts
-          ? page.widgets
-          : { purchases: page.widgets!.purchases },
         widgetLayout: {
           purchases: { xTrack: 0, yTrack: 0, xSpan: 24, ySpan: gridTracks },
-          ...(showCharts
-            ? {
-                outcomes: {
-                  xTrack: 0,
-                  yTrack: gridTracks,
-                  xSpan: narrow ? 24 : 10,
-                  ySpan: 14,
-                },
-                trend: {
-                  xTrack: narrow ? 0 : 10,
-                  yTrack: narrow ? gridTracks + 14 : gridTracks,
-                  xSpan: narrow ? 24 : 14,
-                  ySpan: 14,
-                },
-              }
-            : {}),
         },
       })),
     }),
-    [showCharts, narrow, gridTracks],
+    [gridTracks],
   );
   // Reflow the fixed report without destroying the grid or its current filters.
   useEffect(() => {
@@ -486,13 +461,11 @@ export default function InsightsStudio({
       ...state,
       pages: initialState.pages.map((page) => ({
         ...page,
-        crossFilter: showCharts
-          ? state.pages.find((old) => old.id === page.id)?.crossFilter
-          : undefined,
+        crossFilter: undefined,
       })),
       panels: state.panels,
     });
-  }, [initialState, showCharts]);
+  }, [initialState]);
   const latest = useRef({ snapshot, workspace, shopify });
   latest.current = { snapshot, workspace, shopify };
   const buildAi = useCallback(
@@ -504,6 +477,7 @@ export default function InsightsStudio({
             query: (query) => {
               const result = runGuardQuery(query, latest.current);
               if (result.grid) {
+                setOverviewSelection(undefined);
                 setGuardQuery(query);
                 setDataView(result.grid.view);
                 setAnalysis(result.grid.analysis ?? "purchases");
@@ -517,6 +491,7 @@ export default function InsightsStudio({
             },
             select: (view) => {
               setGuardQuery(undefined);
+              setOverviewSelection(undefined);
               setDataView("purchases");
               setSelection(view);
               setSearch("");
@@ -588,6 +563,7 @@ export default function InsightsStudio({
           return;
         }
         const saved = parseSavedGridView(raw);
+        setOverviewSelection(undefined);
         api.setGridOption("pivotMode", saved.pivot);
         api.applyColumnState({ state: saved.columns, applyOrder: true });
         api.setFilterModel(saved.filters);
@@ -633,7 +609,7 @@ export default function InsightsStudio({
       >
         <section className={styles.workspace} aria-label="Home data workspace">
           <div className={styles.overviewHeading}>
-            <strong>{demo ? "Demo store summary" : "Store summary"}</strong>
+            <strong>{demo ? "Demo store overview" : "Store overview"}</strong>
             <label>
               Data{" "}
               <select
@@ -641,6 +617,7 @@ export default function InsightsStudio({
                 value={demo ? "demo" : "live"}
                 onChange={(e) => {
                   setGuardQuery(undefined);
+                  setOverviewSelection(undefined);
                   setDemo(e.target.value === "demo");
                   setSearch("");
                   setSelection("all");
@@ -660,7 +637,14 @@ export default function InsightsStudio({
               disabled.
             </div>
           )}
-          <StoreSummary summary={workspace.summary} narrow={narrow} />
+          <CurrentStateOverview
+            snapshot={snapshot}
+            workspace={workspace}
+            gridLicenseKey={gridLicenseKey}
+            demo={demo}
+            narrow={narrow}
+            onSelect={selectOverview}
+          />
           <div className={styles.main}>
             <div
               className={styles.tabs}
@@ -695,6 +679,7 @@ export default function InsightsStudio({
                   value={analysis}
                   onChange={(e) => {
                     setGuardQuery(undefined);
+                    setOverviewSelection(undefined);
                     setAnalysis(e.target.value as InsightAnalysis);
                     setSearch("");
                     resetLinked();
@@ -738,16 +723,6 @@ export default function InsightsStudio({
                 >
                   Export
                 </button>
-                <button
-                  type="button"
-                  aria-pressed={showCharts && dataView === "purchases"}
-                  onClick={() => {
-                    setDataView("purchases");
-                    setShowCharts(!showCharts);
-                  }}
-                >
-                  Insights
-                </button>
                 {aiConfigured && (
                   <button
                     type="button"
@@ -761,12 +736,16 @@ export default function InsightsStudio({
                 )}
               </div>
             </div>
-            {(guardQuery ||
+            {(overviewSelection ||
+              guardQuery ||
               filtered ||
               search ||
               linked ||
               selection !== "all") && (
               <div className={styles.activeFilters} role="status">
+                {overviewSelection
+                  ? `Chart: ${overviewSelection.label} · `
+                  : ""}
                 {guardQuery
                   ? `AI result: ${guardQueryLabel(guardQuery)} · `
                   : ""}
@@ -794,9 +773,7 @@ export default function InsightsStudio({
               ref={panelRef}
               style={{
                 height:
-                  dataView === "purchases"
-                    ? gridTracks * 20 + (showCharts ? (narrow ? 560 : 280) : 0)
-                    : panelHeight,
+                  dataView === "purchases" ? gridTracks * 20 : panelHeight,
               }}
             >
               {dataView === "products" && (

@@ -11,7 +11,6 @@ import {
   purchasesForProduct,
   type HomeWorkspaceData,
   type WorkspaceProduct,
-  type WorkspaceSummary,
   type WorkspaceDetail,
   type WorkspaceActivity,
 } from "../lib/insights/workspace";
@@ -21,102 +20,6 @@ import { PRODUCT_ANALYTIC_COLUMNS } from "../lib/insights/grid-query";
 import styles from "./home-workspace.module.css";
 
 export type DataView = "products" | "purchases" | "activity" | "details";
-export function StoreSummary({
-  summary: s,
-  narrow,
-}: {
-  summary: WorkspaceSummary;
-  narrow: boolean;
-}) {
-  const rows = [
-    {
-      id: "spent",
-      metric: "Spent · last 7 days",
-      value: usd(s.spentCents),
-      context: `of ${usd(s.capCents)} rolling 7-day cap`,
-    },
-    {
-      id: "reserved",
-      metric: "Reserved",
-      value: usd(s.reservedCents),
-      context: "Pending payments and approval commitments",
-    },
-    {
-      id: "remaining",
-      metric: "Remaining budget",
-      value: usd(s.remainingCents),
-      context: "Cap minus spent and reserved",
-    },
-    {
-      id: "balance",
-      metric: "PayPal after commitments",
-      value: s.balanceCents === null ? "Unavailable" : usd(s.balanceCents),
-      context: "Current cached balance after commitments",
-    },
-    {
-      id: "waiting",
-      metric: "Needs approval",
-      value: String(s.waiting),
-      context: "Current approval requests",
-    },
-    {
-      id: "blocked",
-      metric: "Blocked purchases",
-      value: String(s.blocked),
-      context: "All recorded blocked proposals",
-    },
-  ];
-  const columns: ColDef[] = narrow
-    ? [
-        {
-          field: "metric",
-          headerName: "Store summary",
-          flex: 1,
-          minWidth: 155,
-        },
-        {
-          field: "value",
-          headerName: "Value",
-          width: 120,
-          cellClass: styles.summaryValue,
-        },
-      ]
-    : rows.map((row) => ({
-        field: row.id,
-        headerName: row.metric,
-        flex: 1,
-        minWidth: 125,
-        cellClass: styles.summaryValue,
-        tooltipValueGetter: () => row.context,
-      }));
-  const data = narrow
-    ? rows
-    : [Object.fromEntries(rows.map((row) => [row.id, row.value]))];
-  return (
-    <div
-      className={styles.summary}
-      aria-label="Store financial summary"
-      style={{ height: narrow ? 238 : 90 }}
-    >
-      <AgGridReact
-        theme={gridTheme}
-        rowData={data}
-        columnDefs={columns}
-        defaultColDef={{
-          sortable: false,
-          resizable: false,
-          suppressHeaderMenuButton: true,
-        }}
-        headerHeight={38}
-        rowHeight={narrow ? 33 : 48}
-        suppressCellFocus
-        suppressHorizontalScroll
-        suppressMovableColumns
-        tooltipShowDelay={150}
-      />
-    </div>
-  );
-}
 type ProductContext = {
   demo: boolean;
   purchases: InsightRow[];

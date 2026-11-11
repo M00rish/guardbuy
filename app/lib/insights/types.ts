@@ -19,6 +19,7 @@ export type InsightRow = {
   purchase: number;
   variantId?: string;
   automatic?: boolean;
+  attentionState?: import("./attention").AttentionLane;
   settledAt?: string;
   proposedAt: string;
   product: string;

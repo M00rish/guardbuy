@@ -43,6 +43,7 @@ export type WorkspaceSummary = {
   blocked: number;
 };
 export type HomeWorkspaceData = {
+  policy?: { reorderBelowDays: number; cashFloorCents: number } | null;
   products: WorkspaceProduct[] | null;
   activity: WorkspaceActivity[];
   details: WorkspaceDetail[];
@@ -117,6 +118,12 @@ export function homeWorkspace(data: HomeInput): HomeWorkspaceData {
     "/app/activity",
   );
   return {
+    policy: data.rules
+      ? {
+          reorderBelowDays: data.rules.reorderBelow,
+          cashFloorCents: data.rules.cashFloorCents,
+        }
+      : null,
     products: data.products,
     activity: data.recent.map(({ seq, at, kind, title, detail }) => ({
       seq,
@@ -166,6 +173,7 @@ export function demoWorkspace(snapshot: InsightsSnapshot): HomeWorkspaceData {
   const s = snapshot.summary;
   return {
     products,
+    policy: { reorderBelowDays: 7, cashFloorCents: 100000 },
     summary: {
       ...s,
       balanceCents: null,
