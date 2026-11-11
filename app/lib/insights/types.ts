@@ -17,6 +17,7 @@ export const VIEW_LABEL: Record<InsightView, string> = {
 };
 export type InsightRow = {
   purchase: number;
+  variantId?: string;
   proposedAt: string;
   product: string;
   supplier: string;

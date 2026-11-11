@@ -22,6 +22,7 @@ export function demoSnapshot(now = new Date()): InsightsSnapshot {
     const at = new Date(now.getTime() - (i % 28) * 86400000);
     return {
       purchase: 10001 + i,
+      variantId: `demo-${i % 8}`,
       proposedAt: at.toISOString(),
       product:
         products[i % 4] +

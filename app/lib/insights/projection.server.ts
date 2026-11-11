@@ -163,6 +163,7 @@ export function insightsSnapshot(
       .join("; ");
     rows.push({
       purchase: entry.seq,
+      variantId: proposal.variantId,
       proposedAt: source.at,
       product:
         names.product?.(proposal.sku, proposal.variantId) ?? proposal.sku,
