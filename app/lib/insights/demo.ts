@@ -54,8 +54,8 @@ export function demoSnapshot(now = new Date()): InsightsSnapshot {
       attention: kind > 5,
     };
   });
-  const trend = Array.from({ length: 7 }, (_, i) => {
-    const day = new Date(now.getTime() - (6 - i) * 86400000)
+  const trend = Array.from({ length: 8 }, (_, i) => {
+    const day = new Date(now.getTime() - (7 - i) * 86400000)
       .toISOString()
       .slice(0, 10);
     return {
