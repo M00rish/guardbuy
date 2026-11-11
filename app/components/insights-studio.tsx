@@ -1,3 +1,4 @@
+import { ViewTabs } from "./view-tabs";
 import { commonInsightPlan } from "../lib/insights/common-plan";
 import { awaitWithSignal } from "../lib/insights/await-signal";
 import CurrentStateOverview from "./current-state-overview";
@@ -667,25 +668,7 @@ export default function InsightsStudio({
             onSelect={selectOverview}
           />
           <div className={styles.main}>
-            <div
-              className={styles.tabs}
-              role="tablist"
-              aria-label="Home data views"
-            >
-              {(Object.keys(viewLabels) as DataView[]).map((view) => (
-                <button
-                  key={view}
-                  id={`tab-${view}`}
-                  type="button"
-                  role="tab"
-                  aria-selected={dataView === view}
-                  aria-controls="home-grid-panel"
-                  onClick={() => changeView(view)}
-                >
-                  {viewLabels[view]}
-                </button>
-              ))}
-            </div>
+            <ViewTabs label="Home data views" value={dataView} options={(Object.keys(viewLabels) as DataView[]).map(id=>({id,label:viewLabels[id]}))} onChange={changeView} panelId="home-grid-panel" />
             <div className={styles.toolbar}>
               <input
                 aria-label={`Search ${viewLabels[dataView].toLowerCase()}`}

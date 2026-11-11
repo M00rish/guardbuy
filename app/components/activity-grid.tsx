@@ -7,29 +7,23 @@ import { ago, FEED_LABEL, FEED_TONE } from "./ui";
 import styles from "./activity-grid.module.css";
 
 type EventRow = FeedItem & { when: string; verifyUrl?: string };
-function EventCell({ data }: CustomCellRendererProps<EventRow>) {
-  if (!data) return null;
+function EventDetail(data: EventRow) {
   return (
-    <div className={styles.event}>
-      <span>{data.title}</span>
-      {(data.detail || data.verifyId || data.untrusted) && (
-        <details>
-          <summary>View details</summary>
-          <div className={styles.details}>
-            {data.detail && <p>{data.detail}</p>}
-            {data.verifyId && (
-              <a href={data.verifyUrl} target="_blank" rel="noreferrer">
-                Verify this payment publicly
-              </a>
-            )}
-            {data.untrusted && (
-              <div className={styles.untrusted}>
-                <strong>{data.untrustedLabel ?? "Untrusted text"}</strong>
-                <p>{data.untrusted}</p>
-              </div>
-            )}
-          </div>
-        </details>
+    <div className={styles.details}>
+      <h3>
+        Entry #{data.seq} · {FEED_LABEL[data.kind] ?? "Activity"}
+      </h3>
+      {data.detail && <p>{data.detail}</p>}
+      {data.verifyId && (
+        <a href={data.verifyUrl} target="_blank" rel="noreferrer">
+          Verify this payment publicly
+        </a>
+      )}
+      {data.untrusted && (
+        <div className={styles.untrusted}>
+          <strong>{data.untrustedLabel ?? "Untrusted text"}</strong>
+          <p>{data.untrusted}</p>
+        </div>
       )}
     </div>
   );
@@ -67,7 +61,9 @@ export default function ActivityGrid({
         minWidth: 260,
         autoHeight: true,
         wrapText: true,
-        cellRenderer: EventCell,
+        cellRenderer: ({ value }: CustomCellRendererProps<EventRow>) => (
+          <span>{value}</span>
+        ),
       },
       {
         field: "kind",
@@ -99,6 +95,10 @@ export default function ActivityGrid({
   return (
     <DataGrid<EventRow>
       label="Activity"
+      renderDetail={EventDetail}
+      isExpandable={(row) =>
+        Boolean(row.detail || row.verifyId || row.untrusted)
+      }
       rows={rows}
       columns={columns}
       rowId={(row) => `${row.seq}-${row.kind}`}

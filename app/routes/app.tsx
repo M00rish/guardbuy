@@ -19,7 +19,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   await privateAdmin(request);
 
   // eslint-disable-next-line no-undef
-  return { apiKey: process.env.SHOPIFY_API_KEY || "" };
+  return { apiKey: process.env.SHOPIFY_API_KEY || "", gridLicenseKey: process.env.AG_GRID_LICENSE_KEY ?? "" };
 };
 
 /** Shows Shopify's loading bar at the top of the admin while a page or action is loading. */
