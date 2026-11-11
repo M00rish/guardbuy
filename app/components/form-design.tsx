@@ -10,22 +10,15 @@ export { styles as formStyles };
 export function FormSection({
   title,
   description,
-  number,
   children,
 }: {
   title: string;
   description?: string;
-  number?: string;
   children: ReactNode;
 }) {
   return (
     <section className={styles.section}>
       <header className={styles.heading}>
-        {number && (
-          <span className={styles.number} aria-hidden="true">
-            {number}
-          </span>
-        )}
         <div>
           <h2>{title}</h2>
           {description && <p>{description}</p>}
