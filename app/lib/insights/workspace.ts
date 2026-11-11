@@ -43,6 +43,7 @@ export type WorkspaceSummary = {
   blocked: number;
 };
 export type HomeWorkspaceData = {
+  suppliers?: { id: string; name: string; addedAt: string }[] | null;
   policy?: { reorderBelowDays: number; cashFloorCents: number } | null;
   products: WorkspaceProduct[] | null;
   activity: WorkspaceActivity[];
@@ -50,6 +51,7 @@ export type HomeWorkspaceData = {
   summary: WorkspaceSummary;
 };
 type HomeInput = {
+  suppliers?: { id: string; name: string; addedAt: string }[] | null;
   products: WorkspaceProduct[] | null;
   recent: WorkspaceActivity[];
   spentCents: number;
@@ -124,6 +126,7 @@ export function homeWorkspace(data: HomeInput): HomeWorkspaceData {
           cashFloorCents: data.rules.cashFloorCents,
         }
       : null,
+    suppliers: data.suppliers ?? null,
     products: data.products,
     activity: data.recent.map(({ seq, at, kind, title, detail }) => ({
       seq,
@@ -173,6 +176,20 @@ export function demoWorkspace(snapshot: InsightsSnapshot): HomeWorkspaceData {
   const s = snapshot.summary;
   return {
     products,
+    suppliers: [
+      ...[...new Set(snapshot.rows.map((row) => row.supplier))].map(
+        (name, index) => ({
+          id: `demo-supplier-${index}`,
+          name,
+          addedAt: snapshot.checkedAt,
+        }),
+      ),
+      {
+        id: "demo-supplier-untraded",
+        name: "Northfield Supplies",
+        addedAt: snapshot.checkedAt,
+      },
+    ],
     policy: { reorderBelowDays: 7, cashFloorCents: 100000 },
     summary: {
       ...s,

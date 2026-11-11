@@ -1,3 +1,5 @@
+import { commonInsightPlan } from "../lib/insights/common-plan";
+import { awaitWithSignal } from "../lib/insights/await-signal";
 import CurrentStateOverview from "./current-state-overview";
 import type { OverviewSelection } from "../lib/insights/overview";
 import { assistantFailureKind } from "../lib/insights/errors";
@@ -466,8 +468,8 @@ export default function InsightsStudio({
       panels: state.panels,
     });
   }, [initialState]);
-  const latest = useRef({ snapshot, workspace, shopify });
-  latest.current = { snapshot, workspace, shopify };
+  const latest = useRef({ snapshot, workspace, shopify, aiConfigured });
+  latest.current = { snapshot, workspace, shopify, aiConfigured };
   const buildAi = useCallback(
     (api: AgStudioApi) =>
       createAiHarness(api, () => ({
@@ -500,7 +502,22 @@ export default function InsightsStudio({
             },
             analyze: (next) => setAnalysis(next),
             plan: async (prompt, signal) => {
-              const token = await latest.current.shopify.idToken();
+              if (signal?.aborted) throw signal.reason;
+              const common = commonInsightPlan(prompt, {
+                reorderBelowDays:
+                  latest.current.workspace.policy?.reorderBelowDays,
+              });
+              if (common) return common;
+              if (!latest.current.aiConfigured)
+                throw new AssistantRequestError("configuration");
+              const deadline = AbortSignal.any([
+                AbortSignal.timeout(30000),
+                ...(signal ? [signal] : []),
+              ]);
+              const token = await awaitWithSignal(
+                latest.current.shopify.idToken(),
+                deadline,
+              );
               const response = await fetch("/app/insights/plan", {
                 method: "POST",
                 headers: {
@@ -508,10 +525,7 @@ export default function InsightsStudio({
                   Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({ prompt }),
-                signal: AbortSignal.any([
-                  AbortSignal.timeout(30000),
-                  ...(signal ? [signal] : []),
-                ]),
+                signal: deadline,
               });
               if (!response.ok) {
                 const failure = await response.json().catch(() => null);
@@ -723,17 +737,16 @@ export default function InsightsStudio({
                 >
                   Export
                 </button>
-                {aiConfigured && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDataView("purchases");
-                      setAiOpen(true);
-                    }}
-                  >
-                    Ask AI
-                  </button>
-                )}
+                <button
+                  type="button"
+                  disabled={!harness}
+                  aria-haspopup="dialog"
+                  aria-expanded={aiOpen}
+                  aria-controls="guardbuy-assistant-panel"
+                  onClick={() => setAiOpen(true)}
+                >
+                  Ask AI
+                </button>
               </div>
             </div>
             {(overviewSelection ||
@@ -747,10 +760,10 @@ export default function InsightsStudio({
                   ? `Chart: ${overviewSelection.label} · `
                   : ""}
                 {guardQuery
-                  ? `AI result: ${guardQueryLabel(guardQuery)} · `
+                  ? `Assistant result: ${guardQueryLabel(guardQuery)} · `
                   : ""}
                 {selection !== "all"
-                  ? `AI view: ${VIEW_LABEL[selection]} · `
+                  ? `Assistant view: ${VIEW_LABEL[selection]} · `
                   : ""}
                 {linked ? "Chart selection active · " : ""}
                 {filtered ? "Column filters active · " : ""}
@@ -807,10 +820,8 @@ export default function InsightsStudio({
                   mode="view"
                   onStudioReady={({ api }) => {
                     studioRef.current = api as AgStudioApi<GuardRegistry>;
-                    if (aiConfigured) {
-                      harnessRef.current = buildAi(api as AgStudioApi);
-                      setHarness(harnessRef.current);
-                    }
+                    harnessRef.current = buildAi(api as AgStudioApi);
+                    setHarness(harnessRef.current);
                   }}
                   onStudioPreDestroyed={({ api }) => {
                     if (studioRef.current === api) {
@@ -847,6 +858,7 @@ export default function InsightsStudio({
               </div>
               {(dataView === "activity" || dataView === "details") && (
                 <RecordsGrid
+                  directory={guardQuery?.source === "supplierDirectory"}
                   key={`${demo}-${dataView}`}
                   view={dataView}
                   workspace={displayedWorkspace}
@@ -856,11 +868,13 @@ export default function InsightsStudio({
                 />
               )}
             </div>
-            {aiOpen && harness && (
+            {harness && (
               <WorkspaceAssistant
                 key={demo ? "demo" : "live"}
                 harness={harness}
+                open={aiOpen}
                 demo={demo}
+                checkedAt={snapshot.checkedAt}
                 onClose={() => setAiOpen(false)}
               />
             )}
@@ -881,9 +895,10 @@ export default function InsightsStudio({
                   Use column menus or the Filters panel to narrow records.
                   Expand a product for its purchases, or a purchase for its
                   recorded decision. Select numeric cells for totals and charts.
-                  Exports include filtered, sorted rows. The assistant sends
-                  only your request to the configured AI provider; keep secrets
-                  and personal information out of prompts.
+                  Exports include filtered, sorted rows. For questions needing
+                  AI, the assistant sends only your request to the configured AI
+                  provider; keep secrets and personal information out of
+                  prompts.
                 </p>
               </details>
             </div>

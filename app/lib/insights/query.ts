@@ -51,7 +51,8 @@ const labels: Record<string, string> = {
 const sourceLabels: Record<GuardQuery["source"], string> = {
   products: "Products",
   purchases: "Purchases",
-  suppliers: "Suppliers",
+  suppliers: "Suppliers with purchase history",
+  supplierDirectory: "Configured suppliers",
   summary: "Store summary",
   details: "Store details",
   activity: "Recent activity",
@@ -156,7 +157,7 @@ const HELP = {
   audit:
     "GuardBuy records decisions, payments and deliveries in a hash-chained audit log. Home analyses require successful verification. Open Activity for full records and verification.",
   assistant:
-    "I read the loaded GuardBuy snapshot, calculate results locally and show related records in the grid. I can filter, rank and summarize recorded data, but cannot move money or change rules. My model receives your question, not the dataset. I ask for clarification when the available data cannot answer a question.",
+    "I read the loaded GuardBuy snapshot, calculate results locally and show related records in the grid. I can filter, rank and summarize recorded data, but cannot move money or change rules. Routine questions are answered directly from the snapshot; other questions send only your request to the AI service, never the dataset. I ask for clarification when the available data cannot answer a question.",
 };
 export function runGuardQuery(
   input: GuardQuery,
@@ -192,6 +193,28 @@ export function runGuardQuery(
               : "details",
       },
     };
+  if (query.source === "supplierDirectory") {
+    if (!workspace.suppliers)
+      return {
+        answer:
+          "The configured supplier directory is unavailable in this snapshot. Refresh Home before asking for a supplier count; purchase history is not a complete supplier list.",
+      };
+    const rows = workspace.suppliers
+      .map((s) => ({ ...s, supplier: s.name }))
+      .filter((s) => matches(s, query))
+      .sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    const displayed = rows.slice(0, limit);
+    return {
+      answer: `You have ${rows.length} ${query.where?.length ? "matching " : ""}configured ${rows.length === 1 ? "supplier" : "suppliers"} in GuardBuy, including suppliers with no purchases.${displayed.length ? "\n" + displayed.map((s, i) => `${i + 1}. ${s.name}`).join("\n") : ""}${displayed.length < rows.length ? `\nShowing ${displayed.length} of ${rows.length}.` : ""}`,
+      grid: { view: "details" },
+      details: rows.map((s) => ({
+        id: `supplier:${s.id}`,
+        category: "Configured suppliers",
+        setting: s.name,
+        value: s.addedAt.slice(0, 10),
+      })),
+    };
+  }
   if (query.source === "summary") {
     if (days && !(metric === "spentCents" && days === 7))
       return {

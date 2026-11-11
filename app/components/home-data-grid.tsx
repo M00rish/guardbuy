@@ -296,6 +296,7 @@ export function ProductsGrid({
   );
 }
 export function RecordsGrid({
+  directory = false,
   view,
   workspace,
   demo,
@@ -303,6 +304,7 @@ export function RecordsGrid({
   onReady,
 }: {
   view: "activity" | "details";
+  directory?: boolean;
   workspace: HomeWorkspaceData;
   demo: boolean;
   search: string;
@@ -347,14 +349,20 @@ export function RecordsGrid({
           {
             field: "category",
             headerName: "Category",
+            hide: directory,
             width: 160,
             enableRowGroup: true,
             filter: "agSetColumnFilter",
           },
-          { field: "setting", headerName: "Setting", minWidth: 190, flex: 1 },
+          {
+            field: "setting",
+            headerName: directory ? "Supplier" : "Setting",
+            minWidth: 190,
+            flex: 1,
+          },
           {
             field: "value",
-            headerName: "Recorded value",
+            headerName: directory ? "Added (UTC)" : "Recorded value",
             minWidth: 230,
             flex: 2,
             wrapText: true,

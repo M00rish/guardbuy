@@ -22,6 +22,7 @@ export function classifyPlannerFailure(error: unknown): AssistantFailureKind {
   const e = error as { name?: unknown; statusCode?: unknown; cause?: unknown };
   if (e.statusCode === 401 || e.statusCode === 403) return "credentials";
   if (e.statusCode === 429 || e.statusCode === 402) return "quota";
+  if ([500, 502, 503, 504].includes(Number(e.statusCode))) return "service";
   if (e.statusCode === 404 || e.statusCode === 410) return "model";
   if (e.name === "TimeoutError" || e.name === "AbortError") return "timeout";
   if (
