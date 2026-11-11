@@ -308,6 +308,7 @@ assert.equal(selected, "unchanged");
 assert.ok(!refusedEvents.some((event) => event.type === "TOOL_CALL_START"));
 for (const file of [
   "app/routes/app.insights.tsx",
+  "app/lib/insights/request.server.ts",
   "app/lib/insights/planner.server.ts",
   "app/lib/insights/agent.ts",
 ])
@@ -319,4 +320,139 @@ for (const file of [
   );
 console.log(
   "PASS insights: settled/reserved/refund math, rolling-day reconciliation, simulation exclusion, empty data, redaction, schema limits, read-only agent tool and refused money actions.",
+);
+
+// Analysis plans cannot introduce arbitrary fields or write commands.
+assert.equal(
+  InsightPlanSchema.safeParse({
+    view: "all",
+    refused: false,
+    analysis: "suppliers",
+  }).success,
+  true,
+);
+assert.equal(
+  InsightPlanSchema.safeParse({
+    view: "all",
+    refused: false,
+    analysis: "status",
+  }).success,
+  true,
+);
+assert.equal(
+  InsightPlanSchema.safeParse({
+    view: "all",
+    refused: false,
+    analysis: "execute_payment",
+  }).success,
+  false,
+);
+const { demoSnapshot } = await import("../app/lib/insights/demo");
+const demo = demoSnapshot(now);
+assert.equal(demo.rows.length, 64);
+assert.equal(new Set(demo.rows.map((r) => r.supplier)).size, 4);
+assert.ok(
+  demo.rows.every(
+    (r) => r.activityUrl === "" && r.route === "Demo · no payment",
+  ),
+);
+assert.equal(
+  demo.summary.spentCents,
+  Math.round(demo.trend.reduce((s, r) => s + r.spent, 0) * 100),
+);
+assert.equal(
+  demo.summary.reservedCents,
+  Math.round(demo.rows.reduce((s, r) => s + r.reserved, 0) * 100),
+);
+let analysisSelected = "";
+const analysisAgent = createInsightsAgent(
+  api as Parameters<typeof createInsightsAgent>[0],
+  {
+    ...ports,
+    plan: async () => ({ view: "all", refused: false, analysis: "status" }),
+    analyze: (value) => {
+      analysisSelected = value;
+    },
+  },
+);
+for await (const event of analysisAgent.run(input, {
+  ...ctx,
+  tools: () => analysisAgent.tools!({} as never, undefined),
+}))
+  void event;
+assert.equal(analysisSelected, "status");
+console.log(
+  "PASS analysis presets, strict plan boundary, demo isolation and reconciled fixture totals",
+);
+
+// Widget snapshots must refresh even though AG Studio context is initial-only.
+const { createPurchaseGridStore, supplierProposalHistory, parseSavedGridView } =
+  await import("../app/lib/insights/grid-view");
+const initialGrid = {
+  rows: demo.rows,
+  allRows: demo.rows,
+  analysis: "purchases" as const,
+  demo: true,
+  storageKey: "shop-a:demo",
+  checkedAt: now.toISOString(),
+  gridLicenseKey: "",
+};
+const store = createPurchaseGridStore(initialGrid);
+let changes = 0;
+const unsubscribe = store.subscribe(() => changes++);
+store.update({
+  ...initialGrid,
+  rows: demo.rows.slice(0, 2),
+  analysis: "status",
+});
+assert.equal(changes, 1);
+assert.equal(store.getSnapshot().rows.length, 2);
+assert.equal(store.getSnapshot().analysis, "status");
+unsubscribe();
+store.update(initialGrid);
+assert.equal(changes, 1);
+const history = supplierProposalHistory(
+  [
+    { ...demo.rows[0], proposedAt: "2026-11-11T23:59:59Z", amount: 0.1 },
+    { ...demo.rows[0], proposedAt: "2026-11-11T00:00:00Z", amount: 0.2 },
+    { ...demo.rows[0], proposedAt: "2026-10-15T00:00:00Z", amount: 10 },
+    { ...demo.rows[0], proposedAt: "2026-10-14T23:59:59Z", amount: 999 },
+    { ...demo.rows[0], proposedAt: "2026-11-12T00:00:00Z", amount: 999 },
+  ],
+  "2026-11-11T12:00:00Z",
+).get(demo.rows[0].supplier)!;
+assert.equal(history.length, 28);
+assert.equal(history[0], 10);
+assert.equal(history[27], 0.3);
+assert.equal(
+  history.reduce((sum, value) => sum + value, 0),
+  10.3,
+);
+const savedView = {
+  version: 1,
+  columns: [
+    { colId: "supplier", rowGroup: true },
+    { colId: "settled", aggFunc: "sum" },
+  ],
+  filters: {
+    supplier: { filterType: "text", type: "contains", filter: "Atlas" },
+  },
+  pivot: false,
+  search: "coffee",
+};
+assert.equal(parseSavedGridView(JSON.stringify(savedView)).search, "coffee");
+assert.throws(() =>
+  parseSavedGridView(JSON.stringify({ ...savedView, version: 2 })),
+);
+assert.throws(() =>
+  parseSavedGridView(
+    JSON.stringify({
+      ...savedView,
+      columns: [{ colId: "settled", aggFunc: "avg" }],
+    }),
+  ),
+);
+assert.throws(() => parseSavedGridView("x".repeat(100001)));
+console.log(
+  "PASS current widget snapshots, 28-day UTC proposal history and validated presentation-only saved views",
 );

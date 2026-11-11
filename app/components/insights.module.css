@@ -29,7 +29,7 @@
   outline-offset: 2px;
 }
 .studio {
-  height: 1040px;
+  height: 1060px;
   min-width: 0;
   border: 1px solid #ddd;
   border-radius: 12px;
@@ -64,9 +64,59 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .studio {
-    height: 1380px;
+    height: 1440px;
   }
   .big {
     font-size: 20px;
+  }
+}
+.hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 28px;
+  border-radius: 14px;
+  color: #f4fff9;
+  background: linear-gradient(120deg, #123d32, #1d6250);
+}
+.hero h2 {
+  font-size: 28px;
+  line-height: 1.2;
+  margin: 12px 0;
+  letter-spacing: -0.6px;
+}
+.hero p {
+  color: #d0e5dc;
+  margin: 0;
+  line-height: 1.5;
+}
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 2px;
+  font-weight: 700;
+}
+.hero button {
+  flex-shrink: 0;
+  border: 1px solid #a6c9b9;
+  border-radius: 8px;
+  background: #fff;
+  color: #123d32;
+  padding: 12px 16px;
+  font: inherit;
+  cursor: pointer;
+}
+.hero button:focus-visible {
+  outline: 3px solid #93c5fd;
+  outline-offset: 3px;
+}
+@media (max-width: 700px) {
+  .hero {
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 20px;
+  }
+  .hero h2 {
+    font-size: 24px;
   }
 }
