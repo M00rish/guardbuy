@@ -1,3 +1,4 @@
+import { FormCheck, FormField, FormSelect } from "./form-design";
 import { DataGrid, cell, GridBadge } from "./data-grid";
 import { PAYMENT_LABEL } from "../lib/wording";
 import {
@@ -432,7 +433,7 @@ export function DeliveriesPage({ data }: { data: Data }) {
           <s-stack gap="base">
             <s-text type="strong">{`${managed.title} · purchase #${managed.decisionSeq}`}</s-text>
             <s-text>{`${managed.received} received · ${managed.closed} closed · ${managed.remaining} outstanding`}</s-text>
-            <s-select
+            <FormSelect
               label="Delivery update"
               value={change}
               disabled={busy}
@@ -443,13 +444,13 @@ export function DeliveriesPage({ data }: { data: Data }) {
               }}
             >
               {managed.payment === "paid" && (
-                <s-option value="estimate">Update expected arrival</s-option>
+                <option value="estimate">Update expected arrival</option>
               )}
-              <s-option value="close">Close undelivered remainder</s-option>
-            </s-select>
+              <option value="close">Close undelivered remainder</option>
+            </FormSelect>
             {change === "estimate" ? (
               <>
-                <s-text-field
+                <FormField
                   label="Expected arrival (YYYY-MM-DD)"
                   value={arrival}
                   disabled={busy}
@@ -474,20 +475,20 @@ export function DeliveriesPage({ data }: { data: Data }) {
                   not refund PayPal or change Shopify stock. Use this only after
                   confirming no more goods will arrive.
                 </s-banner>
-                <s-select
+                <FormSelect
                   label="Reason"
                   value={reason}
                   disabled={busy}
                   onChange={(event) => setReason(event.currentTarget.value)}
                 >
-                  <s-option value="supplier_cancelled">
+                  <option value="supplier_cancelled">
                     Supplier cancelled remaining units
-                  </s-option>
-                  <s-option value="not_arriving">
+                  </option>
+                  <option value="not_arriving">
                     Confirmed remaining units will not arrive
-                  </s-option>
-                </s-select>
-                <s-checkbox
+                  </option>
+                </FormSelect>
+                <FormCheck
                   label="The supplier confirmed no more goods will arrive. I understand a replacement restock may be proposed."
                   checked={confirmed}
                   disabled={busy}
@@ -561,7 +562,7 @@ export function DeliveriesPage({ data }: { data: Data }) {
                   </s-banner>
                 ) : (
                   <>
-                    <s-number-field
+                    <FormField type="number"
                       label="Quantity received"
                       value={quantity}
                       min={1}
@@ -574,7 +575,7 @@ export function DeliveriesPage({ data }: { data: Data }) {
                         setError("");
                       }}
                     />
-                    <s-select
+                    <FormSelect
                       label="Receiving location"
                       value={locationId}
                       disabled={busy}
@@ -583,15 +584,15 @@ export function DeliveriesPage({ data }: { data: Data }) {
                         setError("");
                       }}
                     >
-                      <s-option value="" disabled>
+                      <option value="" disabled>
                         Choose a location
-                      </s-option>
+                      </option>
                       {card.locations.map((location) => (
-                        <s-option key={location.id} value={location.id}>
+                        <option key={location.id} value={location.id}>
                           {location.name}
-                        </s-option>
+                        </option>
                       ))}
-                    </s-select>
+                    </FormSelect>
                     <s-text tone="neutral">{`This will add ${Number.isSafeInteger(Number(quantity)) && Number(quantity) > 0 && Number(quantity) <= card.remaining ? quantity : "the received"} units to the selected location.`}</s-text>
                   </>
                 )}

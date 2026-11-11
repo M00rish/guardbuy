@@ -1,3 +1,4 @@
+import { startPayoutWebhookWorker } from "./lib/paypal/webhook-worker.server";
 import { PassThrough } from "stream";
 import { renderToPipeableStream } from "react-dom/server";
 import { ServerRouter } from "react-router";
@@ -13,6 +14,7 @@ import { startAlertWorker } from "./lib/alerts/worker.server";
 validatePayPalStartup();
 startRestockWorker();
 startAlertWorker();
+startPayoutWebhookWorker();
 
 export const streamTimeout = 5000;
 

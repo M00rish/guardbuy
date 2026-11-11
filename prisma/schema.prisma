@@ -234,6 +234,8 @@ model MerchantAlert {
 
 // Durable per-payout read schedule; a lease prevents duplicate checks across app processes.
 model PayoutCheck {
+  startedAt DateTime?
+  lastCheckOk Boolean @default(false)
   shop String
   payoutSeq Int
   nextCheckAt DateTime @default(now())
@@ -242,4 +244,40 @@ model PayoutCheck {
   holder String?
   lockedUntil DateTime?
   @@id([shop, payoutSeq])
+}
+
+// App/account configuration, not merchant/customer data. No API credentials are stored.
+model PayPalWebhookSubscription {
+  accountKey String @id
+  webhookId String?
+  url String
+  checkedAt DateTime?
+  availableAt DateTime @default(now())
+  holder String?
+  lockedUntil DateTime?
+}
+
+// Minimal verified notification receipts. Never store the webhook body or recipient details.
+model PayPalWebhookReceipt {
+  accountKey String
+  eventId String
+  receivedAt DateTime @default(now())
+  @@id([accountKey, eventId])
+}
+
+// Coalesces item notifications by provider batch. Early notifications wait for audit commit.
+model PayPalPayoutSignal {
+  accountKey String
+  batchId String
+  generation Int @default(1)
+  completedGeneration Int @default(0)
+  claimedGeneration Int?
+  shop String?
+  holder String?
+  lockedUntil DateTime?
+  availableAt DateTime @default(now())
+  receivedAt DateTime @default(now())
+  attempts Int @default(0)
+  @@id([accountKey, batchId])
+  @@index([availableAt, lockedUntil])
 }

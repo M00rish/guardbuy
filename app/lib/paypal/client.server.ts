@@ -61,7 +61,7 @@ async function accessToken(creds: Credentials, signal: AbortSignal): Promise<str
  */
 export async function paypal<T>(
   path: string,
-  init: { method?: "GET" | "POST"; body?: unknown; requestId?: string; creds?: Credentials; maxAttempts?: number; timeoutMs?: number } = {},
+  init: { method?: "GET" | "POST" | "PATCH"; body?: unknown; requestId?: string; creds?: Credentials; maxAttempts?: number; timeoutMs?: number } = {},
 ): Promise<T> {
   const base = paypalApiBase();
   const creds = init.creds ?? merchantCredentials();

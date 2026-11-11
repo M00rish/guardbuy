@@ -1,3 +1,4 @@
+import { activePayoutWebhook } from "./webhook-registration.server";
 import { payoutSchedule } from "./payout-schedule.server";
 import { auditEntries } from "../audit/log.server";
 import { paypal } from "./client.server";
@@ -6,39 +7,44 @@ import { recoverKnownPayments } from "../agent/execute.server";
 import { createPayoutRefresh, type PayoutBatch } from "./payout-refresh";
 
 // Shared by both pages and the legacy manual job. One run per shop per app process.
-export const refreshPayouts = createPayoutRefresh({
-  schedule: payoutSchedule,
-  read: async (shop) => {
-    // Unknown capture recovery is read-only too. Share a durable five-minute lease,
-    // rather than reading the provider again on every page/filter change.
-    if (await payoutSchedule.claim(shop, -1, Date.now())) {
-      try {
-        await recoverKnownPayments(shop);
-      } finally {
-        await payoutSchedule.save(shop, {
-          payoutSeq: -1,
-          checkedAt: Date.now(),
-          nextAt: Date.now() + 300_000,
-          unchanged: 0,
-        });
+export const refreshPayouts = createPayoutRefresh(
+  {
+    schedule: payoutSchedule,
+    read: async (shop) => {
+      // Unknown capture recovery is read-only too. Share a durable five-minute lease,
+      // rather than reading the provider again on every page/filter change.
+      if (await payoutSchedule.claim(shop, -1, Date.now())) {
+        try {
+          await recoverKnownPayments(shop);
+        } finally {
+          await payoutSchedule.save(shop, {
+            payoutSeq: -1,
+            checkedAt: Date.now(),
+            nextAt: Date.now() + 300_000,
+            unchanged: 0,
+          });
+        }
       }
-    }
-    return auditEntries(shop);
+      return auditEntries(shop);
+    },
+    append: payoutSchedule.append,
+    batch: (id) =>
+      paypal<PayoutBatch>(`/v1/payments/payouts/${encodeURIComponent(id)}`),
+    confirmed: async (id) => {
+      const found = await runPayPalTool<{
+        transaction_details?: {
+          transaction_info: { transaction_id: string };
+        }[];
+      }>("list_transactions", { transaction_id: id, search_months: 1 });
+      return (
+        found.transaction_details?.some(
+          (d) => d.transaction_info.transaction_id === id,
+        ) ?? false
+      );
+    },
   },
-  append: payoutSchedule.append,
-  batch: (id) =>
-    paypal<PayoutBatch>(`/v1/payments/payouts/${encodeURIComponent(id)}`),
-  confirmed: async (id) => {
-    const found = await runPayPalTool<{
-      transaction_details?: { transaction_info: { transaction_id: string } }[];
-    }>("list_transactions", { transaction_id: id, search_months: 1 });
-    return (
-      found.transaction_details?.some(
-        (d) => d.transaction_info.transaction_id === id,
-      ) ?? false
-    );
-  },
-});
+  { webhooks: async () => Boolean(await activePayoutWebhook()) },
+);
 
 export async function reconcilePayouts(shop: string) {
   const state = await refreshPayouts(shop);

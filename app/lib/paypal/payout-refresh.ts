@@ -4,6 +4,7 @@ export type PayoutBatch = {
   items?: { transaction_id?: string; transaction_status?: string }[];
 };
 export type PayoutCheck = {
+  ok?: boolean;
   payoutSeq: number;
   nextAt: number;
   checkedAt: number | null;
@@ -29,6 +30,7 @@ export type RefreshState = {
   failed: boolean;
   awaitingConfirmation: boolean;
   scheduled?: boolean;
+  source?: "webhooks" | "reconciliation";
 };
 const FINAL = new Set([
   "SUCCESS",
@@ -83,6 +85,7 @@ export function createPayoutRefresh(
     cooldownMs?: number;
     waitMs?: number;
     batchSize?: number;
+    webhooks?: () => Promise<boolean>;
   } = {},
 ) {
   const now = options.now ?? Date.now,
@@ -92,12 +95,14 @@ export function createPayoutRefresh(
     string,
     { state: RefreshState; pending?: Promise<void> }
   >();
-  async function run(shop: string, state: RefreshState) {
+  async function run(shop: string, state: RefreshState, target?: number) {
     state.failed = false;
     state.incomplete = false;
     state.awaitingConfirmation = false;
     state.scheduled = false;
     try {
+      const webhookMode = (await options.webhooks?.()) ?? false;
+      state.source = webhookMode ? "webhooks" : "reconciliation";
       const [log, stored] = await Promise.all([
         ports.read(shop),
         schedule.load(shop),
@@ -112,7 +117,11 @@ export function createPayoutRefresh(
         if (e.event.type === "payout_status")
           latest.set(e.event.payoutSeq, e.event);
       const due = payouts
-        .filter((p) => (checks.get(p.seq)?.nextAt ?? 0) <= now())
+        .filter(
+          (p) =>
+            (target === undefined || p.seq === target) &&
+            (checks.get(p.seq)?.nextAt ?? 0) <= now(),
+        )
         .sort(
           (a, b) =>
             (checks.get(a.seq)?.nextAt ?? 0) -
@@ -123,6 +132,7 @@ export function createPayoutRefresh(
         if (!(await schedule.claim(shop, payout.seq, now()))) continue;
         const previous = latest.get(payout.seq),
           old = checks.get(payout.seq);
+        let succeeded = false;
         let unchanged = (old?.unchanged ?? -1) + 1,
           verified = false;
         try {
@@ -157,6 +167,7 @@ export function createPayoutRefresh(
                 confirmedByTransactionSearch: true,
               });
           }
+          succeeded = true;
           latest.set(payout.seq, {
             type: "payout_status",
             payoutSeq: payout.seq,
@@ -170,9 +181,14 @@ export function createPayoutRefresh(
         const at = now();
         await schedule.save(shop, {
           payoutSeq: payout.seq,
+          ok: succeeded,
           checkedAt: at,
           nextAt:
-            at + (options.cooldownMs ?? payoutCheckDelay(unchanged, verified)),
+            at +
+            (options.cooldownMs ??
+              (webhookMode
+                ? (verified ? 24 : 6) * 3600_000
+                : payoutCheckDelay(unchanged, verified))),
           unchanged,
         });
       }
@@ -212,8 +228,12 @@ export function createPayoutRefresh(
       state.running = false;
     }
   }
-  return async function refresh(shop: string): Promise<RefreshState> {
-    let slot = shops.get(shop);
+  return async function refresh(
+    shop: string,
+    target?: number,
+  ): Promise<RefreshState> {
+    const key = `${shop}:${target ?? "all"}`;
+    let slot = shops.get(key);
     if (!slot) {
       slot = {
         state: {
@@ -225,14 +245,14 @@ export function createPayoutRefresh(
           awaitingConfirmation: false,
         },
       };
-      shops.set(shop, slot);
+      shops.set(key, slot);
     }
     if (!slot.pending) {
       slot.state.running = true;
       const current = slot;
-      slot.pending = run(shop, slot.state).finally(() => {
+      slot.pending = run(shop, slot.state, target).finally(() => {
         current.pending = undefined;
-        shops.delete(shop);
+        shops.delete(key);
       });
     }
     let timer: ReturnType<typeof setTimeout> | undefined;

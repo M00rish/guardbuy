@@ -33,6 +33,7 @@ export async function purgeShopRequest(owner: PrismaClient, id: string, confirmS
     await tx.alertChannel.deleteMany({ where: { shop: confirmShop } });
     await tx.restockJob.deleteMany({ where: { shop: confirmShop } });
     await tx.payoutCheck.deleteMany({ where: { shop: confirmShop } });
+    await tx.payPalPayoutSignal.deleteMany({ where: { shop: confirmShop } });
     await tx.productSupplier.deleteMany({ where: { shop: confirmShop } });
     await tx.supplier.deleteMany({ where: { shop: confirmShop } });
     await tx.managedProduct.deleteMany({ where: { shop: confirmShop } });

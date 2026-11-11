@@ -32,7 +32,7 @@ export function createPayoutSchedule(): PayoutSchedule & {
       client.$transaction(async (tx) => {
         if (!(await privacyWriteAllowed(tx, shop))) return false;
         await tx.payoutCheck.createMany({
-          data: [{ shop, payoutSeq }],
+          data: [{ shop, payoutSeq, nextCheckAt: new Date(now) }],
           skipDuplicates: true,
         });
         const r = await tx.payoutCheck.updateMany({
@@ -45,7 +45,11 @@ export function createPayoutSchedule(): PayoutSchedule & {
               { lockedUntil: { lte: new Date(now) } },
             ],
           },
-          data: { holder, lockedUntil: new Date(now + 180_000) },
+          data: {
+            holder,
+            startedAt: new Date(now),
+            lockedUntil: new Date(now + 180_000),
+          },
         });
         return r.count === 1;
       }),
@@ -53,6 +57,7 @@ export function createPayoutSchedule(): PayoutSchedule & {
       const r = await client.payoutCheck.updateMany({
         where: { shop, payoutSeq: c.payoutSeq, holder },
         data: {
+          lastCheckOk: c.ok ?? false,
           checkedAt: c.checkedAt === null ? null : new Date(c.checkedAt),
           nextCheckAt: new Date(c.nextAt),
           unchanged: c.unchanged,

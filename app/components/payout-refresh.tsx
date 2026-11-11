@@ -65,7 +65,11 @@ export function PayoutRefresh({
       () => {
         if (document.visibilityState !== "hidden") refresh();
       },
-      state.running ? 5000 : Math.max(1000, retryAt - Date.now()),
+      state.running
+        ? 5000
+        : state.source === "webhooks"
+          ? 30_000
+          : Math.max(1000, retryAt - Date.now()),
     );
     return () => clearTimeout(timer);
   }, [
@@ -76,6 +80,7 @@ export function PayoutRefresh({
     state.awaitingConfirmation,
     state.incomplete,
     state.scheduled,
+    state.source,
     watch,
     retryAt,
     refresh,
@@ -92,22 +97,32 @@ export function PayoutRefresh({
                 ? "Some checks failed. Showing recorded statuses."
                 : state.awaitingConfirmation
                   ? "Waiting for PayPal confirmation"
-                  : "Showing recorded statuses"}
+                  : state.source === "webhooks"
+                    ? "PayPal notifications connected"
+                    : "Showing recorded statuses"}
             {state.checkedAt &&
               ` · Last check ${readableTime(state.checkedAt)}`}
           </p>
         </div>
-        <s-button onClick={refresh} disabled={state.running || busy || cooling}>
-          {COPY.refreshPayouts}
+        <s-button
+          onClick={refresh}
+          disabled={
+            state.running || busy || (cooling && state.source !== "webhooks")
+          }
+        >
+          {state.source === "webhooks"
+            ? "Refresh recorded status"
+            : COPY.refreshPayouts}
         </s-button>
       </div>
       <details>
         <summary>How status checks work</summary>
         <p>
-          Pending payouts are checked less often when unchanged (5–60 minutes).
-          Confirmed payouts are checked at most daily for returns or refunds
-          while the app is in use. Hidden tabs pause automatic checks. These
-          checks never submit a payment.
+          {state.source === "webhooks"
+            ? "Verified PayPal notifications update payout status automatically. This page refreshes recorded status while results are pending; that does not repeatedly query PayPal. A provider reconciliation every 6 hours (daily once confirmed) covers missed notifications."
+            : "PayPal notifications are not connected yet. Pending payouts use checks with increasing delays (5–60 minutes); confirmed payouts are checked at most daily while the app is in use."}{" "}
+          Hidden tabs pause page refreshes. Status checks never submit a
+          payment.
         </p>
         {state.retryAt && (
           <p>Next scheduled check: {readableTime(state.retryAt)}.</p>
