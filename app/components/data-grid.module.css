@@ -1,0 +1,101 @@
+.wrapper {
+  font:
+    13px/1.4 Arial,
+    sans-serif;
+  min-width: 0;
+  max-width: 100%;
+  color: #213c35;
+  border: 1px solid #dce7e1;
+  border-radius: 12px;
+  overflow: hidden;
+  background: white;
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #f7faf8;
+  border-bottom: 1px solid #dce7e1;
+}
+.toolbar input {
+  font: inherit;
+  color: #213c35;
+  border: 1px solid #cddbd4;
+  background: #fff;
+  border-radius: 6px;
+  padding: 8px 10px;
+  width: 260px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.toolbar input:focus-visible {
+  outline: 2px solid #007f65;
+  outline-offset: 2px;
+}
+.toolbar > span {
+  font-size: 11px;
+  color: #708177;
+}
+.badge {
+  display: inline-block;
+  max-width: 100%;
+  padding: 0 7px;
+  border-radius: 5px;
+  font:
+    11px/1.4 Arial,
+    sans-serif;
+  color: #56635d;
+  background: #eef1ef;
+  white-space: normal;
+}
+.badge[data-tone="success"] {
+  color: #087450;
+  background: #e0f5e9;
+}
+.badge[data-tone="info"] {
+  color: #275b91;
+  background: #e5f0ff;
+}
+.badge[data-tone="caution"],
+.badge[data-tone="warning"] {
+  color: #865918;
+  background: #fff2da;
+}
+.badge[data-tone="critical"] {
+  color: #ad3c3c;
+  background: #ffeded;
+}
+.wrapper :global(.ag-cell) {
+  display: flex;
+  align-items: center;
+  line-height: 1.45;
+}
+.wrapper :global(.ag-cell.ag-right-aligned-cell) {
+  justify-content: flex-end;
+}
+.wrapper :global(.ag-cell-value) {
+  min-width: 0;
+}
+.wrapper :global(s-stack) {
+  max-width: 100%;
+}
+.wrapper :global(input[type="checkbox"]) {
+  accent-color: #007f65;
+}
+.wrapper :global(a) {
+  color: #00745b;
+}
+.wrapper :global(button) {
+  font: inherit;
+}
+@media (max-width: 700px) {
+  .toolbar input {
+    width: 100%;
+  }
+  .toolbar > span {
+    font-size: 10px;
+  }
+}

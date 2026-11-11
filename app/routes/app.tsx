@@ -1,6 +1,14 @@
+import { LoadingProgress } from "../components/loading-state";
 import { useEffect } from "react";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
-import { Outlet, useLoaderData, useNavigation, useRouteError } from "react-router";
+import {
+  Outlet,
+  useLoaderData,
+  useNavigation,
+  useRouteError,
+  useFetchers,
+  useRevalidator,
+} from "react-router";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import { AppProvider } from "@shopify/shopify-app-react-router/react";
 import { useAppBridge } from "@shopify/app-bridge-react";
@@ -18,11 +26,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 function LoadingBar() {
   const navigation = useNavigation();
   const shopify = useAppBridge();
-  const loading = navigation.state !== "idle";
+  const fetchers = useFetchers();
+  const revalidator = useRevalidator();
+  const loading =
+    navigation.state !== "idle" ||
+    revalidator.state !== "idle" ||
+    fetchers.some((f) => f.state !== "idle");
   useEffect(() => {
     shopify.loading(loading);
   }, [loading, shopify]);
-  return null;
+  return loading ? <LoadingProgress /> : null;
 }
 
 export default function App() {

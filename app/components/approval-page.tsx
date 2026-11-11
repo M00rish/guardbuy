@@ -1,4 +1,5 @@
-import { Fragment, useEffect, useState } from "react";
+import { DataGrid, cell, GridBadge } from "./data-grid";
+import { useEffect, useState } from "react";
 import { useFetcher } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { PayoutRefresh } from "./payout-refresh";
@@ -26,7 +27,7 @@ type Card = ApprovalCard & { productTitle: string };
 function Status({ card }: { card: Card }) {
   const label = APPROVAL_LABEL[card.status];
   return (
-    <s-badge
+    <GridBadge
       tone={
         card.status === "paypal_pending" || card.status === "payment_pending"
           ? "info"
@@ -34,15 +35,47 @@ function Status({ card }: { card: Card }) {
       }
     >
       {label}
-    </s-badge>
+    </GridBadge>
   );
 }
 
 export function ApprovalsPanel({ data }: { data: ApprovalPageData }) {
   const { cards, payoutRefresh, purchase } = data;
+  const [selected, setSelected] = useState<number | null>(purchase);
+  const [opened, setOpened] = useState(
+    () => new Set<number>(purchase === null ? [] : [purchase]),
+  );
+  useEffect(() => {
+    setSelected(purchase);
+    if (purchase !== null)
+      setOpened((previous) => new Set(previous).add(purchase));
+  }, [purchase]);
+  const toggle = (seq: number) => {
+    setOpened((previous) => new Set(previous).add(seq));
+    setSelected((previous) => (previous === seq ? null : seq));
+  };
+  useEffect(() => {
+    if (selected !== null) {
+      const frame = requestAnimationFrame(() =>
+        document
+          .getElementById(`purchase-details-${selected}`)
+          ?.scrollIntoView({
+            block: "nearest",
+            behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
+              .matches
+              ? "auto"
+              : "smooth",
+          }),
+      );
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [selected]);
   return (
     <s-stack gap="base">
-      <PayoutRefresh state={payoutRefresh} watch={cards.some(card => card.status === "payment_pending")} />
+      <PayoutRefresh
+        state={payoutRefresh}
+        watch={cards.some((card) => card.status === "payment_pending")}
+      />
       {purchase !== null && (
         <s-section>
           <s-banner tone="info" heading={`Purchase #${purchase}`}>
@@ -72,42 +105,113 @@ export function ApprovalsPanel({ data }: { data: ApprovalPageData }) {
                 attention. Expand a row to review the facts and available
                 actions.
               </s-text>
-              <div
-                className={styles.scroll}
-                role="region"
-                aria-label="Purchases needing attention"
-                // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- Allow keyboard scrolling of a wide table.
-                tabIndex={0}
-              >
-                <table className={styles.table}>
-                  <caption className={styles.visuallyHidden}>
-                    Purchases needing approval or payment attention
-                  </caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">Purchase</th>
-                      <th scope="col">Supplier</th>
-                      <th scope="col" className={styles.amount}>
-                        Total
-                      </th>
-                      <th scope="col">Status</th>
-                      <th scope="col">Proposed</th>
-                      <th scope="col">
-                        <span className={styles.visuallyHidden}>Details</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {cards.map((card) => (
-                      <ApprovalRow
-                        key={`${purchase ?? "all"}-${card.decisionSeq}`}
-                        card={card}
-                        initiallyExpanded={purchase === card.decisionSeq}
-                      />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataGrid<Card>
+                label="Purchases needing attention"
+                rows={cards}
+                rowId={(card) => String(card.decisionSeq)}
+                height={640}
+                columns={[
+                  {
+                    colId: "purchase",
+                    headerName: "Purchase",
+                    flex: 2,
+                    minWidth: 265,
+                    autoHeight: true,
+                    wrapText: true,
+                    valueGetter: ({ data }) =>
+                      data
+                        ? `#${data.decisionSeq} · ${data.quantity} × ${data.productTitle}`
+                        : "",
+                    cellRenderer: cell<Card>((card) => (
+                      <button
+                        type="button"
+                        className={styles.purchase}
+                        aria-label={`${selected === card.decisionSeq ? "Hide" : "View"} purchase #${card.decisionSeq}`}
+                        aria-expanded={selected === card.decisionSeq}
+                        aria-controls={`purchase-details-${card.decisionSeq}`}
+                        onClick={() => toggle(card.decisionSeq)}
+                      >
+                        #{card.decisionSeq} · {card.quantity} ×{" "}
+                        {card.productTitle}
+                      </button>
+                    )),
+                  },
+                  {
+                    field: "supplierName",
+                    headerName: "Supplier",
+                    minWidth: 180,
+                    flex: 1,
+                  },
+                  {
+                    field: "totalCents",
+                    headerName: "Total",
+                    type: "numericColumn",
+                    width: 130,
+                    valueFormatter: ({ value }) => usd(value),
+                  },
+                  {
+                    field: "status",
+                    headerName: "Status",
+                    minWidth: 210,
+                    valueGetter: ({ data }) =>
+                      data ? APPROVAL_LABEL[data.status] : "",
+                    cellRenderer: cell<Card>((card) => <Status card={card} />),
+                  },
+                  {
+                    field: "proposedAt",
+                    headerName: "Proposed",
+                    width: 160,
+                    valueFormatter: ({ value }) => ago(value, Date.now()),
+                  },
+                  {
+                    colId: "details",
+                    headerName: "Details",
+                    width: 150,
+                    sortable: false,
+                    filter: false,
+                    cellRenderer: cell<Card>((card) => (
+                      <button
+                        type="button"
+                        className={styles.disclosure}
+                        aria-expanded={selected === card.decisionSeq}
+                        aria-controls={`purchase-details-${card.decisionSeq}`}
+                        aria-label={`${selected === card.decisionSeq ? "Hide" : "View"} details for purchase #${card.decisionSeq}`}
+                        onClick={() => toggle(card.decisionSeq)}
+                      >
+                        {selected === card.decisionSeq
+                          ? "Hide details"
+                          : "View details"}
+                      </button>
+                    )),
+                  },
+                ]}
+              />
+              {cards
+                .filter((card) => opened.has(card.decisionSeq))
+                .map((card) => (
+                  <div
+                    hidden={selected !== card.decisionSeq}
+                    className={styles.detailsContent}
+                    id={`purchase-details-${card.decisionSeq}`}
+                    key={card.decisionSeq}
+                    role="region"
+                    aria-label={`Details for purchase #${card.decisionSeq}`}
+                  >
+                    <div className={styles.detailsHeading}>
+                      <strong>
+                        Purchase #{card.decisionSeq} · {card.productTitle}
+                      </strong>
+                      <button
+                        type="button"
+                        className={styles.disclosure}
+                        onClick={() => setSelected(null)}
+                      >
+                        Close details
+                      </button>
+                    </div>
+                    <ApprovalDetails card={card} />
+                  </div>
+                ))}
             </>
           )}
           <s-text>
@@ -117,71 +221,6 @@ export function ApprovalsPanel({ data }: { data: ApprovalPageData }) {
         </s-stack>
       </s-section>
     </s-stack>
-  );
-}
-
-function ApprovalRow({
-  card,
-  initiallyExpanded,
-}: {
-  card: Card;
-  initiallyExpanded: boolean;
-}) {
-  const [expanded, setExpanded] = useState(initiallyExpanded);
-  const [opened, setOpened] = useState(initiallyExpanded);
-  const detailsId = `purchase-details-${card.decisionSeq}`;
-  const toggle = () => {
-    setOpened(true);
-    setExpanded((value) => !value);
-  };
-  return (
-    <Fragment>
-      <tr className={styles.summary} data-expanded={expanded}>
-        <th scope="row">
-          <button
-            type="button"
-            className={styles.purchase}
-            aria-label={`${expanded ? "Hide" : "View"} purchase #${card.decisionSeq}`}
-            aria-expanded={expanded}
-            aria-controls={detailsId}
-            onClick={toggle}
-          >
-            #{card.decisionSeq} · {card.quantity} × {card.productTitle}
-          </button>
-        </th>
-        <td>{card.supplierName}</td>
-        <td className={styles.amount}>{usd(card.totalCents)}</td>
-        <td>
-          <Status card={card} />
-        </td>
-        <td className={styles.proposed}>{ago(card.proposedAt, Date.now())}</td>
-        <td>
-          <button
-            type="button"
-            className={styles.disclosure}
-            aria-expanded={expanded}
-            aria-controls={detailsId}
-            aria-label={`${expanded ? "Hide" : "View"} details for purchase #${card.decisionSeq}`}
-            onClick={toggle}
-          >
-            {expanded ? "Hide details" : "View details"}
-            <span aria-hidden="true">{expanded ? " ▴" : " ▾"}</span>
-          </button>
-        </td>
-      </tr>
-      <tr hidden={!expanded} className={styles.details}>
-        <td colSpan={6}>
-          <div
-            id={detailsId}
-            className={styles.detailsContent}
-            role="region"
-            aria-label={`Details for purchase #${card.decisionSeq}`}
-          >
-            {opened && <ApprovalDetails card={card} />}
-          </div>
-        </td>
-      </tr>
-    </Fragment>
   );
 }
 
@@ -294,8 +333,8 @@ function ApprovalDetails({ card }: { card: Card }) {
         <s-stack gap="base">
           <s-text>
             PayPal has the original payment. Its outcome is still pending; do
-            not submit another payment. Use the payout status refresh above to check
-            for confirmation.
+            not submit another payment. Use the payout status refresh above to
+            check for confirmation.
           </s-text>
           <s-link href={`/app/activity?purchase=${card.decisionSeq}`}>
             View payment details in Activity

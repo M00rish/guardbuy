@@ -1,3 +1,4 @@
+import { DataGrid, cell, GridBadge } from "./data-grid";
 import { useEffect } from "react";
 import { useFetcher, useSearchParams } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
@@ -87,98 +88,155 @@ export function ProductsPanel({ data }: { data: ProductsPageData }) {
                 : "Nothing to link here."}
             </Empty>
           ) : (
-            <s-table>
-              <s-table-header-row>
-                <s-table-header listSlot="primary">Product</s-table-header>
-                <s-table-header format="numeric">Stock</s-table-header>
-                <s-table-header format="numeric">Days left</s-table-header>
-                <s-table-header listSlot="secondary">Suppliers</s-table-header>
-                <s-table-header>GuardBuy</s-table-header>
-                <s-table-header>Actions</s-table-header>
-              </s-table-header-row>
-              <s-table-body>
-                {shown.map((p) => (
-                  <s-table-row key={p.variantId}>
-                    <s-table-cell>
-                      <s-stack gap="none">
-                        <s-text
-                          type={p.managed ? "strong" : "generic"}
-                          tone={p.managed ? "auto" : "neutral"}
-                        >
-                          {p.title}
-                        </s-text>
-                        {p.sku && <s-text tone="neutral">{p.sku}</s-text>}
-                      </s-stack>
-                    </s-table-cell>
-                    <s-table-cell>{p.stock}</s-table-cell>
-                    <s-table-cell>
-                      {p.cover === null ? "–" : p.cover}
-                    </s-table-cell>
-                    <s-table-cell>
-                      {p.suppliers.length === 0 ? (
-                        needsSupplier(p) ? (
-                          <s-badge tone="caution">Needs a supplier</s-badge>
-                        ) : (
-                          <s-text tone="neutral">None</s-text>
-                        )
-                      ) : (
+            <DataGrid<ProductsPageData["products"][number]>
+              label="Products"
+              rows={shown}
+              rowId={(p) => String(p.variantId)}
+              columns={[
+                {
+                  field: "title",
+                  headerName: "Product",
+                  flex: 2,
+                  minWidth: 230,
+                  getQuickFilterText: ({ data }) =>
+                    [data?.title, data?.sku].filter(Boolean).join(" "),
+                  cellRenderer: cell<ProductsPageData["products"][number]>(
+                    (p) => (
+                      <>
                         <s-stack gap="none">
-                          {p.suppliers.map((s) => (
-                            <s-stack
-                              key={s.name}
-                              direction="inline"
-                              gap="small-200"
-                              alignItems="center"
-                            >
-                              <s-text type={s.preferred ? "strong" : "generic"}>
-                                {s.name}
-                              </s-text>
-                              <s-text tone="neutral">{s.price}</s-text>
-                              {s.preferred && (
-                                <s-badge tone="info">Preferred</s-badge>
-                              )}
-                              {!s.approved && (
-                                <s-badge tone="caution">
-                                  Not approved in rules
-                                </s-badge>
-                              )}
-                            </s-stack>
-                          ))}
+                          <s-text
+                            type={p.managed ? "strong" : "generic"}
+                            tone={p.managed ? "auto" : "neutral"}
+                          >
+                            {p.title}
+                          </s-text>
+                          {p.sku && <s-text tone="neutral">{p.sku}</s-text>}
                         </s-stack>
-                      )}
-                    </s-table-cell>
-                    <s-table-cell>
-                      <s-switch
-                        label="Restock with GuardBuy"
-                        labelAccessibilityVisibility="exclusive"
-                        checked={p.managed}
-                        disabled={busy}
-                        onChange={() =>
-                          fetcher.submit(
-                            {
-                              intent: "toggle",
-                              variantId: p.variantId,
-                              sku: p.sku ?? "",
-                              title: p.title,
-                              managed: String(!p.managed),
-                            },
-                            { method: "POST", action: "/app/products" },
+                      </>
+                    ),
+                  ),
+                },
+                {
+                  field: "stock",
+                  headerName: "Stock",
+                  type: "numericColumn",
+                  width: 100,
+                  cellRenderer: cell<ProductsPageData["products"][number]>(
+                    (p) => <>{p.stock}</>,
+                  ),
+                },
+                {
+                  field: "cover",
+                  headerName: "Days of cover",
+                  type: "numericColumn",
+                  width: 130,
+                  cellRenderer: cell<ProductsPageData["products"][number]>(
+                    (p) => <>{p.cover === null ? "Unavailable" : p.cover}</>,
+                  ),
+                },
+                {
+                  colId: "suppliers",
+                  headerName: "Suppliers",
+                  flex: 2,
+                  minWidth: 245,
+                  autoHeight: true,
+                  wrapText: true,
+                  valueGetter: ({ data }) =>
+                    data?.suppliers.map((s) => s.name).join(", ") ?? "None",
+                  cellRenderer: cell<ProductsPageData["products"][number]>(
+                    (p) => (
+                      <>
+                        {p.suppliers.length === 0 ? (
+                          needsSupplier(p) ? (
+                            <GridBadge tone="caution">
+                              Needs a supplier
+                            </GridBadge>
+                          ) : (
+                            <s-text tone="neutral">None</s-text>
                           )
-                        }
-                      />
-                    </s-table-cell>
-                    <s-table-cell>
-                      <s-button
-                        variant="tertiary"
-                        href={`/app/products/${p.variantId}`}
-                      >
-                        {p.suppliers.length ? "Manage" : "Link supplier"}
-                      </s-button>
-                    </s-table-cell>
-                  </s-table-row>
-                ))}
-              </s-table-body>
-            </s-table>
+                        ) : (
+                          <s-stack gap="none">
+                            {p.suppliers.map((s) => (
+                              <s-stack
+                                key={s.name}
+                                direction="inline"
+                                gap="small-200"
+                                alignItems="center"
+                              >
+                                <s-text
+                                  type={s.preferred ? "strong" : "generic"}
+                                >
+                                  {s.name}
+                                </s-text>
+                                <s-text tone="neutral">{s.price}</s-text>
+                                {s.preferred && (
+                                  <GridBadge tone="info">Preferred</GridBadge>
+                                )}
+                                {!s.approved && (
+                                  <GridBadge tone="caution">
+                                    Not approved in rules
+                                  </GridBadge>
+                                )}
+                              </s-stack>
+                            ))}
+                          </s-stack>
+                        )}
+                      </>
+                    ),
+                  ),
+                },
+                {
+                  field: "managed",
+                  headerName: "Auto restock",
+                  width: 135,
+                  valueGetter: ({ data }) => (data?.managed ? "On" : "Off"),
+                  cellRenderer: cell<ProductsPageData["products"][number]>(
+                    (p) => (
+                      <>
+                        <input
+                          type="checkbox"
+                          aria-label={`Restock ${p.title} automatically`}
+                          checked={p.managed}
+                          disabled={busy}
+                          onChange={() =>
+                            fetcher.submit(
+                              {
+                                intent: "toggle",
+                                variantId: p.variantId,
+                                sku: p.sku ?? "",
+                                title: p.title,
+                                managed: String(!p.managed),
+                              },
+                              { method: "POST", action: "/app/products" },
+                            )
+                          }
+                        />
+                      </>
+                    ),
+                  ),
+                },
+                {
+                  colId: "actions",
+                  headerName: "Actions",
+                  width: 140,
+                  sortable: false,
+                  filter: false,
+                  cellRenderer: cell<ProductsPageData["products"][number]>(
+                    (p) => (
+                      <>
+                        <s-button
+                          variant="tertiary"
+                          href={`/app/products/${p.variantId}`}
+                        >
+                          {p.suppliers.length ? "Manage" : "Link supplier"}
+                        </s-button>
+                      </>
+                    ),
+                  ),
+                },
+              ]}
+              height={640}
+            />
           )}
         </s-stack>
       </s-section>

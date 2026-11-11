@@ -1,3 +1,4 @@
+import { DataGrid, cell, compareMoney, GridBadge } from "./data-grid";
 import { COPY } from "../lib/wording";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFetcher } from "react-router";
@@ -96,7 +97,7 @@ export function RulesEditor({ data }: { data: RulesPageData }) {
       <s-section>
         {signed && current ? (
           <s-stack direction="inline" gap="small-200" alignItems="center">
-            <s-badge tone="success">Signed</s-badge>
+            <GridBadge tone="success">Signed</GridBadge>
             <s-text tone="neutral">
               by {current.by} · {when(current.at)} · fingerprint{" "}
               {current.hash.slice(0, 12)} · audit log entry #{current.seq}
@@ -240,7 +241,7 @@ export function RulesEditor({ data }: { data: RulesPageData }) {
                   {signed ? "Sign updated rules" : "Sign these rules"}
                 </s-button>
                 {changed && signed && (
-                  <s-badge tone="caution">Unsaved changes</s-badge>
+                  <GridBadge tone="caution">Unsaved changes</GridBadge>
                 )}
                 {signed && changed && (
                   <s-button
@@ -268,39 +269,75 @@ export function RulesEditor({ data }: { data: RulesPageData }) {
 
       {history.length > 0 && (
         <s-section heading="History">
-          <s-table>
-            <s-table-header-row>
-              <s-table-header listSlot="primary">Signed</s-table-header>
-              <s-table-header>By</s-table-header>
-              <s-table-header format="numeric">{COPY.approvalAbove}</s-table-header>
-              <s-table-header format="numeric">{COPY.spendingCap}</s-table-header>
-              <s-table-header listSlot="secondary">Fingerprint</s-table-header>
-            </s-table-header-row>
-            <s-table-body>
-              {history.map((h, i) => (
-                <s-table-row key={h.seq}>
-                  <s-table-cell>
+          <DataGrid<RulesPageData["history"][number]>
+            label="Rules history"
+            rows={history}
+            rowId={(h) => String(h.seq)}
+            columns={[
+              {
+                field: "at",
+                headerName: "Signed",
+                flex: 1,
+                minWidth: 210,
+                cellRenderer: cell<RulesPageData["history"][number]>((h) => (
+                  <>
                     <s-stack
                       direction="inline"
                       gap="small-200"
                       alignItems="center"
                     >
                       <s-text>{when(h.at)}</s-text>
-                      {i === 0 && <s-badge tone="success">Current</s-badge>}
+                      {h.seq === history[0]?.seq && (
+                        <GridBadge tone="success">Current</GridBadge>
+                      )}
                     </s-stack>
-                  </s-table-cell>
-                  <s-table-cell>{h.by}</s-table-cell>
-                  <s-table-cell>{h.approvalAbove}</s-table-cell>
-                  <s-table-cell>{h.weeklyCap}</s-table-cell>
-                  <s-table-cell>
+                  </>
+                )),
+              },
+              {
+                field: "by",
+                headerName: "By",
+                flex: 1,
+                minWidth: 150,
+                cellRenderer: cell<RulesPageData["history"][number]>((h) => (
+                  <>{h.by}</>
+                )),
+              },
+              {
+                field: "approvalAbove",
+                headerName: COPY.approvalAbove,
+                type: "numericColumn",
+                minWidth: 185,
+                comparator: compareMoney,
+                cellRenderer: cell<RulesPageData["history"][number]>((h) => (
+                  <>{h.approvalAbove}</>
+                )),
+              },
+              {
+                field: "weeklyCap",
+                headerName: COPY.spendingCap,
+                type: "numericColumn",
+                minWidth: 200,
+                comparator: compareMoney,
+                cellRenderer: cell<RulesPageData["history"][number]>((h) => (
+                  <>{h.weeklyCap}</>
+                )),
+              },
+              {
+                field: "hash",
+                headerName: "Fingerprint",
+                flex: 1,
+                minWidth: 200,
+                cellRenderer: cell<RulesPageData["history"][number]>((h) => (
+                  <>
                     <s-text tone="neutral">
                       {h.hash.slice(0, 12)} · #{h.seq}
                     </s-text>
-                  </s-table-cell>
-                </s-table-row>
-              ))}
-            </s-table-body>
-          </s-table>
+                  </>
+                )),
+              },
+            ]}
+          />
         </s-section>
       )}
       {data.demoAvailable && (

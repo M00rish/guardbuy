@@ -1,3 +1,4 @@
+import { LoadingState } from "../components/loading-state";
 import { homeWorkspace } from "../lib/insights/workspace";
 import { deliveries } from "../lib/inventory/deliveries";
 import { currentProblems } from "../lib/merchant/current-problems";
@@ -216,7 +217,7 @@ export default function Home() {
           <Suspense
             fallback={
               <s-section>
-                <s-text>Loading purchasing analysis…</s-text>
+                <LoadingState label="Loading purchasing analysis" height={640}/>
               </s-section>
             }
           >
@@ -231,7 +232,7 @@ export default function Home() {
           </Suspense>
         ) : (
           <s-section>
-            <s-text>Loading purchasing analysis…</s-text>
+            <LoadingState label="Loading purchasing analysis" height={640}/>
           </s-section>
         ))}
 

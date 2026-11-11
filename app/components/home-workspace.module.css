@@ -88,7 +88,7 @@
   outline-offset: 2px;
 }
 .gridPanel {
-  height: 440px;
+  height: 640px;
   min-width: 0;
 }
 .studio {
@@ -236,4 +236,8 @@
   .productDetail {
     padding: 10px;
   }
+}
+
+.workspace input[type="checkbox"] {
+  accent-color: #007f65;
 }

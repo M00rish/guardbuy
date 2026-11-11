@@ -1,3 +1,6 @@
+import { GridBadge } from "./data-grid";
+import { gridTheme } from "./grid-theme";
+import { GridLoadingOverlay } from "./loading-state";
 import {
   useEffect,
   useMemo,
@@ -14,7 +17,6 @@ import {
 import { AllEnterpriseModule } from "ag-grid-enterprise";
 import { AgChartsEnterpriseModule } from "ag-charts-enterprise";
 import {
-  themeQuartz,
   type ColDef,
   type GridApi,
   type IDetailCellRendererParams,
@@ -44,31 +46,15 @@ export type PurchaseGridContext = { purchaseStore: PurchaseGridStore };
 export const purchaseGridModules = [
   AllEnterpriseModule.with(AgChartsEnterpriseModule),
 ];
-export const gridTheme = themeQuartz.withParams({
-  accentColor: "#007f65",
-  backgroundColor: "#fff",
-  foregroundColor: "#213c35",
-  headerBackgroundColor: "#edf5f1",
-  borderColor: "#dce7e1",
-  fontFamily: "Arial, sans-serif",
-  fontSize: 13,
-  headerFontSize: 12,
-  rowHeight: 44,
-  headerHeight: 44,
-  wrapperBorderRadius: 12,
-  cellHorizontalPadding: 16,
-});
 function StatusCell({ value }: CustomCellRendererProps<InsightRow>) {
   if (!value) return null;
   const tone =
     value === "Paid"
-      ? "paid"
+      ? "success"
       : /blocked|failed|returned/i.test(String(value))
-        ? "blocked"
-        : "waiting";
-  return (
-    <span className={`${styles.badge} ${styles[tone]}`}>{String(value)}</span>
-  );
+        ? "critical"
+        : "warning";
+  return <GridBadge tone={tone}>{String(value)}</GridBadge>;
 }
 function MoneyCell({ value, data }: CustomCellRendererProps<InsightRow>) {
   if (typeof value !== "number") return null;
@@ -480,6 +466,7 @@ export default function PurchaseAnalysisGrid({
               theme={gridTheme}
               rowData={rows}
               loading={ids === null}
+              loadingOverlayComponent={GridLoadingOverlay}
               columnDefs={columns}
               context={context}
               onGridReady={({ api }) => {

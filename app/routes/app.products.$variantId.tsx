@@ -1,12 +1,27 @@
+import {
+  DataGrid,
+  cell,
+  compareMoney,
+  GridBadge,
+} from "../components/data-grid";
 import { useEffect } from "react";
-import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
+import type {
+  ActionFunctionArgs,
+  HeadersFunction,
+  LoaderFunctionArgs,
+} from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import db from "../db.server";
 import { privateAdmin } from "../lib/merchant/staff.server";
-import { linkSupplier, setManaged, setPreferred, unlinkSupplier } from "../lib/suppliers/directory.server";
+import {
+  linkSupplier,
+  setManaged,
+  setPreferred,
+  unlinkSupplier,
+} from "../lib/suppliers/directory.server";
 import { usd } from "../lib/format";
 import { auditEntries } from "../lib/audit/log.server";
 import { currentRuleSet } from "../lib/agent/restock.server";
@@ -105,26 +120,46 @@ export default function ProductSuppliers() {
   const busy = fetcher.state !== "idle";
 
   useEffect(() => {
-    if (fetcher.state === "idle" && fetcher.data) shopify.toast.show(fetcher.data.message, { isError: !fetcher.data.ok });
+    if (fetcher.state === "idle" && fetcher.data)
+      shopify.toast.show(fetcher.data.message, { isError: !fetcher.data.ok });
   }, [fetcher.state, fetcher.data, shopify]);
 
-  const submit = (data: Record<string, string>) => fetcher.submit(data, { method: "POST" });
+  const submit = (data: Record<string, string>) =>
+    fetcher.submit(data, { method: "POST" });
 
   return (
     <s-page heading={p.title} inlineSize="large">
-      <s-link slot="breadcrumb-actions" href="/app/products">Products & Suppliers</s-link>
+      <s-link slot="breadcrumb-actions" href="/app/products">
+        Products & Suppliers
+      </s-link>
 
       <s-section>
         <s-stack direction="inline" gap="base" alignItems="center">
-          <s-switch label="GuardBuy restocks this product" checked={p.managed} disabled={busy}
-            onChange={() => submit({ intent: "toggle", sku: p.sku ?? "", title: p.title, managed: String(!p.managed) })} />
+          <s-switch
+            label="GuardBuy restocks this product"
+            checked={p.managed}
+            disabled={busy}
+            onChange={() =>
+              submit({
+                intent: "toggle",
+                sku: p.sku ?? "",
+                title: p.title,
+                managed: String(!p.managed),
+              })
+            }
+          />
           <s-text tone="neutral">
-            {p.sku ? `SKU ${p.sku} · ` : ""}{p.stock ?? "?"} in stock · {p.perDay} sold/day · {p.cover === null ? "no recent sales" : `${p.cover} days left`}
+            {p.sku ? `SKU ${p.sku} · ` : ""}
+            {p.stock ?? "?"} in stock · {p.perDay} sold/day ·{" "}
+            {p.cover === null ? "no recent sales" : `${p.cover} days left`}
           </s-text>
         </s-stack>
         {p.managed && p.links.length === 0 && (
           <s-box paddingBlockStart="base">
-            <s-banner tone="warning" heading="Link a supplier">GuardBuy can’t restock this product until it has at least one supplier.</s-banner>
+            <s-banner tone="warning" heading="Link a supplier">
+              GuardBuy can’t restock this product until it has at least one
+              supplier.
+            </s-banner>
           </s-box>
         )}
       </s-section>
@@ -132,74 +167,198 @@ export default function ProductSuppliers() {
       <s-section heading="Suppliers for this product">
         {p.links.some((l) => !l.approved) && (
           <s-box paddingBlockEnd="base">
-            <s-banner tone="info" heading="Some suppliers aren't approved in your rules">
-              The agent may still consider them, but any purchase from them is blocked until you approve them in{" "}
+            <s-banner
+              tone="info"
+              heading="Some suppliers aren't approved in your rules"
+            >
+              The agent may still consider them, but any purchase from them is
+              blocked until you approve them in{" "}
               <s-link href="/app/rules?tab=rules">your rules</s-link>.
             </s-banner>
           </s-box>
         )}
         {p.links.length === 0 ? (
-          <Empty heading="No suppliers linked yet">The agent only ever sees the suppliers you link below, at the prices you enter.</Empty>
+          <Empty heading="No suppliers linked yet">
+            The agent only ever sees the suppliers you link below, at the prices
+            you enter.
+          </Empty>
         ) : (
-          <s-table>
-            <s-table-header-row>
-              <s-table-header listSlot="primary">Supplier</s-table-header>
-              <s-table-header format="numeric">Price per unit</s-table-header>
-              <s-table-header format="numeric">Usual order</s-table-header>
-              <s-table-header format="numeric">Lead time</s-table-header>
-              <s-table-header listSlot="secondary">Supplier PayPal email</s-table-header>
-              <s-table-header>Actions</s-table-header>
-            </s-table-header-row>
-            <s-table-body>
-              {p.links.map((l) => (
-                <s-table-row key={l.supplierId}>
-                  <s-table-cell>
-                    <s-stack direction="inline" gap="small-200" alignItems="center">
+          <DataGrid<Awaited<ReturnType<typeof loader>>["links"][number]>
+            label="Linked suppliers"
+            rows={p.links}
+            rowId={(l) => String(l.supplierId)}
+            columns={[
+              {
+                field: "name",
+                headerName: "Supplier",
+                flex: 2,
+                minWidth: 230,
+                autoHeight: true,
+                wrapText: true,
+                cellRenderer: cell<
+                  Awaited<ReturnType<typeof loader>>["links"][number]
+                >((l) => (
+                  <>
+                    <s-stack
+                      direction="inline"
+                      gap="small-200"
+                      alignItems="center"
+                    >
                       <s-text type="strong">{l.name}</s-text>
-                      {l.preferred && <s-badge tone="info">Preferred</s-badge>}
-                      {!l.approved && <s-badge tone="caution">Not approved in rules</s-badge>}
+                      {l.preferred && (
+                        <GridBadge tone="info">Preferred</GridBadge>
+                      )}
+                      {!l.approved && (
+                        <GridBadge tone="caution">
+                          Not approved in rules
+                        </GridBadge>
+                      )}
                     </s-stack>
-                  </s-table-cell>
-                  <s-table-cell>{l.price}</s-table-cell>
-                  <s-table-cell>{l.usualQuantity}</s-table-cell>
-                  <s-table-cell>{`${l.leadTimeDays} ${l.leadTimeDays === 1 ? "day" : "days"}`}</s-table-cell>
-                  <s-table-cell><s-text tone="neutral">{l.paypalEmail}</s-text></s-table-cell>
-                  <s-table-cell>
+                  </>
+                )),
+              },
+              {
+                field: "price",
+                headerName: "Price per unit",
+                type: "numericColumn",
+                width: 145,
+                comparator: compareMoney,
+                cellRenderer: cell<
+                  Awaited<ReturnType<typeof loader>>["links"][number]
+                >((l) => <>{l.price}</>),
+              },
+              {
+                field: "usualQuantity",
+                headerName: "Usual order",
+                type: "numericColumn",
+                width: 130,
+                cellRenderer: cell<
+                  Awaited<ReturnType<typeof loader>>["links"][number]
+                >((l) => <>{l.usualQuantity}</>),
+              },
+              {
+                field: "leadTimeDays",
+                headerName: "Lead time",
+                type: "numericColumn",
+                width: 120,
+                cellRenderer: cell<
+                  Awaited<ReturnType<typeof loader>>["links"][number]
+                >((l) => (
+                  <>{`${l.leadTimeDays} ${l.leadTimeDays === 1 ? "day" : "days"}`}</>
+                )),
+              },
+              {
+                field: "paypalEmail",
+                headerName: "Supplier PayPal email",
+                flex: 2,
+                minWidth: 235,
+                cellRenderer: cell<
+                  Awaited<ReturnType<typeof loader>>["links"][number]
+                >((l) => (
+                  <>
+                    <s-text tone="neutral">{l.paypalEmail}</s-text>
+                  </>
+                )),
+              },
+              {
+                colId: "actions",
+                headerName: "Actions",
+                width: 245,
+                sortable: false,
+                filter: false,
+                cellRenderer: cell<
+                  Awaited<ReturnType<typeof loader>>["links"][number]
+                >((l) => (
+                  <>
                     <s-stack direction="inline" gap="small-200">
-                      {!l.preferred && <s-button variant="tertiary" disabled={busy} onClick={() => submit({ intent: "prefer", supplierId: l.supplierId })}>Make preferred</s-button>}
-                      <s-button variant="tertiary" tone="critical" disabled={busy} onClick={() => submit({ intent: "unlink", supplierId: l.supplierId })}>Remove</s-button>
+                      {!l.preferred && (
+                        <s-button
+                          variant="tertiary"
+                          disabled={busy}
+                          onClick={() =>
+                            submit({
+                              intent: "prefer",
+                              supplierId: l.supplierId,
+                            })
+                          }
+                        >
+                          Make preferred
+                        </s-button>
+                      )}
+                      <s-button
+                        variant="tertiary"
+                        tone="critical"
+                        disabled={busy}
+                        onClick={() =>
+                          submit({ intent: "unlink", supplierId: l.supplierId })
+                        }
+                      >
+                        Remove
+                      </s-button>
                     </s-stack>
-                  </s-table-cell>
-                </s-table-row>
-              ))}
-            </s-table-body>
-          </s-table>
+                  </>
+                )),
+              },
+            ]}
+          />
         )}
       </s-section>
 
       <s-section heading="Link a supplier">
         {p.available.length === 0 ? (
           <s-text tone="neutral">
-            Every supplier you added is linked already. <s-link href="/app/products?tab=suppliers">Add another supplier</s-link>
+            Every supplier you added is linked already.{" "}
+            <s-link href="/app/products?tab=suppliers">
+              Add another supplier
+            </s-link>
           </s-text>
         ) : (
           <fetcher.Form method="post">
             <input type="hidden" name="intent" value="link" />
             <s-query-container>
               {/* Responsive values are comma-separated, so the column lists must not contain commas themselves */}
-              <s-grid gridTemplateColumns="@container (inline-size <= 640px) 1fr 1fr, 2fr 1fr 1fr 1fr" gap="base">
+              <s-grid
+                gridTemplateColumns="@container (inline-size <= 640px) 1fr 1fr, 2fr 1fr 1fr 1fr"
+                gap="base"
+              >
                 <s-select label="Supplier" name="supplierId">
-                  {p.available.map((s) => <s-option key={s.id} value={s.id}>{s.name}</s-option>)}
+                  {p.available.map((s) => (
+                    <s-option key={s.id} value={s.id}>
+                      {s.name}
+                    </s-option>
+                  ))}
                 </s-select>
-                <s-number-field label="Price per unit ($)" name="price" min={0.01} step={0.01} />
-                <s-number-field label="Usual order" name="usualQuantity" min={1} step={1} />
-                <s-number-field label="Lead time (days)" name="leadTimeDays" min={0} step={1} value="3" />
+                <s-number-field
+                  label="Price per unit ($)"
+                  name="price"
+                  min={0.01}
+                  step={0.01}
+                />
+                <s-number-field
+                  label="Usual order"
+                  name="usualQuantity"
+                  min={1}
+                  step={1}
+                />
+                <s-number-field
+                  label="Lead time (days)"
+                  name="leadTimeDays"
+                  min={0}
+                  step={1}
+                  value="3"
+                />
               </s-grid>
             </s-query-container>
             <s-box paddingBlockStart="base">
               <s-stack direction="inline" gap="base" alignItems="center">
-                <s-checkbox label="Make this the preferred supplier" name="preferred" value="on" />
-                <s-button type="submit" variant="primary" disabled={busy}>Link supplier</s-button>
+                <s-checkbox
+                  label="Make this the preferred supplier"
+                  name="preferred"
+                  value="on"
+                />
+                <s-button type="submit" variant="primary" disabled={busy}>
+                  Link supplier
+                </s-button>
               </s-stack>
             </s-box>
           </fetcher.Form>

@@ -1,3 +1,4 @@
+import { LoadingState } from "../components/loading-state";
 import { purchaseEntries, purchaseParam } from "../lib/alerts/projection";
 import { refreshPayouts } from "../lib/paypal/reconcile.server";
 import { PayoutRefresh } from "../components/payout-refresh";
@@ -193,11 +194,13 @@ export default function Activity() {
                 : "Try All to see everything that happened."}
             </Empty>
           ) : mounted ? (
-            <Suspense fallback={<s-text>Loading activity…</s-text>}>
+            <Suspense
+              fallback={<LoadingState label="Loading activity" height={640} />}
+            >
               <ActivityGrid feed={shown} verifyBase={verifyBase} />
             </Suspense>
           ) : (
-            <s-text>Loading activity…</s-text>
+            <LoadingState label="Loading activity" height={640} />
           )}
         </s-stack>
       </s-section>
