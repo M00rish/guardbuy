@@ -3,6 +3,13 @@ import { usd } from "../format";
 
 export type WorkspaceProduct = {
   variantId: string;
+  automaticRestocks?: number;
+  paidRestocks?: number;
+  purchaseCount?: number;
+  amount?: number;
+  settled?: number;
+  reserved?: number;
+  blocked?: number;
   title: string;
   sku: string | null;
   supplier: string | null;

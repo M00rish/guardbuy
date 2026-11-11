@@ -164,6 +164,10 @@ export function insightsSnapshot(
     rows.push({
       purchase: entry.seq,
       variantId: proposal.variantId,
+      automatic:
+        decision.verdict === "auto" &&
+        !events.some((event) => event.event.type === "approved"),
+      settledAt: settled > 0 ? paidAt : undefined,
       proposedAt: source.at,
       product:
         names.product?.(proposal.sku, proposal.variantId) ?? proposal.sku,

@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import type {
   AgAiHarness,
   AgAiChatSession,
   AgAiChatMessage,
   AgAiRunStatus,
 } from "ag-studio";
+import { safeAssistantError } from "../lib/insights/agent";
 import styles from "./home-workspace.module.css";
 
 /** Thin transcript UI over AG Studio's harness. The agent still owns its one
@@ -12,15 +13,35 @@ import styles from "./home-workspace.module.css";
 export function WorkspaceAssistant({
   harness,
   onClose,
+  demo = false,
 }: {
   harness: AgAiHarness;
   onClose: () => void;
+  demo?: boolean;
 }) {
   const [session, setSession] = useState<AgAiChatSession>();
   const [messages, setMessages] = useState<readonly AgAiChatMessage[]>([]);
   const [status, setStatus] = useState<AgAiRunStatus>("idle");
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const transcriptRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (status !== "running") {
+      setElapsed(0);
+      return;
+    }
+    const started = Date.now();
+    const timer = setInterval(
+      () => setElapsed(Math.floor((Date.now() - started) / 1000)),
+      1000,
+    );
+    return () => clearInterval(timer);
+  }, [status]);
+  useEffect(() => {
+    const transcript = transcriptRef.current;
+    if (transcript) transcript.scrollTop = transcript.scrollHeight;
+  }, [messages, status]);
   useEffect(() => {
     let active = true;
     let current: AgAiChatSession | undefined;
@@ -55,19 +76,24 @@ export function WorkspaceAssistant({
   return (
     <aside
       className={styles.assistant}
-      aria-label="Read-only purchase assistant"
+      aria-label="Read-only GuardBuy assistant"
     >
       <div className={styles.detailHeading}>
-        <strong>Ask AI · purchases</strong>
+        <div>
+          <strong>Ask GuardBuy</strong>
+          <small className={styles.assistantScope}>
+            {demo ? "Fictional demo" : "Live snapshot"} · read only
+          </small>
+        </div>
         <button type="button" onClick={onClose} aria-label="Close assistant">
           Close
         </button>
       </div>
       <p>
-        Explore purchases and compare suppliers. Your request goes to the
-        configured AI provider; keep secrets and personal information out.
+        Ask about products, stock, purchases, suppliers or budgets. I’ll show
+        the supporting data in the grid.
       </p>
-      <div className={styles.transcript} aria-live="polite">
+      <div className={styles.transcript} ref={transcriptRef} aria-live="polite">
         {messages.map((message) => (
           <div
             key={message.id}
@@ -79,20 +105,23 @@ export function WorkspaceAssistant({
               part.type === "text" ? (
                 <p key={index}>{part.text}</p>
               ) : part.type === "tool_call" ? (
-                <small key={index}>Purchase view: {part.toolCall.status}</small>
+                <small className={styles.toolStatus} key={index}>
+                  {part.toolCall.status === "complete"
+                    ? "Related data shown in grid"
+                    : part.toolCall.status === "cancelled"
+                      ? "Stopped"
+                      : "Updating the grid…"}
+                </small>
               ) : part.type === "error" ? (
-                <p key={index}>
-                  The assistant is unavailable. Use the grid filters or try
-                  again later.
-                </p>
+                <p key={index}>{safeAssistantError(part.message)}</p>
               ) : null,
             )}
           </div>
         ))}
         {!messages.length && (
           <p>
-            Try “Compare suppliers by settled spend” or “Why were purchases
-            blocked?”
+            Try “Rank products by automatic restock count”, “Which products may
+            run out soon?” or “Why was purchase #123 blocked?”
           </p>
         )}
         {error && (
@@ -101,7 +130,15 @@ export function WorkspaceAssistant({
           </p>
         )}
       </div>
+      {status === "running" && (
+        <p className={styles.loadingStatus} role="status">
+          {elapsed < 7
+            ? "Reading your question…"
+            : "Still working on your question. You can stop at any time."}
+        </p>
+      )}
       <form
+        className={styles.assistantComposer}
         onSubmit={(event) => {
           event.preventDefault();
           const text = prompt.trim();
@@ -111,7 +148,7 @@ export function WorkspaceAssistant({
           }
         }}
       >
-        <label htmlFor="workspace-ai-request">Your request</label>
+        <label htmlFor="workspace-ai-request">Your question</label>
         <textarea
           id="workspace-ai-request"
           value={prompt}
@@ -119,18 +156,36 @@ export function WorkspaceAssistant({
           maxLength={800}
           rows={3}
           required
+          placeholder="Ask a question about GuardBuy…"
+          onKeyDown={(event) => {
+            if (
+              event.key === "Enter" &&
+              !event.shiftKey &&
+              !event.nativeEvent.isComposing
+            ) {
+              event.preventDefault();
+              if (status !== "running")
+                event.currentTarget.form?.requestSubmit();
+            }
+          }}
         />
-        <button
-          type="submit"
-          disabled={!session || status === "running" || !prompt.trim()}
-        >
-          {status === "running" ? "Working…" : "Ask"}
-        </button>
-        {status === "running" && (
-          <button type="button" onClick={() => session?.cancel()}>
-            Stop
+        <div className={styles.composerActions}>
+          <button
+            type="submit"
+            disabled={!session || status === "running" || !prompt.trim()}
+          >
+            {status === "running" ? "Working…" : "Ask GuardBuy"}
           </button>
-        )}
+          {status === "running" && (
+            <button type="button" onClick={() => session?.cancel()}>
+              Stop
+            </button>
+          )}
+        </div>
+        <small className={styles.assistantPrivacy}>
+          Your question is sent to the AI provider. Keep secrets and personal
+          information out.
+        </small>
       </form>
     </aside>
   );

@@ -17,6 +17,7 @@ import {
 } from "../lib/insights/workspace";
 import type { InsightRow } from "../lib/insights/types";
 import { usd } from "../lib/format";
+import { PRODUCT_ANALYTIC_COLUMNS } from "../lib/insights/grid-query";
 import styles from "./home-workspace.module.css";
 
 export type DataView = "products" | "purchases" | "activity" | "details";
@@ -317,6 +318,32 @@ export function ProductsGrid({
         cellRenderer: ManageCell,
         filter: "agSetColumnFilter",
       },
+      ...PRODUCT_ANALYTIC_COLUMNS.map((field): ColDef<WorkspaceProduct> => ({
+        field: field as keyof WorkspaceProduct,
+        headerName: (
+          {
+            automaticRestocks: "Auto restock count",
+            paidRestocks: "Paid purchases",
+            purchaseCount: "Proposals",
+            amount: "Proposal value",
+            settled: "Settled",
+            reserved: "Reserved",
+            blocked: "Blocked value",
+          } as Record<string, string>
+        )[field],
+        width: narrow ? 170 : 210,
+        hide: true,
+        type: "numericColumn",
+        filter: "agNumberColumnFilter",
+        chartDataType: "series",
+        valueFormatter: (p) =>
+          p.value == null
+            ? "Unavailable"
+            : ["amount", "settled", "reserved", "blocked"].includes(field)
+              ? usd(Math.round(p.value * 100))
+              : String(p.value),
+        useValueFormatterForExport: false,
+      })),
       { field: "sku", headerName: "SKU", hide: true },
     ],
     [narrow],
@@ -358,6 +385,7 @@ export function ProductsGrid({
           { statusPanel: "agAggregationComponent" },
         ],
       }}
+      onNewColumnsLoaded={({ api }) => onReady(api as GridApi<unknown>)}
       onGridReady={({ api }) => onReady(api as GridApi<unknown>)}
       onGridPreDestroyed={() => onReady(undefined)}
       overlayNoRowsTemplate="No products yet. Add products in Shopify to get started."

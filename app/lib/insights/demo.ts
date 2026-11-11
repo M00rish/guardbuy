@@ -23,6 +23,8 @@ export function demoSnapshot(now = new Date()): InsightsSnapshot {
     return {
       purchase: 10001 + i,
       variantId: `demo-${i % 8}`,
+      automatic: paid && i % 3 !== 0,
+      settledAt: paid ? at.toISOString() : undefined,
       proposedAt: at.toISOString(),
       product:
         products[i % 4] +
