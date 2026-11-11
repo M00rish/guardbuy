@@ -220,7 +220,7 @@ export default function PurchaseAnalysisGrid({
         enableValue: true,
         aggFunc: "sum",
         allowedAggFuncs: ["sum"],
-        cellClass: "currency",
+        cellClass: ["currency", "ag-right-aligned-cell"],
         useValueFormatterForExport: false,
         valueFormatter: (p) =>
           typeof p.value === "number" ? usd(Math.round(p.value * 100)) : "",
@@ -234,7 +234,7 @@ export default function PurchaseAnalysisGrid({
         enableValue: true,
         aggFunc: "sum",
         allowedAggFuncs: ["sum"],
-        cellClass: "currency",
+        cellClass: ["currency", "ag-right-aligned-cell"],
         useValueFormatterForExport: false,
         cellRenderer: MoneyCell,
         valueFormatter: (p) =>
@@ -249,7 +249,7 @@ export default function PurchaseAnalysisGrid({
         enableValue: true,
         aggFunc: "sum",
         allowedAggFuncs: ["sum"],
-        cellClass: "currency",
+        cellClass: ["currency", "ag-right-aligned-cell"],
         useValueFormatterForExport: false,
         valueFormatter: (p) =>
           typeof p.value === "number" ? usd(Math.round(p.value * 100)) : "",

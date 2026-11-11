@@ -101,6 +101,11 @@ export function StoreSummary({
         theme={gridTheme}
         rowData={data}
         columnDefs={columns}
+        defaultColDef={{
+          sortable: false,
+          resizable: false,
+          suppressHeaderMenuButton: true,
+        }}
         headerHeight={38}
         rowHeight={narrow ? 33 : 48}
         suppressCellFocus
@@ -271,7 +276,7 @@ export function ProductsGrid({
         field: "stock",
         headerName: "Stock",
         type: "numericColumn",
-        width: narrow ? 70 : 95,
+        width: narrow ? 70 : 115,
         filter: "agNumberColumnFilter",
         chartDataType: "series",
       },
@@ -279,7 +284,7 @@ export function ProductsGrid({
         field: "incoming",
         headerName: "Incoming",
         type: "numericColumn",
-        width: 110,
+        width: 130,
         hide: narrow,
         filter: "agNumberColumnFilter",
         chartDataType: "series",
@@ -288,7 +293,7 @@ export function ProductsGrid({
         field: "cover",
         headerName: "Days of cover",
         type: "numericColumn",
-        width: 145,
+        width: 165,
         hide: narrow,
         filter: "agNumberColumnFilter",
         valueFormatter: (p) =>
@@ -307,7 +312,7 @@ export function ProductsGrid({
       {
         field: "managed",
         headerName: "Auto restock",
-        width: 130,
+        width: 150,
         hide: narrow,
         cellRenderer: ManageCell,
         filter: "agSetColumnFilter",
@@ -329,7 +334,13 @@ export function ProductsGrid({
       rowData={workspace.products}
       columnDefs={columns}
       context={{ purchases, demo, busy, onManage } satisfies ProductContext}
-      defaultColDef={{ sortable: true, resizable: true, filter: true }}
+      defaultColDef={{
+        sortable: true,
+        resizable: true,
+        filter: true,
+        suppressHeaderMenuButton: narrow,
+        suppressHeaderFilterButton: narrow,
+      }}
       quickFilterText={search}
       getRowId={(p) => p.data.variantId}
       masterDetail

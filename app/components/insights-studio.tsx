@@ -81,7 +81,7 @@ const widgets = createWidgets<GuardRegistry>({
           dataMappingItems: [{ key: "purchase", label: "Purchase identifier" }],
         }),
       defaultSize: { width: 1000, height: 650 },
-      minSize: { width: 280, height: 450 },
+      minSize: { width: 260, height: 280 },
     },
   ],
 });
@@ -205,6 +205,35 @@ export default function InsightsStudio({
   const [narrow, setNarrow] = useState(
     () => window.matchMedia("(max-width:700px)").matches,
   );
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [panelHeight, setPanelHeight] = useState(440);
+  const gridTracks = Math.ceil(panelHeight / 20);
+  // Measure from the document top: scrolling must not change the grid's height.
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    const update = () => {
+      const top = panel.getBoundingClientRect().top + window.scrollY;
+      const available = Math.round(
+        Math.max(
+          narrow ? 360 : 320,
+          Math.min(760, window.innerHeight - top - 56),
+        ),
+      );
+      setPanelHeight((previous) =>
+        previous === available ? previous : available,
+      );
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(document.body);
+    if (panel.parentElement) observer.observe(panel.parentElement);
+    window.addEventListener("resize", update);
+    update();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [dataView, narrow, demo]);
   const apiRef = useRef<GridApi<unknown>>();
   const [harness, setHarness] = useState<AgAiHarness>();
   const harnessRef = useRef<AgAiHarness>();
@@ -333,25 +362,33 @@ export default function InsightsStudio({
   const initialState = useMemo<AgReportState<GuardRegistry>>(
     () => ({
       ...desktopState,
-      panels: desktopState.panels,
       pages: desktopState.pages.map((page) => ({
         ...page,
         widgets: showCharts
           ? page.widgets
           : { purchases: page.widgets!.purchases },
-        widgetLayout:
-          showCharts && narrow
+        widgetLayout: {
+          purchases: { xTrack: 0, yTrack: 0, xSpan: 24, ySpan: gridTracks },
+          ...(showCharts
             ? {
-                purchases: { xTrack: 0, yTrack: 0, xSpan: 24, ySpan: 31 },
-                outcomes: { xTrack: 0, yTrack: 31, xSpan: 24, ySpan: 14 },
-                trend: { xTrack: 0, yTrack: 45, xSpan: 24, ySpan: 14 },
+                outcomes: {
+                  xTrack: 0,
+                  yTrack: gridTracks,
+                  xSpan: narrow ? 24 : 10,
+                  ySpan: 14,
+                },
+                trend: {
+                  xTrack: narrow ? 0 : 10,
+                  yTrack: narrow ? gridTracks + 14 : gridTracks,
+                  xSpan: narrow ? 24 : 14,
+                  ySpan: 14,
+                },
               }
-            : showCharts
-              ? page.widgetLayout
-              : { purchases: { xTrack: 0, yTrack: 0, xSpan: 24, ySpan: 31 } },
+            : {}),
+        },
       })),
     }),
-    [showCharts, narrow],
+    [showCharts, narrow, gridTracks],
   );
   // Reflow the fixed report without destroying the grid or its current filters.
   useEffect(() => {
@@ -632,6 +669,13 @@ export default function InsightsStudio({
               role="tabpanel"
               aria-labelledby={`tab-${dataView}`}
               className={styles.gridPanel}
+              ref={panelRef}
+              style={{
+                height:
+                  dataView === "purchases"
+                    ? gridTracks * 20 + (showCharts ? (narrow ? 560 : 280) : 0)
+                    : panelHeight,
+              }}
             >
               {dataView === "products" ? (
                 <ProductsGrid
@@ -648,10 +692,7 @@ export default function InsightsStudio({
                   onReady={bindGrid}
                 />
               ) : dataView === "purchases" ? (
-                <div
-                  className={styles.studio}
-                  style={{ height: showCharts ? (narrow ? 1240 : 940) : 620 }}
-                >
+                <div className={styles.studio} style={{ height: "100%" }}>
                   <AgStudio<GuardRegistry>
                     key={demo ? "demo" : "live"}
                     style={{ height: "100%", width: "100%" }}

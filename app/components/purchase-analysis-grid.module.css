@@ -93,18 +93,19 @@
 }
 .money {
   position: relative;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
+  display: inline-block;
+  width: 100%;
+  text-align: right;
+  line-height: inherit;
 }
 .money span {
+  position: relative;
   z-index: 1;
 }
 .money i {
   position: absolute;
-  height: 5px;
-  bottom: 9px;
+  height: 3px;
+  bottom: -3px;
   right: 0;
   background: #9bdbc2;
   border-radius: 3px;

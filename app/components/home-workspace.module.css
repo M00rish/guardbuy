@@ -95,11 +95,8 @@
   outline-offset: 2px;
 }
 .gridPanel {
-  height: clamp(430px, calc(100vh - 320px), 760px);
+  height: 440px;
   min-width: 0;
-}
-.gridPanel:has(.studio) {
-  height: auto;
 }
 .studio {
   width: 100%;
