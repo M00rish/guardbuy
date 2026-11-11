@@ -1,3 +1,4 @@
+import { DataGrid, cell, GridBadge } from "../components/data-grid";
 import { readableTime } from "../lib/format";
 import { useState } from "react";
 import type {
@@ -120,9 +121,9 @@ export default function Alerts() {
           )}
           {data.enabled ? (
             <s-stack gap="base">
-              <s-badge tone="success">
+              <GridBadge tone="success">
                 Connected · chat ending {data.chatSuffix}
-              </s-badge>
+              </GridBadge>
               <s-button onClick={() => submit("disconnect")} disabled={busy}>
                 Disconnect Telegram
               </s-button>
@@ -172,8 +173,8 @@ export default function Alerts() {
           )}
           <s-text>
             Alerts run in the background while GuardBuy’s server is running.
-            Disconnecting removes the routing and queued alerts; a
-            message already being sent may still arrive.
+            Disconnecting removes the routing and queued alerts; a message
+            already being sent may still arrive.
           </s-text>
         </s-stack>
       </s-section>
@@ -181,8 +182,7 @@ export default function Alerts() {
         <s-stack gap="base">
           <s-text>
             A delivery marked unconfirmed may already have arrived. Retrying can
-            send a duplicate alert. Alert delivery never changes
-            payment state.
+            send a duplicate alert. Alert delivery never changes payment state.
           </s-text>
           <s-checkbox
             label="I understand retrying may send a duplicate alert"
@@ -194,35 +194,83 @@ export default function Alerts() {
               No alerts yet. Delivery history is kept for up to 30 days.
             </s-text>
           )}
-          {data.messages.map((m) => (
-            <s-box key={m.id} padding="base" border="base" borderRadius="base">
-              <s-stack gap="small-200">
-                <s-badge tone={m.status === "sent" ? "success" : "neutral"}>
-                  {STATUS[m.status] ?? "Unknown"}
-                </s-badge>
-                <s-text>
-                  {m.decisionSeq === null
-                    ? ""
-                    : `Purchase #${m.decisionSeq} · `}
-                  {ALERT_TEXT[m.kind] ?? "Alert"}
-                </s-text>
-                <s-text>{readableTime(new Date(m.createdAt).toISOString())}</s-text>
-                {(m.status === "uncertain" || m.status === "failed") && (
-                  <s-button
-                    disabled={busy || !acceptDuplicate}
-                    onClick={() =>
-                      fetcher.submit(
-                        { intent: "retry", id: m.id, acceptDuplicate: "yes" },
-                        { method: "POST" },
-                      )
-                    }
-                  >
-                    Retry alert
-                  </s-button>
-                )}
-              </s-stack>
-            </s-box>
-          ))}
+          {data.messages.length > 0 && (
+            <DataGrid<(typeof data.messages)[number]>
+              label="Recent alerts"
+              rows={data.messages}
+              rowId={(m) => m.id}
+              columns={[
+                {
+                  field: "kind",
+                  headerName: "Alert",
+                  flex: 2,
+                  minWidth: 250,
+                  valueGetter: ({ data: m }) =>
+                    m
+                      ? `${m.decisionSeq === null ? "" : `Purchase #${m.decisionSeq} · `}${ALERT_TEXT[m.kind] ?? "Alert"}`
+                      : "",
+                },
+                {
+                  field: "status",
+                  headerName: "Status",
+                  minWidth: 170,
+                  valueGetter: ({ data: m }) =>
+                    m ? (STATUS[m.status] ?? "Unknown") : "",
+                  cellRenderer: cell<(typeof data.messages)[number]>((m) => (
+                    <GridBadge
+                      tone={
+                        m.status === "sent"
+                          ? "success"
+                          : m.status === "failed"
+                            ? "critical"
+                            : m.status === "uncertain"
+                              ? "warning"
+                              : "neutral"
+                      }
+                    >
+                      {STATUS[m.status] ?? "Unknown"}
+                    </GridBadge>
+                  )),
+                },
+                {
+                  field: "createdAt",
+                  headerName: "Created",
+                  minWidth: 220,
+                  flex: 1,
+                  comparator: (a, b) =>
+                    new Date(a).getTime() - new Date(b).getTime(),
+                  valueFormatter: ({ value }) =>
+                    readableTime(new Date(value).toISOString()),
+                },
+                {
+                  colId: "actions",
+                  headerName: "Actions",
+                  width: 160,
+                  sortable: false,
+                  filter: false,
+                  cellRenderer: cell<(typeof data.messages)[number]>((m) =>
+                    m.status === "uncertain" || m.status === "failed" ? (
+                      <s-button
+                        disabled={busy || !acceptDuplicate}
+                        onClick={() =>
+                          fetcher.submit(
+                            {
+                              intent: "retry",
+                              id: m.id,
+                              acceptDuplicate: "yes",
+                            },
+                            { method: "POST" },
+                          )
+                        }
+                      >
+                        Retry alert
+                      </s-button>
+                    ) : null,
+                  ),
+                },
+              ]}
+            />
+          )}
         </s-stack>
       </s-section>
     </s-page>

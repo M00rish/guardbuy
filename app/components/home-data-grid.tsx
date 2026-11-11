@@ -1,3 +1,4 @@
+import { GridBadge } from "./data-grid";
 import { useMemo } from "react";
 import { Link } from "react-router";
 import { AgGridReact, type CustomCellRendererProps } from "ag-grid-react";
@@ -6,7 +7,7 @@ import type {
   GridApi,
   IDetailCellRendererParams,
 } from "ag-grid-community";
-import { gridTheme } from "./purchase-analysis-grid";
+import { gridTheme } from "./grid-theme";
 import {
   purchasesForProduct,
   type HomeWorkspaceData,
@@ -40,13 +41,9 @@ function ProductName({
 function ProductState({ data }: CustomCellRendererProps<WorkspaceProduct>) {
   if (!data) return null;
   return (
-    <span
-      className={styles.badge}
-      data-tone={data.status.tone}
-      title={data.status.label}
-    >
+    <GridBadge tone={data.status.tone} title={data.status.label}>
       {data.status.label}
-    </span>
+    </GridBadge>
   );
 }
 function ManageCell({

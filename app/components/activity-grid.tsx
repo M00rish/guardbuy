@@ -1,24 +1,12 @@
-import { useMemo, useState } from "react";
-import { AgGridReact, type CustomCellRendererProps } from "ag-grid-react";
-import {
-  AllCommunityModule,
-  themeQuartz,
-  type ColDef,
-} from "ag-grid-community";
+import { useMemo } from "react";
+import type { CustomCellRendererProps } from "ag-grid-react";
+import type { ColDef } from "ag-grid-community";
+import { DataGrid, GridBadge } from "./data-grid";
 import type { FeedItem } from "../lib/audit/feed.server";
 import { ago, FEED_LABEL, FEED_TONE } from "./ui";
 import styles from "./activity-grid.module.css";
 
 type EventRow = FeedItem & { when: string; verifyUrl?: string };
-const theme = themeQuartz.withParams({
-  fontFamily: "Arial, sans-serif",
-  fontSize: 13,
-  accentColor: "#007f5f",
-  borderColor: "#dedede",
-  backgroundColor: "#ffffff",
-  headerBackgroundColor: "#f7f7f7",
-  cellHorizontalPadding: 12,
-});
 function EventCell({ data }: CustomCellRendererProps<EventRow>) {
   if (!data) return null;
   return (
@@ -53,7 +41,6 @@ export default function ActivityGrid({
   feed: FeedItem[];
   verifyBase: string | null;
 }) {
-  const [search, setSearch] = useState("");
   const rows = useMemo(
     () =>
       feed.map((item) => ({
@@ -89,9 +76,9 @@ export default function ActivityGrid({
         valueFormatter: (p) => FEED_LABEL[p.value] ?? "Activity",
         filterValueGetter: (p) => FEED_LABEL[p.data?.kind ?? ""] ?? "Activity",
         cellRenderer: ({ value }: CustomCellRendererProps<EventRow>) => (
-          <s-badge tone={FEED_TONE[value] ?? "neutral"}>
+          <GridBadge tone={FEED_TONE[value] ?? "neutral"}>
             {FEED_LABEL[value] ?? "Activity"}
-          </s-badge>
+          </GridBadge>
         ),
       },
       {
@@ -110,35 +97,13 @@ export default function ActivityGrid({
     [],
   );
   return (
-    <div className={styles.wrap}>
-      <label className={styles.search}>
-        Search activity
-        <input
-          type="search"
-          value={search}
-          onChange={(event) => setSearch(event.target.value)}
-          placeholder="Search events, reasons or payment references"
-        />
-      </label>
-      <div className={styles.grid}>
-        <AgGridReact<EventRow>
-          modules={[AllCommunityModule]}
-          theme={theme}
-          rowData={rows}
-          columnDefs={columns}
-          defaultColDef={{ sortable: true, filter: true, resizable: true }}
-          quickFilterText={search}
-          getRowId={(p) => `${p.data.seq}-${p.data.kind}`}
-          rowHeight={68}
-          suppressCellFocus={false}
-          ensureDomOrder={true}
-          overlayNoRowsTemplate="No activity matches this search."
-        />
-      </div>
-      <span className={styles.note}>
-        Sort or filter column headings. Scroll across on smaller screens to see
-        every column.
-      </span>
-    </div>
+    <DataGrid<EventRow>
+      label="Activity"
+      rows={rows}
+      columns={columns}
+      rowId={(row) => `${row.seq}-${row.kind}`}
+      height={640}
+      emptyMessage="No activity matches these filters."
+    />
   );
 }

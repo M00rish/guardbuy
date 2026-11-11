@@ -124,6 +124,12 @@ const desktopState: AgReportState<GuardRegistry> = {
   pages: [
     {
       id: "guardbuy",
+      layout: {
+        rowHeight: 20,
+        minWidth: 260,
+        pagePadding: 0,
+        widgetPadding: 0,
+      },
       widgets: { purchases: analysisWidget() },
       widgetLayout: {
         purchases: { xTrack: 0, yTrack: 0, xSpan: 24, ySpan: 31 },
@@ -209,7 +215,7 @@ export default function InsightsStudio({
     () => window.matchMedia("(max-width:700px)").matches,
   );
   const panelRef = useRef<HTMLDivElement>(null);
-  const [panelHeight, setPanelHeight] = useState(440);
+  const [panelHeight, setPanelHeight] = useState(640);
   const gridTracks = Math.ceil(panelHeight / 20);
   // Measure from the document top: scrolling must not change the grid's height.
   useLayoutEffect(() => {
@@ -218,10 +224,11 @@ export default function InsightsStudio({
     const update = () => {
       const top = panel.getBoundingClientRect().top + window.scrollY;
       const available = Math.round(
-        Math.max(
-          narrow ? 360 : 320,
-          Math.min(760, window.innerHeight - top - 56),
-        ),
+        2 *
+          Math.max(
+            narrow ? 360 : 320,
+            Math.min(600, window.innerHeight - top - 56),
+          ),
       );
       setPanelHeight((previous) =>
         previous === available ? previous : available,

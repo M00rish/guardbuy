@@ -1,3 +1,4 @@
+import { DataGrid, cell, GridBadge } from "./data-grid";
 import { useEffect } from "react";
 import { useFetcher } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
@@ -28,10 +29,7 @@ export function SuppliersPanel({ data }: { data: SuppliersPageData }) {
               alignItems="end"
             >
               <s-text-field label="Name" name="name" />
-              <s-email-field
-                label="Supplier PayPal email"
-                name="paypalEmail"
-              />
+              <s-email-field label="Supplier PayPal email" name="paypalEmail" />
               <s-button
                 type="submit"
                 variant="primary"
@@ -51,50 +49,96 @@ export function SuppliersPanel({ data }: { data: SuppliersPageData }) {
             paid at. Then link them to products.
           </Empty>
         ) : (
-          <s-table>
-            <s-table-header-row>
-              <s-table-header listSlot="primary">
-                Supplier · PayPal email
-              </s-table-header>
-              <s-table-header format="numeric">Products</s-table-header>
-              <s-table-header listSlot="secondary">Status</s-table-header>
-              <s-table-header>Actions</s-table-header>
-            </s-table-header-row>
-            <s-table-body>
-              {suppliers.map((s) => (
-                <s-table-row key={s.id}>
-                  <s-table-cell>
-                    <s-stack gap="none">
-                      <s-text type="strong">{s.name}</s-text>
-                      <s-text tone="neutral">{s.paypalEmail}</s-text>
-                    </s-stack>
-                  </s-table-cell>
-                  <s-table-cell>{s.products}</s-table-cell>
-                  <s-table-cell>
-                    <s-stack direction="inline" gap="small-200">
-                      {s.approved === true && (
-                        <s-badge tone="success">Approved in rules</s-badge>
-                      )}
-                      {s.approved === false && (
-                        <s-badge tone="caution">Not approved in rules</s-badge>
-                      )}
-                      {s.emailChangedAt && (
-                        <s-badge tone="warning">{`PayPal email changed ${ago(s.emailChangedAt, now)}`}</s-badge>
-                      )}
-                    </s-stack>
-                  </s-table-cell>
-                  <s-table-cell>
-                    <s-button
-                      variant="tertiary"
-                      href={`/app/suppliers/${s.id}`}
-                    >
-                      Manage
-                    </s-button>
-                  </s-table-cell>
-                </s-table-row>
-              ))}
-            </s-table-body>
-          </s-table>
+          <DataGrid<SuppliersPageData["suppliers"][number]>
+            label="Suppliers"
+            rows={suppliers}
+            rowId={(s) => String(s.id)}
+            columns={[
+              {
+                field: "name",
+                headerName: "Supplier",
+                flex: 2,
+                minWidth: 250,
+                autoHeight: true,
+                wrapText: true,
+                getQuickFilterText: ({ data }) =>
+                  [data?.name, data?.paypalEmail].join(" "),
+                cellRenderer: cell<SuppliersPageData["suppliers"][number]>(
+                  (s) => (
+                    <>
+                      <s-stack gap="none">
+                        <s-text type="strong">{s.name}</s-text>
+                        <s-text tone="neutral">{s.paypalEmail}</s-text>
+                      </s-stack>
+                    </>
+                  ),
+                ),
+              },
+              {
+                field: "products",
+                headerName: "Products",
+                type: "numericColumn",
+                width: 120,
+                cellRenderer: cell<SuppliersPageData["suppliers"][number]>(
+                  (s) => <>{s.products}</>,
+                ),
+              },
+              {
+                colId: "status",
+                headerName: "Status",
+                flex: 2,
+                minWidth: 250,
+                autoHeight: true,
+                wrapText: true,
+                valueGetter: ({ data }) =>
+                  data?.approved === true
+                    ? "Approved in rules"
+                    : data?.approved === false
+                      ? "Not approved in rules"
+                      : "",
+                cellRenderer: cell<SuppliersPageData["suppliers"][number]>(
+                  (s) => (
+                    <>
+                      <s-stack direction="inline" gap="small-200">
+                        {s.approved === true && (
+                          <GridBadge tone="success">
+                            Approved in rules
+                          </GridBadge>
+                        )}
+                        {s.approved === false && (
+                          <GridBadge tone="caution">
+                            Not approved in rules
+                          </GridBadge>
+                        )}
+                        {s.emailChangedAt && (
+                          <GridBadge tone="warning">{`PayPal email changed ${ago(s.emailChangedAt, now)}`}</GridBadge>
+                        )}
+                      </s-stack>
+                    </>
+                  ),
+                ),
+              },
+              {
+                colId: "actions",
+                headerName: "Actions",
+                width: 120,
+                sortable: false,
+                filter: false,
+                cellRenderer: cell<SuppliersPageData["suppliers"][number]>(
+                  (s) => (
+                    <>
+                      <s-button
+                        variant="tertiary"
+                        href={`/app/suppliers/${s.id}`}
+                      >
+                        Manage
+                      </s-button>
+                    </>
+                  ),
+                ),
+              },
+            ]}
+          />
         )}
       </s-section>
     </s-stack>
