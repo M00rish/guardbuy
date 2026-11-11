@@ -1,19 +1,21 @@
 export const ASSISTANT_ERRORS = {
   rate_limit: "Please wait a few seconds before asking another question.",
+  service:
+    "The AI service is temporarily unavailable. You can still ask a suggested question directly from your store data, or retry later.",
   unavailable:
     "The GuardBuy assistant is unavailable. Use the grid filters or try again later.",
   configuration:
-    "The AI provider is not configured for the selected models. Check the Render AI settings.",
+    "AI-assisted questions are not configured for this store. Suggested questions still work from your store data.",
   credentials:
-    "The AI provider rejected its credentials. Check the configured API key in Render.",
+    "The AI service could not authenticate. Suggested questions still work from your store data.",
   quota:
-    "The AI provider's quota or rate limit was reached. Try again later or check the provider account.",
+    "The AI service has reached its usage limit. Try a suggested question or retry later.",
   model:
-    "The configured AI model is unavailable. Check the model names in Render.",
+    "The AI model is unavailable. Try a suggested question for an answer from your store data.",
   response:
     "The AI provider could not return a valid data query. Try rephrasing your question.",
   timeout:
-    "The question took too long. Try again or ask a more specific question.",
+    "The AI service did not respond in time. Try a suggested question for an immediate answer from your store data, or retry later.",
 } as const;
 export class AssistantRequestError extends Error {
   constructor(readonly kind: keyof typeof ASSISTANT_ERRORS) {

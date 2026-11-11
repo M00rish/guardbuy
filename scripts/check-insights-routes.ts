@@ -87,7 +87,7 @@ try {
                 restock: `export function currentRuleSet(){return null} export function spending(){return {spentLast7dCents:0,pendingCents:0}} export function agentOn(){return false} export async function setAgentState(){throw Error('Unexpected agent command')}`,
                 score: `export async function scoreboard(){return {real:{blocked:0,blockedCents:0},attacks:{blocked:0,flagged:0}}}`,
                 approvals: `export async function approvalQueue(){return []}`,
-                directory: `export async function setupStatus(){return {managedProducts:0,suppliers:0,managedWithSuppliers:0}} export async function setManaged(){throw Error('Unexpected product command')}`,
+                directory: `export async function supplierRoster(shop){globalThis.__insightReads.push('suppliers:'+shop);return[{id:'supplier-'+shop,name:'Supplier '+shop,addedAt:'2026-11-01T00:00:00Z'}]}export async function setupStatus(){return {managedProducts:0,suppliers:0,managedWithSuppliers:0}} export async function setManaged(){throw Error('Unexpected product command')}`,
                 names: `export async function cachedBalanceCents(){return null} export async function productOverview(){return []} export function productStatus(){return {}} export async function feedNames(shop){globalThis.__insightReads.push('names:'+shop);return{product:()=> 'Scoped product',supplier:()=> 'Scoped supplier'}}`,
                 planner: `export function insightsAiConfigured(){return true}export async function planInsightView(prompt){if(globalThis.__failedInsightPlan)throw Error('private provider body');globalThis.__insightPlans.push(prompt);return{view:'pending',refused:false}}`,
                 ui: `export default function Insights(){return null}`,
@@ -140,10 +140,16 @@ try {
   );
   assert.equal(loaded.purchasing.snapshot.rows.length, 0);
   assert.equal(loaded.shop, "shop-b");
+  assert.equal(loaded.workspace.suppliers[0].id, "supplier-shop-b");
+  assert.deepEqual(
+    Object.keys(loaded.workspace.suppliers[0]).sort(),
+    ["addedAt", "id", "name"],
+    "only public directory fields reach the staff snapshot",
+  );
   assert.deepEqual(
     fixtures.__insightReads,
-    ["shop-b", "names:shop-b"],
-    "both log and names are scoped to authenticated shop",
+    ["shop-b", "names:shop-b", "suppliers:shop-b"],
+    "log, names and supplier directory are scoped to authenticated shop",
   );
   const bookmark = await routes.loader(
     args(

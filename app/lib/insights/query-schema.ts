@@ -29,6 +29,8 @@ export const QUERY_FIELDS = [
   "managed",
   "automatic",
   "purchase",
+  "attentionState",
+  "id",
   "kind",
   "category",
   "setting",
@@ -56,12 +58,14 @@ const fields = {
     "supplier",
     "status",
     "purchase",
+    "attentionState",
     "automatic",
     "amount",
     "settled",
     "reserved",
     "blocked",
   ],
+  supplierDirectory: ["supplier", "id"],
   suppliers: [
     "supplier",
     "automaticRestocks",
@@ -93,6 +97,7 @@ export const GuardQuerySchema = z
       "products",
       "purchases",
       "suppliers",
+      "supplierDirectory",
       "summary",
       "details",
       "activity",
@@ -134,6 +139,17 @@ export const GuardQuerySchema = z
   })
   .strict()
   .superRefine((query, ctx) => {
+    if (
+      query.source === "supplierDirectory" &&
+      (!["list", "count"].includes(query.operation) ||
+        query.days ||
+        query.metric ||
+        query.topic)
+    )
+      ctx.addIssue({
+        code: "custom",
+        message: "Configured suppliers support current lists and counts only",
+      });
     if (query.operation === "count" && query.metric)
       ctx.addIssue({
         code: "custom",

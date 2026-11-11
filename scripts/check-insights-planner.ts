@@ -1,5 +1,6 @@
 // Exercise the production planner with explicit model responses, never provider traffic.
 import assert from "node:assert/strict";
+import { insightModelCandidates } from "../app/lib/insights/planner.server";
 import { modelChain } from "../app/lib/agent/proposer.server";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
@@ -24,6 +25,24 @@ assert.deepEqual(modelChain("google:custom,openrouter:custom:free"), [
   "google:custom",
   "openrouter:custom:free",
 ]);
+
+assert.deepEqual(
+  insightModelCandidates(
+    ["openrouter:first", "openrouter:second", "openrouter:third"],
+    false,
+  ),
+  [
+    "openrouter:first",
+    "google:gemini-3.8-flash",
+    "openrouter:second",
+    "openrouter:third",
+  ],
+);
+assert.deepEqual(
+  insightModelCandidates(["openrouter:only"], true),
+  ["openrouter:only"],
+  "explicit provider policy is never widened",
+);
 
 // Exercise actual SDK serialization and parsing, with explicit HTTP responses.
 // No provider credentials or traffic; provider transports are injected here only.
@@ -145,6 +164,7 @@ const work = await mkdtemp(resolve(root, "node_modules/.insights-planner-"));
 const prior = {
   google: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
   router: process.env.OPENROUTER_API_KEY,
+  models: process.env.GUARDBUY_LLM_MODELS,
 };
 type Call = {
   model: string;
@@ -162,6 +182,7 @@ const warnings: string[] = [];
 const originalWarn = console.warn;
 console.warn = (entry: unknown) => warnings.push(String(entry));
 try {
+  process.env.GUARDBUY_LLM_MODELS = "explicit-fixture";
   process.env.GOOGLE_GENERATIVE_AI_API_KEY = "offline-google";
   process.env.OPENROUTER_API_KEY = "offline-router";
   fixture.__plannerModels = [
@@ -211,6 +232,16 @@ try {
   });
   const { planInsightView, insightsAiConfigured } = await import(
     pathToFileURL(resolve(work, "planner.mjs")).href
+  );
+  fixture.__plannerCalls = [];
+  assert.equal(
+    (await planInsightView("How many suppliers do I have?")).query?.source,
+    "supplierDirectory",
+  );
+  assert.equal(
+    fixture.__plannerCalls.length,
+    0,
+    "routine questions must not call any provider",
   );
   // Hosted failure: first two candidates fail, third retired, fourth is healthy.
   fixture.__plannerGenerate = async ({ model }) => {
@@ -276,17 +307,20 @@ try {
       ? { view: "pay", refused: false, tool: "approve" }
       : { view: "all", refused: true },
   });
-  assert.deepEqual(await planInsightView("Approve purchases"), {
-    view: "all",
-    refused: true,
-  });
+  assert.deepEqual(
+    await planInsightView("Approve purchase #123 with special instructions"),
+    {
+      view: "all",
+      refused: true,
+    },
+  );
   const controller = new AbortController();
   controller.abort();
   fixture.__plannerCalls = [];
   await assert.rejects(
     planInsightView("Show paid purchases", controller.signal),
     (error: unknown) =>
-      error instanceof Error && "kind" in error && error.kind === "timeout",
+      error instanceof DOMException && error.name === "AbortError",
   );
   assert.equal(
     fixture.__plannerCalls.length,
@@ -329,6 +363,28 @@ try {
         !error.message.includes("private"),
     );
   }
+  fixture.__plannerModels = [
+    "openrouter:slow-one",
+    "openrouter:busy",
+    "openrouter:slow-two",
+  ];
+  fixture.__plannerGenerate = async ({ model }) => {
+    if (model.endsWith("busy"))
+      throw Object.assign(new Error("private provider response"), {
+        statusCode: 503,
+      });
+    throw new DOMException("Timed out", "TimeoutError");
+  };
+  await assert.rejects(
+    planInsightView("Compare supplier proposal values by route over 12 days"),
+    (error: unknown) =>
+      error instanceof Error &&
+      "kind" in error &&
+      error.kind === "service" &&
+      "attempts" in error &&
+      Array.isArray(error.attempts) &&
+      error.attempts.length === 3,
+  );
   delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
   delete process.env.OPENROUTER_API_KEY;
   fixture.__plannerCalls = [];
@@ -357,6 +413,7 @@ try {
   for (const [key, value] of [
     ["GOOGLE_GENERATIVE_AI_API_KEY", prior.google],
     ["OPENROUTER_API_KEY", prior.router],
+    ["GUARDBUY_LLM_MODELS", prior.models],
   ]) {
     if (value === undefined) delete process.env[key!];
     else process.env[key!] = value;

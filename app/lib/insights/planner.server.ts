@@ -1,3 +1,5 @@
+import { commonInsightPlan } from "./common-plan";
+import { awaitWithSignal } from "./await-signal";
 import { google } from "@ai-sdk/google";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText, Output } from "ai";
@@ -15,19 +17,31 @@ import {
   type InsightPlan,
 } from "./plan";
 
+/** Default advanced-query fallbacks cross provider boundaries; explicit overrides are authoritative. */
+export function insightModelCandidates(
+  candidates = modelChain(),
+  explicit = !!process.env.GUARDBUY_LLM_MODELS,
+): string[] {
+  if (explicit || candidates.some((entry) => entry.startsWith("google:")))
+    return candidates.slice(0, 4);
+  return [candidates[0], "google:gemini-3.8-flash", ...candidates.slice(1)]
+    .filter((entry): entry is string => !!entry)
+    .slice(0, 4);
+}
 export const insightsAiConfigured = () =>
-  modelChain()
-    .slice(0, 4)
-    .some((entry) =>
-      entry.startsWith("openrouter:")
-        ? !!process.env.OPENROUTER_API_KEY
-        : !!process.env.GOOGLE_GENERATIVE_AI_API_KEY,
-    );
+  insightModelCandidates().some((entry) =>
+    entry.startsWith("openrouter:")
+      ? !!process.env.OPENROUTER_API_KEY
+      : !!process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+  );
 /** Only the user's short request goes to the provider; no audit data, payment IDs or tool credentials. */
 export async function planInsightView(
   prompt: string,
   signal?: AbortSignal,
 ): Promise<InsightPlan> {
+  if (signal?.aborted) throw signal.reason;
+  const common = commonInsightPlan(prompt);
+  if (common) return common;
   const requestId = randomUUID();
   const failures: AssistantFailureKind[] = [];
   const attempts: PlannerAttempt[] = [];
@@ -38,7 +52,7 @@ export async function planInsightView(
   ]);
   // A slow/unavailable free model must leave time for the remaining providers.
   // Keep the whole request bounded while allowing the fourth configured fallback.
-  for (const entry of modelChain().slice(0, 4)) {
+  for (const entry of insightModelCandidates()) {
     if (deadline.aborted) break;
     const split = entry.indexOf(":"),
       provider = entry.slice(0, split),
@@ -54,17 +68,24 @@ export async function planInsightView(
         provider === "openrouter"
           ? createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY })(id)
           : google(id);
-      const { output } = await generateText({
-        model,
-        system: INSIGHTS_INSTRUCTIONS,
-        prompt,
-        output: Output.object({ schema: InsightPlanSchema }),
-        temperature: 0,
-        maxRetries: 0,
-        abortSignal: AbortSignal.any([deadline, AbortSignal.timeout(6_000)]),
-        // Reasoning models spend part of this budget before producing the JSON.
-        maxOutputTokens: 2048,
-      });
+      const attemptDeadline = AbortSignal.any([
+        deadline,
+        AbortSignal.timeout(8_000),
+      ]);
+      const { output } = await awaitWithSignal(
+        generateText({
+          model,
+          system: INSIGHTS_INSTRUCTIONS,
+          prompt,
+          output: Output.object({ schema: InsightPlanSchema }),
+          temperature: 0,
+          maxRetries: 0,
+          abortSignal: attemptDeadline,
+          // Reasoning models spend part of this budget before producing the JSON.
+          maxOutputTokens: 2048,
+        }),
+        attemptDeadline,
+      );
       return InsightPlanSchema.parse(output);
     } catch (error) {
       if (signal?.aborted) throw error;
@@ -104,9 +125,13 @@ export async function planInsightView(
       ? "configuration"
       : deadline.aborted
         ? "timeout"
-        : failures.length && failures.every((code) => code === failures[0])
-          ? failures[0]
-          : "unavailable";
+        : failures.length &&
+            failures.every((code) => ["timeout", "service"].includes(code)) &&
+            failures.includes("service")
+          ? "service"
+          : failures.length && failures.every((code) => code === failures[0])
+            ? failures[0]
+            : "unavailable";
   const failure = new PlannerFailure(kind, requestId, attempts);
   console.warn(
     JSON.stringify({

@@ -19,7 +19,7 @@ import { agentOn, currentRuleSet, setAgentState, spending } from "../lib/agent/r
 import { scoreboard } from "../lib/agent/scoreboard.server";
 import { cachedBalanceCents, feedNames, productOverview, productStatus } from "../lib/merchant/dashboard.server";
 import { adminWithStaff } from "../lib/merchant/staff.server";
-import { setManaged, setupStatus } from "../lib/suppliers/directory.server";
+import { setManaged, setupStatus, supplierRoster } from "../lib/suppliers/directory.server";
 import { plural } from "../components/ui";
 
 // Home: what the agent is doing, what it spent, which products need attention, and what changed.
@@ -30,11 +30,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const shop = session.shop;
   const log = await auditEntries(shop);
   const rules = currentRuleSet(log);
-  const [setup, queue, chain, score, balanceCents, products, names] = await Promise.all([
+  const [setup, queue, chain, score, balanceCents, products, names, suppliers] = await Promise.all([
     setupStatus(shop), approvalQueue(shop), verifyChain(shop), scoreboard(shop, log), cachedBalanceCents(),
     // Shopify's API can be briefly unreachable: show the rest of Home and a retry for the product list.
     productOverview(admin, shop).catch((e) => { console.warn(`[home] products unavailable: ${(e as Error).message}`); return null; }),
     feedNames(shop),
+    supplierRoster(shop).catch(() => null),
   ]);
   const ready = setup.managedProducts > 0 && setup.suppliers > 0 && setup.managedWithSuppliers > 0 && !!rules;
   const running = ready && agentOn(log);
@@ -46,6 +47,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const incoming = deliveries(log, checkedAt).filter((delivery) => delivery.payment !== "failed" || delivery.pending);
   const data = {
+    suppliers,
     shop,
     purchasing: chain.valid
       ? {
