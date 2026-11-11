@@ -1,4 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef, useCallback } from "react";
+import { Link } from "react-router";
+import { demoSnapshot } from "../lib/insights/demo";
+import { ANALYSES, type InsightAnalysis } from "../lib/insights/plan";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import {
   AgStudio,
@@ -80,7 +83,7 @@ function BudgetWidget({
 function PurchaseLink({ value }: AgWidgetCustomCellRendererProps) {
   const seq = Number(value);
   return Number.isSafeInteger(seq) && seq >= 0 ? (
-    <a href={`/app/activity?purchase=${seq}`}>#{seq} · View activity</a>
+    <Link to={`/app/activity?purchase=${seq}`}>#{seq} · View activity</Link>
   ) : (
     <span>Purchase unavailable</span>
   );
@@ -107,6 +110,61 @@ const widgets = createWidgets<GuardRegistry>({
     },
   ],
 });
+const demoWidgets = createWidgets<GuardRegistry>({
+  additionalTypes: [
+    {
+      id: "guardbuy-budget",
+      label: "Demo spending guardrail",
+      comp: BudgetWidget,
+      dataMapping: {},
+      form: (p) => p.createDefaults({ dataMappingItems: [] }),
+      defaultSize: { width: 420, height: 230 },
+      minSize: { width: 260, height: 200 },
+    },
+  ],
+});
+const ANALYSIS_LABELS = {
+  purchases: "Purchase details",
+  suppliers: "Supplier comparison",
+  status: "Status pivot",
+};
+function analysisWidget(
+  analysis: InsightAnalysis,
+): NonNullable<
+  AgReportState<GuardRegistry>["pages"][number]["widgets"]
+>[string] {
+  if (analysis === "purchases") return desktopState.pages[0].widgets!.purchases;
+  return {
+    type: "pivot-grid",
+    dataMapping: {
+      rows: [
+        { id: "purchases.supplier" },
+        ...(analysis === "suppliers" ? [{ id: "purchases.product" }] : []),
+      ],
+      columns: analysis === "status" ? [{ id: "purchases.status" }] : [],
+      values: (analysis === "status"
+        ? ["amount"]
+        : ["settled", "reserved", "count"]
+      ).map((id) => ({ id: `purchases.${id}`, aggregation: "sum" as const })),
+    },
+    format: {
+      crossFilter: "filter",
+      title: {
+        enabled: true,
+        text:
+          analysis === "status"
+            ? "Supplier × status · proposal value"
+            : "Supplier → product · expand to explore",
+      },
+      style: {
+        columnWidth: 165,
+        grandTotalRow: { enabled: true },
+        totalColumns: true,
+        theme: { rowHeight: 40 },
+      },
+    },
+  };
+}
 const theme = studioTheme.withParams({
   backgroundColor: "#ffffff",
   foregroundColor: "#303030",
@@ -135,6 +193,7 @@ const desktopState: AgReportState<GuardRegistry> = {
             valueKey: [{ id: "purchases.count", aggregation: "sum" }],
           },
           format: {
+            crossFilter: "filter",
             title: {
               enabled: true,
               typography: { fontSize: 16 },
@@ -145,14 +204,23 @@ const desktopState: AgReportState<GuardRegistry> = {
         trend: {
           type: "column-chart-grouped",
           dataMapping: {
-            categoryKey: [{ id: "trend.day" }],
-            valueKey: [{ id: "trend.spent", aggregation: "sum" }],
+            categoryKey: [{ id: "purchases.supplier" }],
+            valueKey: [
+              { id: "purchases.settled", aggregation: "sum" },
+              { id: "purchases.reserved", aggregation: "sum" },
+            ],
           },
           format: {
+            crossFilter: "filter",
             title: {
               enabled: true,
               typography: { fontSize: 16 },
-              text: "Settled spend · last 7 days (UTC)",
+              text: "Supplier comparison · settled and reserved",
+            },
+            style: {
+              theme: {
+                common: { legend: { enabled: true, position: "bottom" } },
+              },
             },
           },
         },
@@ -173,10 +241,11 @@ const desktopState: AgReportState<GuardRegistry> = {
             ].map((id) => ({ id: "purchases." + id })),
           },
           format: {
+            crossFilter: "filter",
             title: {
               enabled: true,
               typography: { fontSize: 16 },
-              text: "Recorded purchases · open a purchase in Activity",
+              text: "Purchases · decision and payment details",
             },
             style: {
               columnWidth: 170,
@@ -197,7 +266,7 @@ const desktopState: AgReportState<GuardRegistry> = {
   ],
 };
 export default function InsightsStudio({
-  snapshot,
+  snapshot: liveSnapshot,
   licenseKey,
   aiConfigured,
 }: {
@@ -205,6 +274,51 @@ export default function InsightsStudio({
   licenseKey: string;
   aiConfigured: boolean;
 }) {
+  const [demo, setDemo] = useState(false);
+  const demoData = useMemo(() => demoSnapshot(), []);
+  const snapshot = demo ? demoData : liveSnapshot;
+  const [days, setDays] = useState(0);
+  const datedRows = useMemo(
+    () =>
+      snapshot.rows.filter(
+        (row) =>
+          !days ||
+          Date.parse(row.proposedAt) >=
+            Date.parse(snapshot.checkedAt) - days * 86400000,
+      ),
+    [snapshot, days],
+  );
+  const [analysis, setAnalysis] = useState<InsightAnalysis>("purchases");
+  const studioApi = useRef<AgStudioApi<GuardRegistry>>();
+  const [linked, setLinked] = useState(false);
+  const resetLinked = useCallback(() => {
+    const api = studioApi.current;
+    if (!api) return;
+    const state = api.getState();
+    api.setState({
+      ...state,
+      pages: state.pages.map((page) => ({
+        ...page,
+        crossFilter: undefined,
+        filter: undefined,
+      })),
+    });
+  }, []);
+  const analyze = useCallback((next: InsightAnalysis) => {
+    setAnalysis(next);
+    const api = studioApi.current;
+    if (!api) return;
+    const state = api.getState();
+    api.setState({
+      ...state,
+      pages: state.pages.map((page) => ({
+        ...page,
+        crossFilter: undefined,
+        filter: undefined,
+        widgets: { ...page.widgets, purchases: analysisWidget(next) },
+      })),
+    });
+  }, []);
   const [view, setView] = useState<InsightView>("all");
   const shopify = useAppBridge();
   const [narrow, setNarrow] = useState(
@@ -235,8 +349,8 @@ export default function InsightsStudio({
     [narrow],
   );
   const shown = useMemo(
-    () => snapshot.rows.filter((row) => inInsightView(row, view)),
-    [snapshot.rows, view],
+    () => datedRows.filter((row) => inInsightView(row, view)),
+    [datedRows, view],
   );
   const data = useMemo<AgDataSourcesDefinition<GuardRegistry>>(
     () => ({
@@ -300,8 +414,12 @@ export default function InsightsStudio({
         createAiHarness(api as AgStudioApi, () => ({
           agents: [
             createInsightsAgent(api as AgStudioApi, {
-              rows: () => snapshot.rows,
-              select: setView,
+              rows: () => datedRows,
+              select: (next) => {
+                setView(next);
+                resetLinked();
+              },
+              analyze,
               plan: async (prompt, signal) => {
                 const token = await shopify.idToken();
                 const response = await fetch("/app/insights/plan", {
@@ -321,20 +439,20 @@ export default function InsightsStudio({
           primary: "guardbuy-insights",
           promptStarters: [
             {
-              label: "Show pending purchases",
-              prompt: "Show pending purchases",
+              label: "Compare suppliers",
+              prompt: "Compare suppliers by settled spend",
             },
             {
               label: "Why were proposals blocked?",
               prompt: "Show blocked proposals and their reasons",
             },
             {
-              label: "Show purchases needing attention",
-              prompt: "Show purchases needing attention",
+              label: "Payment status by supplier",
+              prompt: "Show payment status by supplier",
             },
           ],
         })),
-    [snapshot.rows, shopify],
+    [datedRows, shopify, analyze, resetLinked],
   );
   return (
     <AgStudioProvider
@@ -342,6 +460,34 @@ export default function InsightsStudio({
       modules={[AgStudioAiModule]}
     >
       <s-stack gap="base">
+        <div className={styles.hero}>
+          <div>
+            <span className={styles.eyebrow}>GUARDBUY / INSIGHTS</span>
+            <h2>Every purchase. A clear explanation.</h2>
+            <p>
+              Compare suppliers, follow the money, and explore the decisions
+              behind it.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setDemo(!demo);
+              setView("all");
+              analyze("purchases");
+            }}
+            aria-pressed={demo}
+          >
+            {demo ? "Return to live data" : "Explore demo data"}
+          </button>
+        </div>
+        {demo && (
+          <s-banner heading="Demo data · fictional purchases" tone="info">
+            64 example purchases across four suppliers. This does not create
+            products, submit payments or change store records. Return to live
+            data to inspect your store.
+          </s-banner>
+        )}
         <s-section>
           <div className={styles.metrics}>
             <Metric
@@ -368,24 +514,65 @@ export default function InsightsStudio({
         </s-section>
         <s-section>
           <s-stack gap="base">
-            <s-heading>Explore purchases</s-heading>
+            <s-heading>
+              {demo ? "Demo purchasing analysis" : "Purchasing analysis"}
+            </s-heading>
+            <div className={styles.filters} aria-label="Analysis mode">
+              {ANALYSES.map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  aria-pressed={analysis === id}
+                  onClick={() => analyze(id)}
+                >
+                  {ANALYSIS_LABELS[id]}
+                </button>
+              ))}
+              <button type="button" onClick={resetLinked}>
+                Reset chart filters{linked ? " · active" : ""}
+              </button>
+            </div>
+            <div className={styles.filters} aria-label="Date range">
+              {[0, 7, 30].map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  aria-pressed={days === value}
+                  onClick={() => {
+                    setDays(value);
+                    resetLinked();
+                  }}
+                >
+                  {value
+                    ? `Proposed in last ${value} days`
+                    : "All recorded dates"}
+                </button>
+              ))}
+            </div>
             <div className={styles.filters} aria-label="Purchase views">
               {INSIGHT_VIEWS.map((id) => (
                 <button
                   key={id}
                   type="button"
                   aria-pressed={view === id}
-                  onClick={() => setView(id)}
+                  onClick={() => {
+                    setView(id);
+                    resetLinked();
+                  }}
                 >
                   {VIEW_LABEL[id]}
                 </button>
               ))}
             </div>
             <s-text>
+              {days
+                ? `Proposed in last ${days} days · `
+                : "All recorded dates · "}
               {VIEW_LABEL[view]} · {shown.length}{" "}
-              {shown.length === 1 ? "purchase" : "purchases"}. Sort or
-              cross-filter the table; select a purchase link for its full
-              Activity history.
+              {shown.length === 1 ? "purchase" : "purchases"} before chart
+              selections. Sort or cross-filter with a chart selection. Expand
+              supplier rows to explore products; use the purchase view for
+              decision details.
             </s-text>
             {aiConfigured && (
               <s-text tone="neutral">
@@ -406,16 +593,31 @@ export default function InsightsStudio({
             <div className={styles.studio}>
               <AgStudio<GuardRegistry>
                 style={{ height: "100%", width: "100%" }}
-                key={narrow ? "mobile" : "desktop"}
+                key={`${demo ? "demo" : "live"}-${narrow ? "mobile" : "desktop"}`}
+                onStudioReady={({ api }) => {
+                  studioApi.current = api as AgStudioApi<GuardRegistry>;
+                  analyze(analysis);
+                }}
+                onStateUpdated={({ state }) =>
+                  setLinked(
+                    state.pages.some((page) =>
+                      Object.values(page.crossFilter?.values ?? {}).some(
+                        (values) => Array.isArray(values) && values.length > 0,
+                      ),
+                    ),
+                  )
+                }
                 data={data}
                 context={context}
                 initialState={initialState}
-                widgets={widgets}
+                widgets={demo ? demoWidgets : widgets}
                 theme={theme}
                 mode="edit"
                 ai={aiConfigured ? ai : undefined}
                 aiToolDisplay={{
-                  show_purchases: { label: () => ({ text: "Show purchases" }) },
+                  show_purchases: {
+                    label: () => ({ text: "Update analysis" }),
+                  },
                 }}
                 panels={{
                   edit: { right: aiConfigured ? ["ai"] : [], left: [] },
@@ -430,7 +632,7 @@ export default function InsightsStudio({
                 loadThemeGoogleFonts={false}
               />
             </div>
-            <s-link href="/app/activity">View all activity</s-link>
+            {!demo && <s-link href="/app/activity">View all activity</s-link>}
           </s-stack>
         </s-section>
       </s-stack>

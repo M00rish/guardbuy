@@ -3,10 +3,15 @@ import {
   type AgAiAgentRunner,
   type AgStudioApi,
 } from "ag-studio";
-import { InsightPlanSchema, type InsightPlan } from "./plan";
+import {
+  InsightPlanSchema,
+  type InsightPlan,
+  type InsightAnalysis,
+} from "./plan";
 import {
   INSIGHT_VIEWS,
   describeInsightView,
+  inInsightView,
   type InsightRow,
   type InsightView,
 } from "./types";
@@ -14,6 +19,7 @@ import {
 export type InsightAgentPorts = {
   plan: (prompt: string, signal?: AbortSignal) => Promise<InsightPlan>;
   select: (view: InsightView) => void;
+  analyze?: (analysis: InsightAnalysis) => void;
   rows: () => InsightRow[];
 };
 /** One view-selection tool, no built-in agent roster, no backend/business write capability. */
@@ -26,11 +32,36 @@ export function createInsightsAgent(
       name: "show_purchases",
       description:
         "Select a local read-only purchase view and summarize its proposal value; cannot pay, approve or edit rules.",
-      params: (s) => s.object({ view: s.enum([...INSIGHT_VIEWS]) }),
-      execute: async ({ view }, ctx) => {
+      params: (s) =>
+        s.object({
+          view: s.enum([...INSIGHT_VIEWS]),
+          analysis: s.enum(["purchases", "suppliers", "status"]),
+        }),
+      execute: async ({ view, analysis }, ctx) => {
         if (ctx.signal.aborted) return ctx.error("The request was cancelled.");
         ports.select(view);
-        return ctx.success(describeInsightView(ports.rows(), view));
+        ports.analyze?.(
+          InsightPlanSchema.parse({ view, analysis, refused: false })
+            .analysis ?? "purchases",
+        );
+        const selected = ports.rows().filter((row) => inInsightView(row, view));
+        const suppliers = new Map<string, number>();
+        for (const row of selected)
+          suppliers.set(
+            row.supplier,
+            (suppliers.get(row.supplier) ?? 0) + Math.round(row.settled * 100),
+          );
+        const ranking = [...suppliers]
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 3)
+          .map(
+            ([name, cents]) =>
+              `${name}: ${new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(cents / 100)} settled`,
+          )
+          .join("; ");
+        return ctx.success(
+          `${analysis === "suppliers" ? "Supplier comparison opened: expand a supplier to explore its products. " : analysis === "status" ? "Supplier-by-status pivot opened. Values show proposal value, not settled spend. " : ""}${describeInsightView(ports.rows(), view)}${analysis === "suppliers" && ranking ? ` Leading suppliers in the selected date range: ${ranking}.` : ""}`,
+        );
       },
     });
   return {
@@ -50,7 +81,7 @@ export function createInsightsAgent(
         );
         if (ctx.signal?.aborted) return;
         let answer =
-          "I can only show all, pending, blocked, paid or attention-needed purchases. I cannot approve purchases, send payments or change rules.";
+          "I can explore purchases, compare suppliers and pivot payment statuses. I cannot approve purchases, send payments or change rules.";
         if (!plan.refused) {
           const tool = ctx
             .tools()
@@ -65,11 +96,18 @@ export function createInsightsAgent(
           yield {
             type: "TOOL_CALL_ARGS",
             toolCallId,
-            delta: JSON.stringify({ view: plan.view }),
+            delta: JSON.stringify({
+              view: plan.view,
+              analysis: plan.analysis ?? "purchases",
+            }),
           };
           yield { type: "TOOL_CALL_END", toolCallId };
           const result = await tool.execute(
-            { toolCallId, name: tool.name, args: { view: plan.view } },
+            {
+              toolCallId,
+              name: tool.name,
+              args: { view: plan.view, analysis: plan.analysis ?? "purchases" },
+            },
             createAiToolContext({
               signal: ctx.signal,
               run: { threadId, runId, agentId: "guardbuy-insights" },

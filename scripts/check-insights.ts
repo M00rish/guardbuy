@@ -320,3 +320,66 @@ for (const file of [
 console.log(
   "PASS insights: settled/reserved/refund math, rolling-day reconciliation, simulation exclusion, empty data, redaction, schema limits, read-only agent tool and refused money actions.",
 );
+
+// Analysis plans cannot introduce arbitrary fields or write commands.
+assert.equal(
+  InsightPlanSchema.safeParse({
+    view: "all",
+    refused: false,
+    analysis: "suppliers",
+  }).success,
+  true,
+);
+assert.equal(
+  InsightPlanSchema.safeParse({
+    view: "all",
+    refused: false,
+    analysis: "status",
+  }).success,
+  true,
+);
+assert.equal(
+  InsightPlanSchema.safeParse({
+    view: "all",
+    refused: false,
+    analysis: "execute_payment",
+  }).success,
+  false,
+);
+const { demoSnapshot } = await import("../app/lib/insights/demo");
+const demo = demoSnapshot(now);
+assert.equal(demo.rows.length, 64);
+assert.equal(new Set(demo.rows.map((r) => r.supplier)).size, 4);
+assert.ok(
+  demo.rows.every(
+    (r) => r.activityUrl === "" && r.route === "Demo · no payment",
+  ),
+);
+assert.equal(
+  demo.summary.spentCents,
+  Math.round(demo.trend.reduce((s, r) => s + r.spent, 0) * 100),
+);
+assert.equal(
+  demo.summary.reservedCents,
+  Math.round(demo.rows.reduce((s, r) => s + r.reserved, 0) * 100),
+);
+let analysisSelected = "";
+const analysisAgent = createInsightsAgent(
+  api as Parameters<typeof createInsightsAgent>[0],
+  {
+    ...ports,
+    plan: async () => ({ view: "all", refused: false, analysis: "status" }),
+    analyze: (value) => {
+      analysisSelected = value;
+    },
+  },
+);
+for await (const event of analysisAgent.run(input, {
+  ...ctx,
+  tools: () => analysisAgent.tools!({} as never, undefined),
+}))
+  void event;
+assert.equal(analysisSelected, "status");
+console.log(
+  "PASS analysis presets, strict plan boundary, demo isolation and reconciled fixture totals",
+);

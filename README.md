@@ -333,3 +333,11 @@ The assistant posts to the authenticated JSON resource `/app/insights/plan`, rat
 **Judge/demo path:** the Insights page is staff-only. Show it in the demo recording or with an authorized demo-store staff account. The existing public dashboard/Verify privacy rules are unchanged; no private Insights dataset or assistant endpoint is exposed through the storefront proxy. After deployment, compare the dashboard totals with Home, filter pending/blocked purchases, open a purchase in Activity, use the assistant and try a payment request to see its refusal. Check desktop/mobile layouts and confirm the trial watermark/licence warning is gone with your own valid key. Local mocked-model evidence is not a live-provider acceptance test.
 
 Offline checks: `npx tsx scripts/check-insights.ts` and `npx tsx scripts/check-insights-routes.ts`, run within the existing **Tests** CI job.
+
+### Insights judge walkthrough
+
+Insights has three analysis presets: Purchase details, Supplier comparison (supplier → product hierarchy with settled/reserved/count totals), and Status pivot (supplier × payment status, proposal value). Click a chart bar to cross-filter other widgets; Reset chart filters clears the selection. Date controls filter proposal dates, while the store's seven-day spending guardrail remains independent.
+
+Use **Explore demo data** for 64 fictional, browser-only purchases across four suppliers and 28 days. Demo mode never writes products, audit entries, inventory or payments, and omits links to real purchase activity. Return to live data restores the authenticated snapshot. Demo metrics are labelled and separate from live metrics.
+
+Suggested demonstration: enter demo mode; ask “Compare suppliers by settled spend”; expand a supplier; select a supplier bar; reset filters; ask “Show payment status by supplier”; then ask to approve a purchase and observe the read-only refusal. Only the bounded prompt is sent to the provider. The returned plan can select an allowlisted view/analysis; totals and supplier rankings are calculated locally. The assistant cannot create arbitrary tools, execute queries, or submit business commands.
