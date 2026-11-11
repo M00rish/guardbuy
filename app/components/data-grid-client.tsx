@@ -1,6 +1,6 @@
 import { useMatches } from "react-router";
 import { MasterDetailModule, LicenseManager } from "ag-grid-enterprise";
-import { useState, useCallback, useRef, useMemo } from "react";
+import { useState, useCallback, useRef, useMemo, useEffect } from "react";
 import { AgGridReact } from "ag-grid-react";
 import {
   AllCommunityModule,
@@ -22,6 +22,20 @@ export default function DataGridClient<T>({
   search = true,
   emptyMessage = "No records match these filters.",
 }: DataGridProps<T>) {
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = wrapperRef.current;
+    if (!element) return;
+    const update = () =>
+      element.style.setProperty(
+        "--guardbuy-detail-width",
+        `${Math.max(0, element.clientWidth - 18)}px`,
+      );
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
   const matches = useMatches();
   const license = matches
     .map((m) => m.data as { gridLicenseKey?: string } | undefined)
@@ -54,7 +68,12 @@ export default function DataGridClient<T>({
   const [query, setQuery] = useState("");
   const [shown, setShown] = useState(rows.length);
   return (
-    <div className={styles.wrapper} role="region" aria-label={label}>
+    <div
+      ref={wrapperRef}
+      className={styles.wrapper}
+      role="region"
+      aria-label={label}
+    >
       {search && (
         <div className={styles.toolbar}>
           <input

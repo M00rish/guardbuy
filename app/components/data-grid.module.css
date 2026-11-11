@@ -101,6 +101,9 @@
 }
 
 .detail {
+  white-space: normal;
+  width: var(--guardbuy-detail-width, 100%);
+  max-width: 100%;
   padding: 20px;
   background: #f3f8f5;
   border-bottom: 1px solid #dce7e1;
