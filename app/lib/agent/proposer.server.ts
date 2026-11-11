@@ -10,14 +10,14 @@ import type { StockCheck } from "../inventory/trigger.server";
 // whatever it returns is still checked by the deterministic policy engine before any money moves.
 
 // Models are tried in order until one answers: free tiers get overloaded ("high demand", 503) or
-// run out of daily quota, so the chain mixes two providers. Each entry is "provider:model":
+// run out of daily quota. Defaults use free OpenRouter models with structured outputs.
+// Each entry is "provider:model":
 //   google:<Gemini model>  |  openrouter:<OpenRouter model id, e.g. ...:free>
 // Override with GUARDBUY_LLM_MODELS (comma-separated). The model that answered is recorded.
 const DEFAULT_MODELS = [
-  "google:gemini-3.8-flash",
+  "openrouter:liquid/lfm-3-1.7b:free",
+  "openrouter:nvidia/nemotron-3.5-super-vl:free",
   "openrouter:dots-studio/dots-3-note-preview:free",
-  "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
-  "google:gemini-3.5-flash",
 ];
 
 export function modelChain(spec = process.env.GUARDBUY_LLM_MODELS): string[] {

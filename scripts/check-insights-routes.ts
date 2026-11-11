@@ -16,6 +16,7 @@ const fixtures = globalThis as typeof globalThis & {
   __insightReads?: string[];
   __insightPlans?: string[];
   __brokenInsightChain?: boolean;
+  __failedInsightPlan?: boolean;
 };
 try {
   process.env.NODE_ENV = "test";
@@ -88,7 +89,7 @@ try {
                 approvals: `export async function approvalQueue(){return []}`,
                 directory: `export async function setupStatus(){return {managedProducts:0,suppliers:0,managedWithSuppliers:0}} export async function setManaged(){throw Error('Unexpected product command')}`,
                 names: `export async function cachedBalanceCents(){return null} export async function productOverview(){return []} export function productStatus(){return {}} export async function feedNames(shop){globalThis.__insightReads.push('names:'+shop);return{product:()=> 'Scoped product',supplier:()=> 'Scoped supplier'}}`,
-                planner: `export function insightsAiConfigured(){return true}export async function planInsightView(prompt){globalThis.__insightPlans.push(prompt);return{view:'pending',refused:false}}`,
+                planner: `export function insightsAiConfigured(){return true}export async function planInsightView(prompt){if(globalThis.__failedInsightPlan)throw Error('private provider body');globalThis.__insightPlans.push(prompt);return{view:'pending',refused:false}}`,
                 ui: `export default function Insights(){return null}`,
               } as Record<string, string>
             )[path],
@@ -208,6 +209,16 @@ try {
     429,
     "repeated prompts are rate limited",
   );
+  fixtures.__failedInsightPlan = true;
+  const failed = await routes.action(
+    args(req(undefined, { "x-staff": "staff-failure" })),
+  );
+  assert.equal(failed.status, 503);
+  const failure = await failed.json();
+  assert.equal(failure.code, "unavailable");
+  assert.match(failure.requestId, /^[a-f0-9-]{36}$/);
+  assert.ok(!JSON.stringify(failure).includes("private"));
+  fixtures.__failedInsightPlan = false;
   process.env.NODE_ENV = "production";
   delete process.env.AG_STUDIO_LICENSE_KEY;
   const unlicensed = await routes.home.loader(

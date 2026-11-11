@@ -2,6 +2,7 @@ import type { ActionFunctionArgs } from "react-router";
 import { adminWithStaff } from "../merchant/staff.server";
 import { planInsightView } from "./planner.server";
 import { InsightPromptSchema } from "./plan";
+import { plannerFailureResponse } from "./failure.server";
 
 // Session-scoped, bounded, in-memory cost limit; not an authorization boundary.
 const requests = new Map<string, number>();
@@ -74,13 +75,7 @@ export const planInsightsRequest = async ({ request }: ActionFunctionArgs) => {
     return Response.json(
       await planInsightView(parsed.data.prompt, request.signal),
     );
-  } catch {
-    return Response.json(
-      {
-        error:
-          "Insights assistant is unavailable. Use the purchase filters or try again later.",
-      },
-      { status: 503 },
-    );
+  } catch (error) {
+    return Response.json(plannerFailureResponse(error), { status: 503 });
   }
 };
