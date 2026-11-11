@@ -24,6 +24,15 @@ export function demoSnapshot(now = new Date()): InsightsSnapshot {
       purchase: 10001 + i,
       variantId: `demo-${i % 8}`,
       automatic: paid && i % 3 !== 0,
+      attentionState: pending
+        ? "pending"
+        : kind === 6
+          ? "approval"
+          : kind === 7
+            ? "uncertain"
+            : blocked && i < 8
+              ? "blocked"
+              : undefined,
       settledAt: paid ? at.toISOString() : undefined,
       proposedAt: at.toISOString(),
       product:

@@ -1,3 +1,4 @@
+import { currentAttention } from "./attention";
 import type { AuditEntry } from "../policy/schema";
 import { approvalStates } from "../agent/approval-state";
 import { currentRuleSet, spending } from "../agent/restock.server";
@@ -68,6 +69,7 @@ export function insightsSnapshot(
       .slice(0, 10),
   );
   const trend = days.map((day) => ({ day, spent: 0 }));
+  const attention = currentAttention(history, now);
   const rows: InsightRow[] = [];
   for (const entry of log) {
     if (entry.event.type !== "decision") continue;
@@ -163,6 +165,7 @@ export function insightsSnapshot(
       .join("; ");
     rows.push({
       purchase: entry.seq,
+      attentionState: attention.get(entry.seq),
       variantId: proposal.variantId,
       automatic:
         decision.verdict === "auto" &&
