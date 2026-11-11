@@ -1,0 +1,169 @@
+.shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  font-family: Arial, sans-serif;
+  color: #213c35;
+  background: #fff;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  background: #f7faf8;
+  flex-wrap: wrap;
+}
+.toolbar label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+.toolbar input {
+  border: 1px solid #cddbd4;
+  border-radius: 7px;
+  background: white;
+  padding: 9px 12px;
+  font: 13px Arial;
+  width: 240px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+.actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.actions button {
+  font: 12px Arial;
+  color: #245344;
+  background: #fff;
+  border: 1px solid #cddbd4;
+  padding: 9px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+}
+.actions button:first-child {
+  background: #0b745a;
+  color: white;
+  border-color: #0b745a;
+}
+.actions button:focus-visible,
+.toolbar input:focus-visible {
+  outline: 2px solid #00896c;
+  outline-offset: 2px;
+}
+.hint {
+  font-size: 11px;
+  color: #64766e;
+  padding: 8px 14px;
+  line-height: 1.5;
+  border-top: 1px solid #eef3f0;
+}
+.grid {
+  flex: 1;
+  min-height: 250px;
+}
+.badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 24px;
+  border-radius: 6px;
+  padding: 0 8px;
+}
+.paid {
+  color: #087450;
+  background: #e0f5e9;
+}
+.blocked {
+  color: #ad3c3c;
+  background: #ffeded;
+}
+.waiting {
+  color: #865918;
+  background: #fff2da;
+}
+.money {
+  position: relative;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+.money span {
+  z-index: 1;
+}
+.money i {
+  position: absolute;
+  height: 5px;
+  bottom: 9px;
+  right: 0;
+  background: #9bdbc2;
+  border-radius: 3px;
+}
+.detail {
+  height: 100%;
+  box-sizing: border-box;
+  padding: 22px 30px;
+  background: #f2f8f5;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 30px;
+  font: 13px/1.5 Arial;
+}
+.detail h3 {
+  margin: 6px 0;
+  font-size: 18px;
+}
+.detail p {
+  margin: 0;
+  max-width: 55ch;
+}
+.detail dl {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  gap: 5px 12px;
+  overflow: auto;
+}
+.detail dt {
+  color: #64766e;
+}
+.detail dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.detail a {
+  color: #087450;
+  font-weight: 700;
+}
+.kicker {
+  font-size: 10px;
+  letter-spacing: 1.5px;
+  color: #64766e;
+}
+.demo {
+  color: #865918;
+  font-weight: 700;
+}
+@media (max-width: 700px) {
+  .detail {
+    grid-template-columns: 1fr;
+    padding: 12px;
+    overflow: auto;
+  }
+  .toolbar {
+    padding: 8px;
+  }
+  .toolbar input {
+    width: 220px;
+  }
+}

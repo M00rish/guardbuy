@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
-import { Link } from "react-router";
+import PurchaseAnalysisGrid, {
+  type PurchaseGridData,
+} from "./purchase-analysis-grid";
 import { demoSnapshot } from "../lib/insights/demo";
 import { ANALYSES, type InsightAnalysis } from "../lib/insights/plan";
 import { useAppBridge } from "@shopify/app-bridge-react";
@@ -8,7 +10,6 @@ import {
   AgStudioProvider,
   createWidgets,
   type AgWidgetDefinition,
-  type AgWidgetCustomCellRendererProps,
 } from "ag-studio-react";
 import {
   AgStudioAiModule,
@@ -21,7 +22,6 @@ import {
   type AgWidgetParams,
   type AgAiHarnessSetup,
   type AgStudioApi,
-  type AgWidgetField,
   type AgDataSourcesDefinition,
 } from "ag-studio";
 import { createInsightsAgent } from "../lib/insights/agent";
@@ -44,7 +44,9 @@ type BudgetData = AgWidgetData<
 type BudgetDefinition = AgWidgetDefinition<"guardbuy-budget", BudgetData>;
 interface GuardRegistry extends Omit<AgCoreDefaultRegistry, "widgets"> {
   widgets: readonly (
-    AgCoreDefaultRegistry["widgets"][number] | BudgetDefinition
+    | AgCoreDefaultRegistry["widgets"][number]
+    | BudgetDefinition
+    | AgWidgetDefinition<"guardbuy-purchases", PurchaseGridData>
   )[];
 }
 function BudgetWidget({
@@ -80,46 +82,34 @@ function BudgetWidget({
     </div>
   );
 }
-function PurchaseLink({ value }: AgWidgetCustomCellRendererProps) {
-  const seq = Number(value);
-  return Number.isSafeInteger(seq) && seq >= 0 ? (
-    <Link to={`/app/activity?purchase=${seq}`}>#{seq} · View activity</Link>
-  ) : (
-    <span>Purchase unavailable</span>
-  );
-}
 const widgets = createWidgets<GuardRegistry>({
-  overrides: [
+  additionalTypes: [
     {
-      id: "grid",
-      options: {
-        createCellRenderer: (field: AgWidgetField) =>
-          field.fieldId === "purchases.purchase" ? PurchaseLink : undefined,
+      id: "guardbuy-budget",
+      label: "Spending guardrail",
+      comp: BudgetWidget,
+      dataMapping: {},
+      form: (p) => p.createDefaults({ dataMappingItems: [] }),
+      defaultSize: { width: 420, height: 230 },
+      minSize: { width: 260, height: 200 },
+    },
+    {
+      id: "guardbuy-purchases",
+      label: "Purchase explorer",
+      comp: PurchaseAnalysisGrid,
+      dataMapping: {
+        purchase: {
+          type: "field",
+          supportedRoles: ["numeric"],
+          required: true,
+        },
       },
-    },
-  ],
-  additionalTypes: [
-    {
-      id: "guardbuy-budget",
-      label: "GuardBuy spending guardrail",
-      comp: BudgetWidget,
-      dataMapping: {},
-      form: (p) => p.createDefaults({ dataMappingItems: [] }),
-      defaultSize: { width: 420, height: 230 },
-      minSize: { width: 260, height: 200 },
-    },
-  ],
-});
-const demoWidgets = createWidgets<GuardRegistry>({
-  additionalTypes: [
-    {
-      id: "guardbuy-budget",
-      label: "Demo spending guardrail",
-      comp: BudgetWidget,
-      dataMapping: {},
-      form: (p) => p.createDefaults({ dataMappingItems: [] }),
-      defaultSize: { width: 420, height: 230 },
-      minSize: { width: 260, height: 200 },
+      form: (p) =>
+        p.createDefaults({
+          dataMappingItems: [{ key: "purchase", label: "Purchase identifier" }],
+        }),
+      defaultSize: { width: 1000, height: 650 },
+      minSize: { width: 280, height: 450 },
     },
   ],
 });
@@ -128,41 +118,11 @@ const ANALYSIS_LABELS = {
   suppliers: "Supplier comparison",
   status: "Status pivot",
 };
-function analysisWidget(
-  analysis: InsightAnalysis,
-): NonNullable<
-  AgReportState<GuardRegistry>["pages"][number]["widgets"]
->[string] {
-  if (analysis === "purchases") return desktopState.pages[0].widgets!.purchases;
+function analysisWidget(_analysis: InsightAnalysis): PurchaseGridData {
   return {
-    type: "pivot-grid",
-    dataMapping: {
-      rows: [
-        { id: "purchases.supplier" },
-        ...(analysis === "suppliers" ? [{ id: "purchases.product" }] : []),
-      ],
-      columns: analysis === "status" ? [{ id: "purchases.status" }] : [],
-      values: (analysis === "status"
-        ? ["amount"]
-        : ["settled", "reserved", "count"]
-      ).map((id) => ({ id: `purchases.${id}`, aggregation: "sum" as const })),
-    },
-    format: {
-      crossFilter: "filter",
-      title: {
-        enabled: true,
-        text:
-          analysis === "status"
-            ? "Supplier × status · proposal value"
-            : "Supplier → product · expand to explore",
-      },
-      style: {
-        columnWidth: 165,
-        grandTotalRow: { enabled: true },
-        totalColumns: true,
-        theme: { rowHeight: 40 },
-      },
-    },
+    type: "guardbuy-purchases",
+    dataMapping: { purchase: [{ id: "purchases.purchase" }] },
+    format: { crossFilter: "filter" },
   };
 }
 const theme = studioTheme.withParams({
@@ -224,43 +184,13 @@ const desktopState: AgReportState<GuardRegistry> = {
             },
           },
         },
-        purchases: {
-          type: "grid",
-          dataMapping: {
-            cols: [
-              "purchase",
-              "product",
-              "supplier",
-              "status",
-              "amount",
-              "settled",
-              "reserved",
-              "reason",
-              "paymentReference",
-              "route",
-            ].map((id) => ({ id: "purchases." + id })),
-          },
-          format: {
-            crossFilter: "filter",
-            title: {
-              enabled: true,
-              typography: { fontSize: 16 },
-              text: "Purchases · decision and payment details",
-            },
-            style: {
-              columnWidth: 170,
-              columnAutoSize: false,
-              headerRow: { wrapText: true },
-              theme: { rowHeight: 36 },
-            },
-          },
-        },
+        purchases: analysisWidget("purchases"),
       },
       widgetLayout: {
-        guardrail: { xTrack: 0, yTrack: 0, xSpan: 8, ySpan: 12 },
-        outcomes: { xTrack: 8, yTrack: 0, xSpan: 16, ySpan: 12 },
-        trend: { xTrack: 0, yTrack: 12, xSpan: 24, ySpan: 12 },
-        purchases: { xTrack: 0, yTrack: 24, xSpan: 24, ySpan: 23 },
+        guardrail: { xTrack: 0, yTrack: 34, xSpan: 8, ySpan: 14 },
+        outcomes: { xTrack: 8, yTrack: 34, xSpan: 16, ySpan: 14 },
+        trend: { xTrack: 0, yTrack: 48, xSpan: 24, ySpan: 15 },
+        purchases: { xTrack: 0, yTrack: 0, xSpan: 24, ySpan: 34 },
       },
     },
   ],
@@ -269,10 +199,14 @@ export default function InsightsStudio({
   snapshot: liveSnapshot,
   licenseKey,
   aiConfigured,
+  shop = "preview",
+  home = false,
 }: {
   snapshot: InsightsSnapshot;
   licenseKey: string;
   aiConfigured: boolean;
+  shop?: string;
+  home?: boolean;
 }) {
   const [demo, setDemo] = useState(false);
   const demoData = useMemo(() => demoSnapshot(), []);
@@ -338,10 +272,10 @@ export default function InsightsStudio({
             pages: desktopState.pages.map((page) => ({
               ...page,
               widgetLayout: {
-                guardrail: { xTrack: 0, yTrack: 0, xSpan: 24, ySpan: 12 },
-                outcomes: { xTrack: 0, yTrack: 12, xSpan: 24, ySpan: 12 },
-                trend: { xTrack: 0, yTrack: 24, xSpan: 24, ySpan: 12 },
-                purchases: { xTrack: 0, yTrack: 36, xSpan: 24, ySpan: 23 },
+                guardrail: { xTrack: 0, yTrack: 36, xSpan: 24, ySpan: 12 },
+                outcomes: { xTrack: 0, yTrack: 48, xSpan: 24, ySpan: 15 },
+                trend: { xTrack: 0, yTrack: 63, xSpan: 24, ySpan: 15 },
+                purchases: { xTrack: 0, yTrack: 0, xSpan: 24, ySpan: 36 },
               },
             })),
           }
@@ -405,8 +339,16 @@ export default function InsightsStudio({
     [shown, snapshot.trend],
   );
   const context = useMemo(
-    () => ({ summary: snapshot.summary }),
-    [snapshot.summary],
+    () => ({
+      summary: snapshot.summary,
+      rows: shown,
+      allRows: snapshot.rows,
+      analysis,
+      demo,
+      checkedAt: snapshot.checkedAt,
+      storageKey: `guardbuy-grid:${shop}:${demo ? "demo" : "live"}`,
+    }),
+    [snapshot, shown, analysis, demo, shop],
   );
   const ai = useMemo<AgAiHarnessSetup>(
     () =>
@@ -462,8 +404,8 @@ export default function InsightsStudio({
       <s-stack gap="base">
         <div className={styles.hero}>
           <div>
-            <span className={styles.eyebrow}>GUARDBUY / INSIGHTS</span>
-            <h2>Every purchase. A clear explanation.</h2>
+            <span className={styles.eyebrow}>GUARDBUY / PURCHASE EXPLORER</span>
+            <h2>Your purchasing, in focus.</h2>
             <p>
               Compare suppliers, follow the money, and explore the decisions
               behind it.
@@ -488,30 +430,32 @@ export default function InsightsStudio({
             data to inspect your store.
           </s-banner>
         )}
-        <s-section>
-          <div className={styles.metrics}>
-            <Metric
-              label="Spent · last 7 days"
-              value={usd(snapshot.summary.spentCents)}
-              detail="Settled payments, net of recorded refunds"
-            />
-            <Metric
-              label="Reserved"
-              value={usd(snapshot.summary.reservedCents)}
-              detail="Pending payments and unexpired approval commitments"
-            />
-            <Metric
-              label="Remaining budget"
-              value={usd(snapshot.summary.remainingCents)}
-              detail="7-day spending cap minus spent and reserved"
-            />
-            <Metric
-              label="Blocked proposal value · all time"
-              value={usd(snapshot.summary.blockedCents)}
-              detail={`${snapshot.summary.blockedCount} blocked ${snapshot.summary.blockedCount === 1 ? "proposal" : "proposals"}; not realized savings`}
-            />
-          </div>
-        </s-section>
+        {(!home || demo) && (
+          <s-section>
+            <div className={styles.metrics}>
+              <Metric
+                label="Spent · last 7 days"
+                value={usd(snapshot.summary.spentCents)}
+                detail="Settled payments, net of recorded refunds"
+              />
+              <Metric
+                label="Reserved"
+                value={usd(snapshot.summary.reservedCents)}
+                detail="Pending payments and unexpired approval commitments"
+              />
+              <Metric
+                label="Remaining budget"
+                value={usd(snapshot.summary.remainingCents)}
+                detail="7-day spending cap minus spent and reserved"
+              />
+              <Metric
+                label="Blocked proposal value · all time"
+                value={usd(snapshot.summary.blockedCents)}
+                detail={`${snapshot.summary.blockedCount} blocked ${snapshot.summary.blockedCount === 1 ? "proposal" : "proposals"}; not realized savings`}
+              />
+            </div>
+          </s-section>
+        )}
         <s-section>
           <s-stack gap="base">
             <s-heading>
@@ -610,7 +554,7 @@ export default function InsightsStudio({
                 data={data}
                 context={context}
                 initialState={initialState}
-                widgets={demo ? demoWidgets : widgets}
+                widgets={widgets}
                 theme={theme}
                 mode="edit"
                 ai={aiConfigured ? ai : undefined}
