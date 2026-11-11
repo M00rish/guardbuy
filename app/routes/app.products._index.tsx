@@ -1,3 +1,4 @@
+import { ViewTabs } from "../components/view-tabs";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
@@ -36,22 +37,7 @@ export default function ProductsAndSuppliers() {
   return (
     <s-page heading="Products & Suppliers" inlineSize="large">
       <s-stack gap="base">
-        <s-section>
-          <s-stack direction="inline" gap="base">
-            <s-button
-              href="/app/products"
-              variant={data.tab === "products" ? "secondary" : "tertiary"}
-            >
-              Products
-            </s-button>
-            <s-button
-              href="/app/products?tab=suppliers"
-              variant={data.tab === "suppliers" ? "secondary" : "tertiary"}
-            >
-              Suppliers
-            </s-button>
-          </s-stack>
-        </s-section>
+        <ViewTabs label="Page sections" value={data.tab} options={[{id:"products",label:"Products",href:"/app/products"},{id:"suppliers",label:"Suppliers",href:"/app/products?tab=suppliers"}]} />
         {data.products && <ProductsPanel data={data.products} />}
         {data.suppliers && <SuppliersPanel data={data.suppliers} />}
       </s-stack>

@@ -1,3 +1,4 @@
+import { ViewFilter } from "./view-tabs";
 import { DataGrid, cell, GridBadge } from "./data-grid";
 import { useEffect } from "react";
 import { useFetcher, useSearchParams } from "react-router";
@@ -28,8 +29,6 @@ export function ProductsPanel({ data }: { data: ProductsPageData }) {
       shopify.toast.show(fetcher.data.message, { isError: !fetcher.data.ok });
   }, [fetcher.state, fetcher.data, shopify]);
 
-  const needsSupplier = (p: (typeof products)[number]) =>
-    p.managed && p.suppliers.length === 0;
   const inView = (p: (typeof products)[number], v: View) =>
     v === "managed"
       ? p.managed
@@ -51,22 +50,16 @@ export function ProductsPanel({ data }: { data: ProductsPageData }) {
 
       <s-section>
         <s-stack gap="base">
-          <s-stack direction="inline" gap="small-200" alignItems="center">
-            {VIEWS.map((v) => (
-              <s-button
-                key={v.id}
-                variant={v.id === view ? "secondary" : "tertiary"}
-                onClick={() => {
-                  const next = new URLSearchParams(params);
-                  if (v.id === "all") next.delete("view");
-                  else next.set("view", v.id);
-                  setParams(next, { replace: true });
-                }}
-              >
-                {`${v.label} (${count(v.id)})`}
-              </s-button>
-            ))}
-          </s-stack>
+          <ViewFilter
+            options={VIEWS.map((v) => ({ ...v, count: count(v.id) }))}
+            value={view}
+            onChange={(id) => {
+              const next = new URLSearchParams(params);
+              if (id === "all") next.delete("view");
+              else next.set("view", id);
+              setParams(next, { replace: true });
+            }}
+          />
 
           {unavailable ? (
             <Unavailable what="your products" />
@@ -145,43 +138,14 @@ export function ProductsPanel({ data }: { data: ProductsPageData }) {
                     data?.suppliers.map((s) => s.name).join(", ") ?? "None",
                   cellRenderer: cell<ProductsPageData["products"][number]>(
                     (p) => (
-                      <>
-                        {p.suppliers.length === 0 ? (
-                          needsSupplier(p) ? (
-                            <GridBadge tone="caution">
-                              Needs a supplier
-                            </GridBadge>
-                          ) : (
-                            <s-text tone="neutral">None</s-text>
-                          )
-                        ) : (
-                          <s-stack gap="none">
-                            {p.suppliers.map((s) => (
-                              <s-stack
-                                key={s.name}
-                                direction="inline"
-                                gap="small-200"
-                                alignItems="center"
-                              >
-                                <s-text
-                                  type={s.preferred ? "strong" : "generic"}
-                                >
-                                  {s.name}
-                                </s-text>
-                                <s-text tone="neutral">{s.price}</s-text>
-                                {s.preferred && (
-                                  <GridBadge tone="info">Preferred</GridBadge>
-                                )}
-                                {!s.approved && (
-                                  <GridBadge tone="caution">
-                                    Not approved in rules
-                                  </GridBadge>
-                                )}
-                              </s-stack>
-                            ))}
-                          </s-stack>
-                        )}
-                      </>
+                      <span>
+                        {p.suppliers.find((s) => s.preferred)?.name ??
+                          p.suppliers[0]?.name ??
+                          "None"}
+                        {p.suppliers.length > 1
+                          ? ` +${p.suppliers.length - 1}`
+                          : ""}
+                      </span>
                     ),
                   ),
                 },
@@ -235,6 +199,56 @@ export function ProductsPanel({ data }: { data: ProductsPageData }) {
                   ),
                 },
               ]}
+              renderDetail={(p) => (
+                <div>
+                  <h3>{p.title} · suppliers</h3>
+                  {p.suppliers.length ? (
+                    <DataGrid
+                      label="Linked suppliers"
+                      rows={p.suppliers}
+                      rowId={(s) => String(p.suppliers.indexOf(s))}
+                      height={220}
+                      search={false}
+                      columns={[
+                        {
+                          field: "name",
+                          headerName: "Supplier",
+                          flex: 1,
+                          minWidth: 180,
+                        },
+                        { field: "price", headerName: "Price", width: 120 },
+                        {
+                          colId: "state",
+                          headerName: "Status",
+                          flex: 1,
+                          minWidth: 180,
+                          cellRenderer: cell<(typeof p.suppliers)[number]>(
+                            (s) => (
+                              <>
+                                {s.preferred && (
+                                  <GridBadge tone="info">Preferred</GridBadge>
+                                )}{" "}
+                                {!s.approved && (
+                                  <GridBadge tone="caution">
+                                    Not approved in rules
+                                  </GridBadge>
+                                )}
+                              </>
+                            ),
+                          ),
+                        },
+                      ]}
+                    />
+                  ) : (
+                    <p>No supplier linked yet.</p>
+                  )}
+                  <p>
+                    <s-link href={`/app/products/${p.variantId}`}>
+                      Manage product & supplier settings →
+                    </s-link>
+                  </p>
+                </div>
+              )}
               height={640}
             />
           )}

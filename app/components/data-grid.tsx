@@ -17,6 +17,8 @@ export type DataGridProps<T> = {
   rowId: (row: T) => string;
   height?: number;
   search?: boolean;
+  renderDetail?: (row: T) => ReactNode;
+  isExpandable?: (row: T) => boolean;
   emptyMessage?: string;
 };
 const Client = lazy(() => import("./data-grid-client")) as <T>(

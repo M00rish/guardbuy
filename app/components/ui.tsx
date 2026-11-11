@@ -1,3 +1,4 @@
+import { ViewFilter } from "./view-tabs";
 // Shared Polaris-native building blocks for GuardBuy's admin pages (browser-safe: no server code).
 
 import { APPROVAL_LABEL, COPY } from "../lib/wording";
@@ -84,15 +85,7 @@ export function Columns({ children }: { children: React.ReactNode }) {
 
 /** Filter buttons above a table (the active one is outlined). */
 export function Filters<T extends string>({ options, value, onChange }: { options: { id: T; label: string; count?: number }[]; value: T; onChange: (id: T) => void }) {
-  return (
-    <s-stack direction="inline" gap="small-200" alignItems="center">
-      {options.map((o) => (
-        <s-button key={o.id} variant={o.id === value ? "secondary" : "tertiary"} onClick={() => onChange(o.id)}>
-          {o.count === undefined ? o.label : `${o.label} (${o.count})`}
-        </s-button>
-      ))}
-    </s-stack>
-  );
+  return <ViewFilter options={options} value={value} onChange={onChange} />;
 }
 
 /** Empty state: what will show up here, and the one thing to do next. */

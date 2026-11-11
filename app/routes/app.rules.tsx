@@ -1,3 +1,4 @@
+import { ViewTabs } from "../components/view-tabs";
 import type {
   ActionFunctionArgs,
   HeadersFunction,
@@ -37,22 +38,7 @@ export default function RulesAndApprovals() {
   return (
     <s-page heading="Rules & Approvals" inlineSize="large">
       <s-stack gap="base">
-        <s-section>
-          <s-stack direction="inline" gap="base">
-            <s-button
-              href="/app/rules?tab=approvals"
-              variant={data.tab === "approvals" ? "secondary" : "tertiary"}
-            >
-              Approvals
-            </s-button>
-            <s-button
-              href="/app/rules?tab=rules"
-              variant={data.tab === "rules" ? "secondary" : "tertiary"}
-            >
-              Rules
-            </s-button>
-          </s-stack>
-        </s-section>
+        <ViewTabs label="Page sections" value={data.tab} options={[{id:"approvals",label:"Approvals",href:"/app/rules?tab=approvals"},{id:"rules",label:"Rules",href:"/app/rules?tab=rules"}]} />
         {data.approvals && <ApprovalsPanel data={data.approvals} />}
         {data.rules && <RulesEditor data={data.rules} />}
       </s-stack>

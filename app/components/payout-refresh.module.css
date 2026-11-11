@@ -1,0 +1,41 @@
+.panel {
+  padding: 16px 20px;
+  border: 1px solid #dce7e1;
+  border-radius: 12px;
+  background: #fff;
+  color: #213c35;
+  font:
+    13px/1.5 Arial,
+    sans-serif;
+}
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.meta {
+  margin: 4px 0 0;
+  color: #64766e;
+  font-size: 12px;
+}
+.panel details {
+  margin-top: 8px;
+  color: #64766e;
+  font-size: 12px;
+}
+.panel summary {
+  cursor: pointer;
+  color: #00745b;
+  width: fit-content;
+}
+.panel details p {
+  max-width: 85ch;
+  margin: 8px 0 0;
+}
+@media (max-width: 700px) {
+  .panel {
+    padding: 14px;
+  }
+}

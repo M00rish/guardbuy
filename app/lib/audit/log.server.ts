@@ -20,7 +20,7 @@ export async function appendAudit(shop: string, event: AuditEvent): Promise<Audi
 }
 
 /** Conditional append checks current history under the same database lock as the write. */
-export async function appendAuditWhen(shop: string, event: AuditEvent, when?: (log: AuditEntry[]) => boolean, lease?: PaymentLease): Promise<AuditEntry | null> {
+export async function appendAuditWhen(shop: string, event: AuditEvent, when?: (log: AuditEntry[]) => boolean, lease?: PaymentLease, payoutLease?: { payoutSeq: number; holder: string }): Promise<AuditEntry | null> {
   const parsed = AuditEventSchema.parse(event);
 
   return db.$transaction(async (tx) => {
@@ -29,6 +29,10 @@ export async function appendAuditWhen(shop: string, event: AuditEvent, when?: (l
     if (lease) {
       const rows = await tx.$queryRaw<{ holder: string; live: boolean }[]>`SELECT "holder", "lockedUntil" > clock_timestamp() AS live FROM "PaymentLock" WHERE "shop" = ${lease.key} FOR UPDATE`;
       if (rows[0]?.holder !== lease.holder || !rows[0].live) throw new Error("Payment lease lost; no new attempt may start");
+    }
+    if (payoutLease) {
+      const rows = await tx.$queryRaw<{ holder: string; live: boolean }[]>`SELECT "holder", "lockedUntil" > clock_timestamp() AS live FROM "PayoutCheck" WHERE "shop" = ${shop} AND "payoutSeq" = ${payoutLease.payoutSeq} FOR UPDATE`;
+      if (rows[0]?.holder !== payoutLease.holder || !rows[0].live) throw new Error("Payout check lease lost; stale status evidence refused");
     }
     if (when) {
       const rows = await tx.auditEntry.findMany({ where: { shop }, orderBy: { seq: "asc" } });

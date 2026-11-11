@@ -231,3 +231,15 @@ model MerchantAlert {
   @@unique([shop, subject, revision])
   @@index([status, availableAt])
 }
+
+// Durable per-payout read schedule; a lease prevents duplicate checks across app processes.
+model PayoutCheck {
+  shop String
+  payoutSeq Int
+  nextCheckAt DateTime @default(now())
+  checkedAt DateTime?
+  unchanged Int @default(0)
+  holder String?
+  lockedUntil DateTime?
+  @@id([shop, payoutSeq])
+}

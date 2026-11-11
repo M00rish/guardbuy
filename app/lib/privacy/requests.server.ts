@@ -20,6 +20,7 @@ export async function receivePrivacyRequest({ shop, topic, eventId, requestId }:
       await tx.shopSettings.deleteMany({ where: { shop } });
       await tx.alertChannel.deleteMany({ where: { shop } });
       await tx.restockJob.deleteMany({ where: { shop } });
+      await tx.payoutCheck.deleteMany({ where: { shop } });
     }
   }, { maxWait: 15_000, timeout: 20_000 });
 }

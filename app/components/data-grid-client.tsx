@@ -1,12 +1,20 @@
-import { useState, useCallback, useRef } from "react";
+import { useMatches } from "react-router";
+import { MasterDetailModule, LicenseManager } from "ag-grid-enterprise";
+import { useState, useCallback, useRef, useMemo } from "react";
 import { AgGridReact } from "ag-grid-react";
-import { AllCommunityModule, type GetRowIdParams } from "ag-grid-community";
+import {
+  AllCommunityModule,
+  type GetRowIdParams,
+  type IDetailCellRendererParams,
+} from "ag-grid-community";
 import { gridTheme } from "./grid-theme";
 import { GridLoadingOverlay } from "./loading-state";
 import type { DataGridProps } from "./data-grid";
 import styles from "./data-grid.module.css";
 export default function DataGridClient<T>({
   rows,
+  renderDetail,
+  isExpandable,
   columns,
   label,
   rowId,
@@ -14,6 +22,29 @@ export default function DataGridClient<T>({
   search = true,
   emptyMessage = "No records match these filters.",
 }: DataGridProps<T>) {
+  const matches = useMatches();
+  const license = matches
+    .map((m) => m.data as { gridLicenseKey?: string } | undefined)
+    .find((d) => d?.gridLicenseKey)?.gridLicenseKey;
+  if (license) LicenseManager.setLicenseKey(license);
+  const gridColumns = useMemo(
+    () =>
+      columns.map((column, index) =>
+        index === 0 && renderDetail
+          ? {
+              ...column,
+              cellRenderer: "agGroupCellRenderer",
+              cellRendererParams: {
+                suppressCount: true,
+                innerRenderer: column.cellRenderer,
+              },
+            }
+          : column,
+      ),
+    [columns, renderDetail],
+  );
+  const detail = ({ data }: IDetailCellRendererParams<T>) =>
+    data ? <div className={styles.detail}>{renderDetail?.(data)}</div> : null;
   const idRef = useRef(rowId);
   idRef.current = rowId;
   const getRowId = useCallback(
@@ -42,10 +73,17 @@ export default function DataGridClient<T>({
       )}
       <div style={{ height, minWidth: 0 }}>
         <AgGridReact<T>
-          modules={[AllCommunityModule]}
+          modules={[AllCommunityModule, MasterDetailModule]}
           theme={gridTheme}
           rowData={rows}
-          columnDefs={columns}
+          columnDefs={gridColumns}
+          masterDetail={Boolean(renderDetail)}
+          isRowMaster={(data) =>
+            Boolean(data && (!isExpandable || isExpandable(data)))
+          }
+          detailCellRenderer={detail}
+          detailRowAutoHeight
+          keepDetailRows
           getRowId={getRowId}
           quickFilterText={query}
           defaultColDef={{
