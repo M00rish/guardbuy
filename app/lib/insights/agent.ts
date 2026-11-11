@@ -18,23 +18,12 @@ import {
   type InsightView,
 } from "./types";
 
-export const ASSISTANT_ERRORS = {
-  rate_limit: "Please wait a few seconds before asking another question.",
-  unavailable:
-    "The GuardBuy assistant is unavailable. Use the grid filters or try again later.",
-  timeout:
-    "The question took too long. Try again or ask a more specific question.",
-} as const;
-export class AssistantRequestError extends Error {
-  constructor(readonly kind: keyof typeof ASSISTANT_ERRORS) {
-    super(ASSISTANT_ERRORS[kind]);
-  }
-}
-export function safeAssistantError(message: string) {
-  return Object.values(ASSISTANT_ERRORS).some((value) => value === message)
-    ? message
-    : ASSISTANT_ERRORS.unavailable;
-}
+import { ASSISTANT_ERRORS, AssistantRequestError } from "./errors";
+export {
+  ASSISTANT_ERRORS,
+  AssistantRequestError,
+  safeAssistantError,
+} from "./errors";
 export type InsightAgentPorts = {
   plan: (prompt: string, signal?: AbortSignal) => Promise<InsightPlan>;
   select: (view: InsightView) => void;

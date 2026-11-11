@@ -16,7 +16,7 @@ import type { StockCheck } from "../inventory/trigger.server";
 const DEFAULT_MODELS = [
   "google:gemini-3.8-flash",
   "openrouter:dots-studio/dots-3-note-preview:free",
-  "openrouter:nvidia/nemotron-3-super-120b-a12b:free",
+  "openrouter:nvidia/nemotron-3.5-super-vl:free",
   "google:gemini-3.5-flash",
 ];
 

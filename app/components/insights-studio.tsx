@@ -1,3 +1,4 @@
+import { assistantFailureKind } from "../lib/insights/errors";
 import {
   useEffect,
   useMemo,
@@ -537,10 +538,14 @@ export default function InsightsStudio({
                   ...(signal ? [signal] : []),
                 ]),
               });
-              if (!response.ok)
+              if (!response.ok) {
+                const failure = await response.json().catch(() => null);
                 throw new AssistantRequestError(
-                  response.status === 429 ? "rate_limit" : "unavailable",
+                  response.status === 429
+                    ? "rate_limit"
+                    : assistantFailureKind(failure?.code),
                 );
+              }
               return InsightPlanSchema.parse(await response.json());
             },
           }),
