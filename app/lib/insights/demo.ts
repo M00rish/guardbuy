@@ -30,7 +30,7 @@ export function demoSnapshot(now = new Date()): InsightsSnapshot {
       status: paid
         ? PAYMENT_LABEL.paid
         : pending
-          ? "Payment submitted · pending"
+          ? PAYMENT_LABEL.pending
           : blocked
             ? "Blocked"
             : kind === 6

@@ -36,7 +36,6 @@ export default function App() {
         <s-link href="/app/rules">Rules &amp; Approvals</s-link>
         <s-link href="/app/deliveries">Deliveries</s-link>
         <s-link href="/app/activity">Activity</s-link>
-        <s-link href="/app/insights">Insights</s-link>
         <s-link href="/app/alerts">Alerts</s-link>
       </s-app-nav>
       <LoadingBar />

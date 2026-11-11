@@ -1,7 +1,10 @@
 import { COPY, APPROVAL_LABEL } from "../lib/wording";
 import { currentProblems } from "../lib/merchant/current-problems";
 import { budgetSummary } from "../lib/payments/status";
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
+import { insightsSnapshot } from "../lib/insights/projection.server";
+import { insightsAiConfigured } from "../lib/insights/planner.server";
+const PurchasingDashboard = lazy(() => import("../components/insights-studio"));
 import type { ActionFunctionArgs, HeadersFunction, LoaderFunctionArgs } from "react-router";
 import { useFetcher, useLoaderData } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
@@ -36,9 +39,26 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const running = ready && agentOn(log);
   const signed = log.filter((e) => e.event.type === "ruleset_signed").at(-1);
   const firstPurchase = log.some((e) => e.event.type === "payout" || e.event.type === "order_captured");
-  const problems = currentProblems(log);
+  const checkedAt = new Date();
+  const totals = spending(log, checkedAt);
+  const problems = currentProblems(log, checkedAt);
 
   return {
+    shop,
+    purchasing: chain.valid
+      ? {
+          snapshot: insightsSnapshot(log, names, checkedAt),
+          licenseKey: process.env.AG_STUDIO_LICENSE_KEY ?? "",
+          gridLicenseKey: process.env.AG_GRID_LICENSE_KEY ?? "",
+          enabled:
+            process.env.NODE_ENV !== "production" ||
+            !!(
+              process.env.AG_STUDIO_LICENSE_KEY &&
+              process.env.AG_GRID_LICENSE_KEY
+            ),
+          aiConfigured: insightsAiConfigured(),
+        }
+      : null,
     ready,
     running,
     paused: ready && !running,
@@ -51,8 +71,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       allowlist: rules.supplierAllowlist.map((id) => names.supplier(id) ?? id),
     },
     signed: signed?.event.type === "ruleset_signed" ? { by: signed.event.ruleSet.signedBy === actor ? "you" : signed.event.ruleSet.signedBy.replace("shopify-staff:", "staff member "), at: signed.event.ruleSet.signedAt } : null,
-    spentCents: spending(log).spentLast7dCents,
-    budget: budgetSummary(spending(log).spentLast7dCents, spending(log).pendingCents, rules?.weeklySpendCapCents ?? 0),
+    spentCents: totals.spentLast7dCents,
+    budget: budgetSummary(totals.spentLast7dCents, totals.pendingCents, rules?.weeklySpendCapCents ?? 0),
     balanceCents,
     waiting: queue.length,
     blocked: { count: score.real.blocked, cents: score.real.blockedCents },
@@ -88,6 +108,8 @@ export default function Home() {
   const d = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const shopify = useAppBridge();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const t = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(t); }, []);
   useEffect(() => {
@@ -209,6 +231,34 @@ export default function Home() {
         </s-section>
       )}
 
+      {d.purchasing &&
+        (!d.purchasing.enabled ? (
+          <s-section>
+            <s-banner tone="info" heading="Purchasing analysis is being set up">
+              Your dashboard will be available when setup is complete.
+            </s-banner>
+          </s-section>
+        ) : mounted ? (
+          <Suspense
+            fallback={
+              <s-section>
+                <s-text>Loading purchasing analysis…</s-text>
+              </s-section>
+            }
+          >
+            <PurchasingDashboard
+              key={`${d.shop}:${d.purchasing.snapshot.checkedAt}`}
+              {...d.purchasing}
+              shop={d.shop}
+              home
+            />
+          </Suspense>
+        ) : (
+          <s-section>
+            <s-text>Loading purchasing analysis…</s-text>
+          </s-section>
+        ))}
+
       {d.ready && (
         <s-section>
           {/* Responsive values are comma-separated, so the column lists must not contain commas themselves */}
@@ -321,6 +371,10 @@ export default function Home() {
   );
 }
 
-export const headers: HeadersFunction = (headersArgs) => boundary.headers(headersArgs);
+export const headers: HeadersFunction = (args) => {
+  const headers = new Headers(boundary.headers(args));
+  headers.set("Cache-Control", "private, no-store");
+  return headers;
+};
 
 export { PageError as ErrorBoundary } from "../components/page-error";

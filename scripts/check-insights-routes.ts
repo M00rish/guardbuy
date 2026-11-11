@@ -10,6 +10,7 @@ const root = resolve(import.meta.dirname, ".."),
 const priorEnv = {
   node: process.env.NODE_ENV,
   license: process.env.AG_STUDIO_LICENSE_KEY,
+  gridLicense: process.env.AG_GRID_LICENSE_KEY,
 };
 const fixtures = globalThis as typeof globalThis & {
   __insightReads?: string[];
@@ -23,7 +24,7 @@ try {
   await build({
     stdin: {
       contents:
-        "export {loader,action} from './app/routes/app.insights'; export * as resource from './app/routes/app.insights.plan';",
+        "export {loader,action} from './app/routes/app.insights'; export * as home from './app/routes/app._index'; export * as resource from './app/routes/app.insights.plan';",
       resolveDir: root,
       loader: "ts",
     },
@@ -40,6 +41,10 @@ try {
             path: "auth",
             namespace: "fixture",
           }));
+          b.onResolve({ filter: /audit\/feed.server$/ }, () => ({
+            path: "feed",
+            namespace: "fixture",
+          }));
           b.onResolve({ filter: /audit\/log.server$/ }, () => ({
             path: "audit",
             namespace: "fixture",
@@ -48,7 +53,7 @@ try {
             path: "names",
             namespace: "fixture",
           }));
-          b.onResolve({ filter: /insights\/planner.server$/ }, () => ({
+          b.onResolve({ filter: /(^|\/)planner.server$/ }, () => ({
             path: "planner",
             namespace: "fixture",
           }));
@@ -56,13 +61,33 @@ try {
             path: "ui",
             namespace: "fixture",
           }));
+          b.onResolve(
+            { filter: /agent\/(approvals|scoreboard|restock).server$/ },
+            ({ path }) => ({
+              path: path.includes("restock")
+                ? "restock"
+                : path.includes("scoreboard")
+                  ? "score"
+                  : "approvals",
+              namespace: "fixture",
+            }),
+          );
+          b.onResolve({ filter: /suppliers\/directory.server$/ }, () => ({
+            path: "directory",
+            namespace: "fixture",
+          }));
           b.onLoad({ filter: /.*/, namespace: "fixture" }, ({ path }) => ({
             loader: "js",
             contents: (
               {
+                feed: `export function toFeed(){return []}`,
                 auth: `export async function adminWithStaff(request){if(request.headers.get('x-auth')!=='verified')throw new Response('Unauthorized',{status:401});if(request.headers.get('x-staff')==='missing')throw new Response('Staff required',{status:403});return{session:{shop:request.headers.get('x-shop')||'shop-a'},actor:request.headers.get('x-staff')||'staff-a'}}`,
                 audit: `export async function appendAudit(){throw Error('Unexpected audit write')}export async function appendAuditWhen(){throw Error('Unexpected audit write')}export async function verifyChain(shop){return{valid:!globalThis.__brokenInsightChain,length:0}}export async function auditEntries(shop){globalThis.__insightReads.push(shop);return[];}`,
-                names: `export async function feedNames(shop){globalThis.__insightReads.push('names:'+shop);return{product:()=> 'Scoped product',supplier:()=> 'Scoped supplier'}}`,
+                restock: `export function currentRuleSet(){return null} export function spending(){return {spentLast7dCents:0,pendingCents:0}} export function agentOn(){return false} export async function setAgentState(){throw Error('Unexpected agent command')}`,
+                score: `export async function scoreboard(){return {real:{blocked:0,blockedCents:0},attacks:{blocked:0,flagged:0}}}`,
+                approvals: `export async function approvalQueue(){return []}`,
+                directory: `export async function setupStatus(){return {managedProducts:0,suppliers:0,managedWithSuppliers:0}} export async function setManaged(){throw Error('Unexpected product command')}`,
+                names: `export async function cachedBalanceCents(){return null} export async function productOverview(){return []} export function productStatus(){return {}} export async function feedNames(shop){globalThis.__insightReads.push('names:'+shop);return{product:()=> 'Scoped product',supplier:()=> 'Scoped supplier'}}`,
                 planner: `export function insightsAiConfigured(){return true}export async function planInsightView(prompt){globalThis.__insightPlans.push(prompt);return{view:'pending',refused:false}}`,
                 ui: `export default function Insights(){return null}`,
               } as Record<string, string>
@@ -93,6 +118,10 @@ try {
     (e: unknown) => e instanceof Response && e.status === 401,
   );
   await assert.rejects(
+    routes.home.loader(args(new Request("https://local.test/app"))),
+    (e: unknown) => e instanceof Response && e.status === 401,
+  );
+  await assert.rejects(
     routes.action(args(req({}, { "x-staff": "missing" }))),
     (e: unknown) => e instanceof Response && e.status === 403,
   );
@@ -101,29 +130,46 @@ try {
     0,
     "authorization precedes all merchant data reads",
   );
-  const loaded = await routes.loader(
+  const loaded = await routes.home.loader(
     args(
       new Request("https://local.test/app/insights", {
         headers: { "x-auth": "verified", "x-shop": "shop-b" },
       }),
     ),
   );
-  assert.equal(loaded.snapshot.rows.length, 0);
+  assert.equal(loaded.purchasing.snapshot.rows.length, 0);
+  assert.equal(loaded.shop, "shop-b");
   assert.deepEqual(
     fixtures.__insightReads,
     ["shop-b", "names:shop-b"],
     "both log and names are scoped to authenticated shop",
   );
-  fixtures.__brokenInsightChain = true;
-  await assert.rejects(
-    routes.loader(
-      args(
-        new Request("https://local.test/app/insights", {
-          headers: { "x-auth": "verified" },
-        }),
+  const bookmark = await routes.loader(
+    args(
+      new Request(
+        "https://local.test/app/insights?host=abc&shop=shop-b&embedded=1&id_token=secret",
+        { headers: { "x-auth": "verified" } },
       ),
     ),
-    (e: unknown) => e instanceof Response && e.status === 409,
+  );
+  assert.equal(bookmark.status, 302);
+  assert.equal(
+    bookmark.headers.get("Location"),
+    "/app?host=abc&shop=shop-b&embedded=1",
+  );
+  assert.equal(bookmark.headers.get("Cache-Control"), "private, no-store");
+  fixtures.__brokenInsightChain = true;
+  const broken = await routes.home.loader(
+    args(
+      new Request("https://local.test/app", {
+        headers: { "x-auth": "verified" },
+      }),
+    ),
+  );
+  assert.equal(
+    broken.purchasing,
+    null,
+    "unverified audit data cannot enter dashboard while Home warnings remain usable",
   );
   fixtures.__brokenInsightChain = false;
   assert.equal(
@@ -164,7 +210,7 @@ try {
   );
   process.env.NODE_ENV = "production";
   delete process.env.AG_STUDIO_LICENSE_KEY;
-  const unlicensed = await routes.loader(
+  const unlicensed = await routes.home.loader(
     args(
       new Request("https://local.test/app/insights", {
         headers: { "x-auth": "verified" },
@@ -172,7 +218,7 @@ try {
     ),
   );
   assert.equal(
-    unlicensed.enabled,
+    unlicensed.purchasing.enabled,
     false,
     "hosted Studio waits for configured deployment licence",
   );
@@ -181,6 +227,30 @@ try {
     503,
   );
   assert.equal(fixtures.__insightPlans.length, 1);
+  process.env.AG_STUDIO_LICENSE_KEY = "test-studio-config";
+  delete process.env.AG_GRID_LICENSE_KEY;
+  const gridUnlicensed = await routes.home.loader(
+    args(
+      new Request("https://local.test/app", {
+        headers: { "x-auth": "verified" },
+      }),
+    ),
+  );
+  assert.equal(
+    gridUnlicensed.purchasing.enabled,
+    false,
+    "Studio key alone does not enable custom Enterprise grid",
+  );
+  process.env.AG_GRID_LICENSE_KEY = "test-grid-config";
+  const licensed = await routes.home.loader(
+    args(
+      new Request("https://local.test/app", {
+        headers: { "x-auth": "verified" },
+      }),
+    ),
+  );
+  assert.equal(licensed.purchasing.enabled, true);
+
   // Real React Router request handling (not just calling action directly): a UI
   // document POST renders HTML, while the component-less endpoint returns JSON.
   process.env.NODE_ENV = "test";
@@ -200,7 +270,7 @@ try {
           id: "insights",
           parentId: "root",
           path: "app/insights",
-          module: { default: () => null, action: routes.action },
+          module: { loader: routes.loader, action: routes.action },
         },
         plan: {
           id: "plan",
@@ -235,12 +305,13 @@ try {
       },
       body: JSON.stringify({ prompt: "Show pending purchases" }),
     });
-  const document = await handler(httpReq("/app/insights", "document-test"));
-  assert.match(
-    document.headers.get("content-type") ?? "",
-    /text\/html/,
-    "old fetch target renders a UI document",
+  const redirected = await handler(
+    new Request("https://local.test/app/insights", {
+      headers: { "x-auth": "verified" },
+    }),
   );
+  assert.equal(redirected.status, 302);
+  assert.equal(redirected.headers.get("Location"), "/app");
   const json = await handler(httpReq("/app/insights/plan", "resource-test"));
   assert.equal(json.status, 200);
   assert.match(json.headers.get("content-type") ?? "", /application\/json/);
@@ -255,13 +326,16 @@ try {
     "resource endpoint retains staff authorization",
   );
   console.log(
-    "PASS insights routes: authentication/staff boundary, shop isolation, chain refusal, bounded strict JSON, no client tools/data, model prompt isolation, rate limit and hosted licence gate.",
+    "PASS insights routes: authentication/staff boundary, shop isolation, Home migration, bookmark redirect, chain refusal, bounded strict JSON, no client tools/data, model prompt isolation, rate limit and hosted licence gate.",
   );
 } finally {
   if (priorEnv.node === undefined) delete process.env.NODE_ENV;
   else process.env.NODE_ENV = priorEnv.node;
   if (priorEnv.license === undefined) delete process.env.AG_STUDIO_LICENSE_KEY;
   else process.env.AG_STUDIO_LICENSE_KEY = priorEnv.license;
+  if (priorEnv.gridLicense === undefined)
+    delete process.env.AG_GRID_LICENSE_KEY;
+  else process.env.AG_GRID_LICENSE_KEY = priorEnv.gridLicense;
   delete fixtures.__insightReads;
   delete fixtures.__insightPlans;
   delete fixtures.__brokenInsightChain;

@@ -1,14 +1,22 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import { Link } from "react-router";
-import { AgGridReact, type CustomCellRendererProps } from "ag-grid-react";
+import {
+  AgGridProvider,
+  AgGridReact,
+  type CustomCellRendererProps,
+} from "ag-grid-react";
 import { AllEnterpriseModule } from "ag-grid-enterprise";
 import { AgChartsEnterpriseModule } from "ag-charts-enterprise";
 import {
   themeQuartz,
   type ColDef,
   type GridApi,
-  type ColumnState,
-  type FilterModel,
   type IDetailCellRendererParams,
 } from "ag-grid-community";
 import type {
@@ -16,25 +24,23 @@ import type {
   AgWidgetDataFormat,
   AgWidgetParams,
   AgWidgetDataQuery,
+  AgDataHandleDefinition,
   AgWidgetRowsResult,
 } from "ag-studio";
 import type { InsightRow } from "../lib/insights/types";
-import type { InsightAnalysis } from "../lib/insights/plan";
 import { usd } from "../lib/format";
+import {
+  parseSavedGridView,
+  supplierProposalHistory,
+  type PurchaseGridStore,
+} from "../lib/insights/grid-view";
 import styles from "./purchase-analysis-grid.module.css";
 
 export type PurchaseGridData = AgWidgetData<
   { purchase: { id: string }[] },
   AgWidgetDataFormat<Record<string, never>>
 > & { type: "guardbuy-purchases" };
-export type PurchaseGridContext = {
-  rows: InsightRow[];
-  allRows: InsightRow[];
-  analysis: InsightAnalysis;
-  demo: boolean;
-  storageKey: string;
-  checkedAt: string;
-};
+export type PurchaseGridContext = { purchaseStore: PurchaseGridStore };
 const modules = [AllEnterpriseModule.with(AgChartsEnterpriseModule)];
 const gridTheme = themeQuartz.withParams({
   accentColor: "#007f65",
@@ -55,7 +61,7 @@ function StatusCell({ value }: CustomCellRendererProps<InsightRow>) {
   const tone =
     value === "Paid"
       ? "paid"
-      : String(value).includes("Blocked")
+      : /blocked|failed|returned/i.test(String(value))
         ? "blocked"
         : "waiting";
   return (
@@ -68,6 +74,7 @@ function MoneyCell({ value, data }: CustomCellRendererProps<InsightRow>) {
     <div className={styles.money}>
       <span>{usd(Math.round(value * 100))}</span>
       <i
+        aria-hidden="true"
         style={{
           width: `${Math.min(100, data?.amount ? (value / data.amount) * 100 : 0)}%`,
         }}
@@ -78,7 +85,10 @@ function MoneyCell({ value, data }: CustomCellRendererProps<InsightRow>) {
 function Detail({
   data,
   context,
-}: IDetailCellRendererParams<InsightRow, InsightRow, PurchaseGridContext>) {
+}: Omit<IDetailCellRendererParams<InsightRow, InsightRow>, "context"> & {
+  context: { demo: boolean };
+}) {
+  if (!data) return null;
   return (
     <div className={styles.detail}>
       <div>
@@ -111,8 +121,14 @@ function Detail({
 export default function PurchaseAnalysisGrid({
   widgetApi,
   dataMapping,
-  context,
+  context: initialContext,
 }: AgWidgetParams<PurchaseGridData, unknown, PurchaseGridContext>) {
+  const context = useSyncExternalStore(
+    initialContext.purchaseStore.subscribe,
+    initialContext.purchaseStore.getSnapshot,
+  );
+  // A saved layout belongs to this shop, data mode AND analysis preset.
+  const viewKey = `${context.storageKey}:${context.analysis}:v1`;
   const [ids, setIds] = useState<Set<number> | null>(null);
   const [error, setError] = useState(false);
   const [search, setSearch] = useState("");
@@ -120,16 +136,23 @@ export default function PurchaseAnalysisGrid({
   const grid = useRef<GridApi<InsightRow>>();
   const fields = dataMapping.purchase;
   useEffect(() => {
+    setIds(null);
     if (!fields?.length) return;
     const handle = widgetApi.getDataHandle<{
-      purchases: { query: AgWidgetDataQuery };
+      purchases: AgDataHandleDefinition<AgWidgetDataQuery>;
     }>();
     handle.open(({ results }) => {
-      const result = results[0]?.response.results as
-        AgWidgetRowsResult | undefined;
+      const result = results.find((result) => result.key === "purchases")
+        ?.response.results as AgWidgetRowsResult | undefined;
       if (!result) return;
       setError(!!result.metadata?.error);
-      setIds(new Set(result.rows.map((row) => Number(row[fields[0].key]))));
+      setIds(
+        new Set(
+          result.metadata?.error
+            ? []
+            : result.rows.map((row) => Number(row[fields[0].key])),
+        ),
+      );
     });
     handle.set("purchases", {
       query: { fields },
@@ -141,23 +164,10 @@ export default function PurchaseAnalysisGrid({
     () => context.rows.filter((row) => ids?.has(row.purchase)),
     [context.rows, ids],
   );
-  const history = useMemo(() => {
-    const map = new Map<string, number[]>();
-    const last = Date.parse(context.checkedAt.slice(0, 10) + "T00:00:00Z");
-    for (const row of context.allRows) {
-      const day =
-        27 -
-        Math.floor(
-          (last - Date.parse(row.proposedAt.slice(0, 10) + "T00:00:00Z")) /
-            86400000,
-        );
-      if (day < 0 || day > 27) continue;
-      const values = map.get(row.supplier) ?? Array<number>(28).fill(0);
-      values[day] += row.amount;
-      map.set(row.supplier, values);
-    }
-    return map;
-  }, [context.allRows, context.checkedAt]);
+  const history = useMemo(
+    () => supplierProposalHistory(context.allRows, context.checkedAt),
+    [context.allRows, context.checkedAt],
+  );
   const columns = useMemo<ColDef<InsightRow>[]>(
     () => [
       {
@@ -166,7 +176,12 @@ export default function PurchaseAnalysisGrid({
         pinned: "left",
         width: 150,
         cellRenderer: "agGroupCellRenderer",
-        valueFormatter: (p) => (p.value == null ? "" : `#${p.value}`),
+        valueFormatter: (p) =>
+          p.node?.footer
+            ? "Total (filtered)"
+            : p.value == null
+              ? ""
+              : `#${p.value}`,
         chartDataType: "excluded",
       },
       {
@@ -186,7 +201,7 @@ export default function PurchaseAnalysisGrid({
       },
       {
         field: "status",
-        headerName: "Payment status",
+        headerName: "Purchase status",
         width: 220,
         cellRenderer: StatusCell,
         enableRowGroup: true,
@@ -200,6 +215,9 @@ export default function PurchaseAnalysisGrid({
         type: "numericColumn",
         enableValue: true,
         aggFunc: "sum",
+        allowedAggFuncs: ["sum"],
+        cellClass: "currency",
+        useValueFormatterForExport: false,
         valueFormatter: (p) =>
           typeof p.value === "number" ? usd(Math.round(p.value * 100)) : "",
         chartDataType: "series",
@@ -211,6 +229,9 @@ export default function PurchaseAnalysisGrid({
         type: "numericColumn",
         enableValue: true,
         aggFunc: "sum",
+        allowedAggFuncs: ["sum"],
+        cellClass: "currency",
+        useValueFormatterForExport: false,
         cellRenderer: MoneyCell,
         valueFormatter: (p) =>
           typeof p.value === "number" ? usd(Math.round(p.value * 100)) : "",
@@ -223,6 +244,9 @@ export default function PurchaseAnalysisGrid({
         type: "numericColumn",
         enableValue: true,
         aggFunc: "sum",
+        allowedAggFuncs: ["sum"],
+        cellClass: "currency",
+        useValueFormatterForExport: false,
         valueFormatter: (p) =>
           typeof p.value === "number" ? usd(Math.round(p.value * 100)) : "",
         chartDataType: "series",
@@ -233,8 +257,13 @@ export default function PurchaseAnalysisGrid({
         width: 200,
         sortable: false,
         filter: false,
-        valueGetter: (p) =>
-          history.get(p.data?.supplier ?? String(p.node?.key)) ?? [],
+        valueGetter: (p) => {
+          let node = p.node;
+          while (node?.group && node.field !== "supplier") node = node.parent;
+          return history.get(p.data?.supplier ?? String(node?.key ?? "")) ?? [];
+        },
+        tooltipValueGetter: () =>
+          "28 UTC days of supplier proposal value, including today; independent of view filters.",
         cellRenderer: "agSparklineCellRenderer",
         cellRendererParams: {
           sparklineOptions: {
@@ -287,39 +316,38 @@ export default function PurchaseAnalysisGrid({
     });
   };
   useEffect(() => {
-    if (grid.current) applyAnalysis(grid.current);
+    if (grid.current && !grid.current.isDestroyed())
+      applyAnalysis(grid.current);
     setSearch("");
     setNotice("");
   }, [context.analysis]); // eslint-disable-line react-hooks/exhaustive-deps
   const save = () => {
     try {
       sessionStorage.setItem(
-        context.storageKey,
+        viewKey,
         JSON.stringify({
+          version: 1,
           columns: grid.current?.getColumnState(),
           filters: grid.current?.getFilterModel(),
           pivot: grid.current?.isPivotMode(),
           search,
         }),
       );
-      setNotice("View saved for this browser session.");
+      setNotice(
+        "View saved for this analysis, store and data mode in this browser session.",
+      );
     } catch {
       setNotice("This browser could not save the view.");
     }
   };
   const restore = () => {
     try {
-      const raw = sessionStorage.getItem(context.storageKey);
+      const raw = sessionStorage.getItem(viewKey);
       if (!raw) {
         setNotice("Save a view first.");
         return;
       }
-      const saved = JSON.parse(raw) as {
-        columns: ColumnState[];
-        filters: FilterModel;
-        pivot: boolean;
-        search: string;
-      };
+      const saved = parseSavedGridView(raw);
       grid.current?.setGridOption("pivotMode", saved.pivot);
       grid.current?.applyColumnState({
         state: saved.columns,
@@ -339,6 +367,7 @@ export default function PurchaseAnalysisGrid({
           Find a purchase
           <input
             value={search}
+            maxLength={800}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Product, supplier or status…"
           />
@@ -347,13 +376,31 @@ export default function PurchaseAnalysisGrid({
           <button
             type="button"
             onClick={() => {
-              grid.current?.createRangeChart({
-                cellRange: { columns: ["supplier", "settled", "reserved"] },
+              const api = grid.current;
+              const range = api?.getCellRanges()?.at(-1);
+              if (
+                !range?.startRow ||
+                !range.endRow ||
+                !range.columns.some((col) =>
+                  ["amount", "settled", "reserved"].includes(col.getColId()),
+                )
+              ) {
+                setNotice(
+                  "Select a range including numeric cells, then chart the selection.",
+                );
+                return;
+              }
+              api?.createRangeChart({
+                cellRange: {
+                  rowStartIndex: range.startRow.rowIndex,
+                  rowEndIndex: range.endRow.rowIndex,
+                  columns: range.columns,
+                },
                 chartType: "groupedColumn",
               });
             }}
           >
-            Chart this view
+            Chart selection
           </button>
           <button type="button" onClick={save}>
             Save view
@@ -365,6 +412,9 @@ export default function PurchaseAnalysisGrid({
             type="button"
             onClick={() =>
               grid.current?.exportDataAsExcel({
+                columnKeys: grid.current
+                  .getAllDisplayedColumns()
+                  .filter((column) => column.getColId() !== "history"),
                 fileName: context.demo
                   ? "guardbuy-demo.xlsx"
                   : "guardbuy-purchases.xlsx",
@@ -378,7 +428,9 @@ export default function PurchaseAnalysisGrid({
       <div className={styles.hint}>
         Expand a purchase for its decision. Drag column headings to group.
         Select numeric cells for totals, or right-click a range to chart it.
-        Trends show 28 days of proposal value, not sales.
+        Trends show 28 UTC days of supplier proposal value, independent of
+        filters. Excel exports filtered, sorted rows and the current
+        grouping/pivot; it is not a payment statement.
       </div>
       {notice && (
         <div role="status" className={styles.hint}>
@@ -391,67 +443,77 @@ export default function PurchaseAnalysisGrid({
         </div>
       ) : (
         <div className={styles.grid}>
-          <AgGridReact<InsightRow>
+          <AgGridProvider
             modules={modules}
-            theme={gridTheme}
-            rowData={rows}
-            loading={ids === null}
-            columnDefs={columns}
-            context={context}
-            onGridReady={({ api }) => {
-              grid.current = api;
-              applyAnalysis(api);
-            }}
-            getRowId={(p) => String(p.data.purchase)}
-            defaultColDef={{
-              sortable: true,
-              filter: true,
-              resizable: true,
-              minWidth: 100,
-            }}
-            quickFilterText={search}
-            masterDetail
-            detailCellRenderer={Detail}
-            detailRowHeight={240}
-            keepDetailRows
-            rowGroupPanelShow="always"
-            groupDefaultExpanded={0}
-            autoGroupColumnDef={{
-              headerName: "Supplier / product",
-              minWidth: 250,
-              pinned: "left",
-            }}
-            cellSelection
-            enableCharts
-            animateRows
-            sideBar={{
-              toolPanels: ["columns", "filters"],
-              defaultToolPanel: undefined,
-            }}
-            statusBar={{
-              statusPanels: [
+            licenseKey={context.gridLicenseKey || undefined}
+          >
+            <AgGridReact<InsightRow>
+              theme={gridTheme}
+              rowData={rows}
+              loading={ids === null}
+              columnDefs={columns}
+              context={context}
+              onGridReady={({ api }) => {
+                grid.current = api;
+                applyAnalysis(api);
+              }}
+              onGridPreDestroyed={({ api }) => {
+                if (grid.current === api) grid.current = undefined;
+              }}
+              getRowId={(p) => String(p.data.purchase)}
+              defaultColDef={{
+                sortable: true,
+                filter: true,
+                resizable: true,
+                minWidth: 100,
+              }}
+              quickFilterText={search}
+              masterDetail
+              detailCellRenderer={Detail}
+              detailRowHeight={240}
+              keepDetailRows
+              rowGroupPanelShow="always"
+              groupDefaultExpanded={0}
+              autoGroupColumnDef={{
+                headerName: "Supplier / product",
+                minWidth: 250,
+                pinned: "left",
+              }}
+              cellSelection
+              enableCharts
+              animateRows
+              sideBar={{
+                toolPanels: ["columns", "filters"],
+                defaultToolPanel: undefined,
+              }}
+              statusBar={{
+                statusPanels: [
+                  {
+                    statusPanel: "agTotalAndFilteredRowCountComponent",
+                    align: "left",
+                  },
+                  { statusPanel: "agAggregationComponent", align: "right" },
+                ],
+              }}
+              grandTotalRow="bottom"
+              suppressStickyTotalRow
+              suppressAggFuncInHeader
+              excelStyles={[
                 {
-                  statusPanel: "agTotalAndFilteredRowCountComponent",
-                  align: "left",
+                  id: "currency",
+                  numberFormat: { format: '"$"#,##0.00' },
+                  dataType: "Number",
                 },
-                { statusPanel: "agAggregationComponent", align: "right" },
-              ],
-            }}
-            grandTotalRow="pinnedBottom"
-            suppressAggFuncInHeader
-            defaultExcelExportParams={{
-              columnKeys: [
-                "purchase",
-                "product",
-                "supplier",
-                "status",
-                "amount",
-                "settled",
-                "reserved",
-                "proposedAt",
-              ],
-            }}
-          />
+              ]}
+              defaultExcelExportParams={{
+                exportedRows: "filteredAndSorted",
+                autoConvertFormulas: false,
+                sheetName: context.demo
+                  ? "Fictional demo"
+                  : "Recorded purchases",
+              }}
+            />
+          </AgGridProvider>
         </div>
       )}
     </div>

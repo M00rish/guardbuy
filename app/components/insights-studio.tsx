@@ -1,7 +1,15 @@
-import { useEffect, useMemo, useState, useRef, useCallback } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useRef,
+  useCallback,
+  useLayoutEffect,
+} from "react";
 import PurchaseAnalysisGrid, {
   type PurchaseGridData,
 } from "./purchase-analysis-grid";
+import { createPurchaseGridStore } from "../lib/insights/grid-view";
 import { demoSnapshot } from "../lib/insights/demo";
 import { ANALYSES, type InsightAnalysis } from "../lib/insights/plan";
 import { useAppBridge } from "@shopify/app-bridge-react";
@@ -17,9 +25,6 @@ import {
   studioTheme,
   type AgCoreDefaultRegistry,
   type AgReportState,
-  type AgWidgetData,
-  type AgWidgetDataFormat,
-  type AgWidgetParams,
   type AgAiHarnessSetup,
   type AgStudioApi,
   type AgDataSourcesDefinition,
@@ -37,62 +42,14 @@ import { readableTime, usd } from "../lib/format";
 import { Metric } from "./ui";
 import styles from "./insights.module.css";
 
-type BudgetData = AgWidgetData<
-  Record<string, never>,
-  AgWidgetDataFormat<Record<string, never>>
-> & { type: "guardbuy-budget" };
-type BudgetDefinition = AgWidgetDefinition<"guardbuy-budget", BudgetData>;
 interface GuardRegistry extends Omit<AgCoreDefaultRegistry, "widgets"> {
   widgets: readonly (
     | AgCoreDefaultRegistry["widgets"][number]
-    | BudgetDefinition
     | AgWidgetDefinition<"guardbuy-purchases", PurchaseGridData>
   )[];
 }
-function BudgetWidget({
-  context,
-}: AgWidgetParams<
-  BudgetData,
-  unknown,
-  { summary: InsightsSnapshot["summary"] }
->) {
-  const s = context.summary,
-    committed = s.spentCents + s.reservedCents;
-  return (
-    <div className={styles.budget}>
-      <strong>Spending guardrail</strong>
-      <span className={styles.big}>{usd(s.remainingCents)} remaining</span>
-      <progress
-        aria-label="Committed share of 7-day spending cap"
-        value={Math.min(committed, s.capCents)}
-        max={Math.max(1, s.capCents)}
-      />
-      <span>
-        {usd(s.spentCents)} spent + {usd(s.reservedCents)} reserved
-      </span>
-      <span>
-        {s.capCents
-          ? `${usd(s.capCents)} 7-day spending cap`
-          : "No spending rules signed"}
-        {s.overCents ? ` · ${usd(s.overCents)} over cap` : ""}
-      </span>
-      <span className={styles.note}>
-        Store totals; purchase filters do not change the guardrail.
-      </span>
-    </div>
-  );
-}
 const widgets = createWidgets<GuardRegistry>({
   additionalTypes: [
-    {
-      id: "guardbuy-budget",
-      label: "Spending guardrail",
-      comp: BudgetWidget,
-      dataMapping: {},
-      form: (p) => p.createDefaults({ dataMappingItems: [] }),
-      defaultSize: { width: 420, height: 230 },
-      minSize: { width: 260, height: 200 },
-    },
     {
       id: "guardbuy-purchases",
       label: "Purchase explorer",
@@ -118,7 +75,7 @@ const ANALYSIS_LABELS = {
   suppliers: "Supplier comparison",
   status: "Status pivot",
 };
-function analysisWidget(_analysis: InsightAnalysis): PurchaseGridData {
+function analysisWidget(): PurchaseGridData {
   return {
     type: "guardbuy-purchases",
     dataMapping: { purchase: [{ id: "purchases.purchase" }] },
@@ -145,7 +102,6 @@ const desktopState: AgReportState<GuardRegistry> = {
     {
       id: "guardbuy",
       widgets: {
-        guardrail: { type: "guardbuy-budget", dataMapping: {} },
         outcomes: {
           type: "column-chart-grouped",
           dataMapping: {
@@ -184,12 +140,11 @@ const desktopState: AgReportState<GuardRegistry> = {
             },
           },
         },
-        purchases: analysisWidget("purchases"),
+        purchases: analysisWidget(),
       },
       widgetLayout: {
-        guardrail: { xTrack: 0, yTrack: 34, xSpan: 8, ySpan: 14 },
-        outcomes: { xTrack: 8, yTrack: 34, xSpan: 16, ySpan: 14 },
-        trend: { xTrack: 0, yTrack: 48, xSpan: 24, ySpan: 15 },
+        outcomes: { xTrack: 0, yTrack: 34, xSpan: 10, ySpan: 15 },
+        trend: { xTrack: 10, yTrack: 34, xSpan: 14, ySpan: 15 },
         purchases: { xTrack: 0, yTrack: 0, xSpan: 24, ySpan: 34 },
       },
     },
@@ -198,12 +153,14 @@ const desktopState: AgReportState<GuardRegistry> = {
 export default function InsightsStudio({
   snapshot: liveSnapshot,
   licenseKey,
+  gridLicenseKey,
   aiConfigured,
   shop = "preview",
   home = false,
 }: {
   snapshot: InsightsSnapshot;
   licenseKey: string;
+  gridLicenseKey: string;
   aiConfigured: boolean;
   shop?: string;
   home?: boolean;
@@ -229,6 +186,7 @@ export default function InsightsStudio({
     const api = studioApi.current;
     if (!api) return;
     const state = api.getState();
+    if (!state.pages.some((page) => page.crossFilter || page.filter)) return;
     api.setState({
       ...state,
       pages: state.pages.map((page) => ({
@@ -238,21 +196,13 @@ export default function InsightsStudio({
       })),
     });
   }, []);
-  const analyze = useCallback((next: InsightAnalysis) => {
-    setAnalysis(next);
-    const api = studioApi.current;
-    if (!api) return;
-    const state = api.getState();
-    api.setState({
-      ...state,
-      pages: state.pages.map((page) => ({
-        ...page,
-        crossFilter: undefined,
-        filter: undefined,
-        widgets: { ...page.widgets, purchases: analysisWidget(next) },
-      })),
-    });
-  }, []);
+  const analyze = useCallback(
+    (next: InsightAnalysis) => {
+      setAnalysis(next);
+      resetLinked();
+    },
+    [resetLinked],
+  );
   const [view, setView] = useState<InsightView>("all");
   const shopify = useAppBridge();
   const [narrow, setNarrow] = useState(
@@ -272,9 +222,8 @@ export default function InsightsStudio({
             pages: desktopState.pages.map((page) => ({
               ...page,
               widgetLayout: {
-                guardrail: { xTrack: 0, yTrack: 36, xSpan: 24, ySpan: 12 },
-                outcomes: { xTrack: 0, yTrack: 48, xSpan: 24, ySpan: 15 },
-                trend: { xTrack: 0, yTrack: 63, xSpan: 24, ySpan: 15 },
+                outcomes: { xTrack: 0, yTrack: 36, xSpan: 24, ySpan: 15 },
+                trend: { xTrack: 0, yTrack: 51, xSpan: 24, ySpan: 15 },
                 purchases: { xTrack: 0, yTrack: 0, xSpan: 24, ySpan: 36 },
               },
             })),
@@ -340,7 +289,7 @@ export default function InsightsStudio({
   );
   const context = useMemo(
     () => ({
-      summary: snapshot.summary,
+      gridLicenseKey,
       rows: shown,
       allRows: snapshot.rows,
       analysis,
@@ -348,22 +297,31 @@ export default function InsightsStudio({
       checkedAt: snapshot.checkedAt,
       storageKey: `guardbuy-grid:${shop}:${demo ? "demo" : "live"}`,
     }),
-    [snapshot, shown, analysis, demo, shop],
+    [snapshot, shown, analysis, demo, shop, gridLicenseKey],
   );
+  const [purchaseStore] = useState(() => createPurchaseGridStore(context));
+  useLayoutEffect(
+    () => purchaseStore.update(context),
+    [purchaseStore, context],
+  );
+  const widgetContext = useMemo(() => ({ purchaseStore }), [purchaseStore]);
+  // The AI harness is initial-only too: callbacks must read current date-filtered rows.
+  const latest = useRef({ datedRows, shopify });
+  latest.current = { datedRows, shopify };
   const ai = useMemo<AgAiHarnessSetup>(
     () =>
       ({ api }) =>
         createAiHarness(api as AgStudioApi, () => ({
           agents: [
             createInsightsAgent(api as AgStudioApi, {
-              rows: () => datedRows,
+              rows: () => latest.current.datedRows,
               select: (next) => {
                 setView(next);
                 resetLinked();
               },
               analyze,
               plan: async (prompt, signal) => {
-                const token = await shopify.idToken();
+                const token = await latest.current.shopify.idToken();
                 const response = await fetch("/app/insights/plan", {
                   method: "POST",
                   headers: {
@@ -394,7 +352,7 @@ export default function InsightsStudio({
             },
           ],
         })),
-    [datedRows, shopify, analyze, resetLinked],
+    [analyze, resetLinked],
   );
   return (
     <AgStudioProvider
@@ -427,10 +385,11 @@ export default function InsightsStudio({
           <s-banner heading="Demo data · fictional purchases" tone="info">
             64 example purchases across four suppliers. This does not create
             products, submit payments or change store records. Return to live
-            data to inspect your store.
+            data to inspect your store. Home’s status and budget totals above
+            remain live.
           </s-banner>
         )}
-        {(!home || demo) && (
+        {!home && (
           <s-section>
             <div className={styles.metrics}>
               <Metric
@@ -473,7 +432,7 @@ export default function InsightsStudio({
                 </button>
               ))}
               <button type="button" onClick={resetLinked}>
-                Reset chart filters{linked ? " · active" : ""}
+                Reset chart filters{linked ? " · selection active" : ""}
               </button>
             </div>
             <div className={styles.filters} aria-label="Date range">
@@ -540,7 +499,9 @@ export default function InsightsStudio({
                 key={`${demo ? "demo" : "live"}-${narrow ? "mobile" : "desktop"}`}
                 onStudioReady={({ api }) => {
                   studioApi.current = api as AgStudioApi<GuardRegistry>;
-                  analyze(analysis);
+                }}
+                onStudioPreDestroyed={({ api }) => {
+                  if (studioApi.current === api) studioApi.current = undefined;
                 }}
                 onStateUpdated={({ state }) =>
                   setLinked(
@@ -552,7 +513,7 @@ export default function InsightsStudio({
                   )
                 }
                 data={data}
-                context={context}
+                context={widgetContext}
                 initialState={initialState}
                 widgets={widgets}
                 theme={theme}

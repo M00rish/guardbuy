@@ -60,7 +60,7 @@ export function createInsightsAgent(
           )
           .join("; ");
         return ctx.success(
-          `${analysis === "suppliers" ? "Supplier comparison opened: expand a supplier to explore its products. " : analysis === "status" ? "Supplier-by-status pivot opened. Values show proposal value, not settled spend. " : ""}${describeInsightView(ports.rows(), view)}${analysis === "suppliers" && ranking ? ` Leading suppliers in the selected date range: ${ranking}.` : ""}`,
+          `${analysis === "suppliers" ? "Supplier comparison opened: expand a supplier to explore its products. " : analysis === "status" ? "Supplier-by-status pivot opened. Proposal value, settled spend and reserved funds are shown separately. " : ""}${describeInsightView(ports.rows(), view)}${analysis === "suppliers" && ranking ? ` Leading suppliers in the selected date range: ${ranking}.` : ""}`,
         );
       },
     });

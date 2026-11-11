@@ -29,7 +29,7 @@
   outline-offset: 2px;
 }
 .studio {
-  height: 1320px;
+  height: 1060px;
   min-width: 0;
   border: 1px solid #ddd;
   border-radius: 12px;
@@ -64,7 +64,7 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .studio {
-    height: 1640px;
+    height: 1440px;
   }
   .big {
     font-size: 20px;
