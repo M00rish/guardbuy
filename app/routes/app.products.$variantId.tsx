@@ -1,3 +1,4 @@
+import { manageProduct } from "../lib/merchant/manage-product.server";
 import { FormCheck, FormField, FormSelect, FormSection, FormButton, FormGrid, formStyles } from "../components/form-design";
 import {
   DataGrid,
@@ -19,7 +20,6 @@ import db from "../db.server";
 import { privateAdmin } from "../lib/merchant/staff.server";
 import {
   linkSupplier,
-  setManaged,
   setPreferred,
   unlinkSupplier,
 } from "../lib/suppliers/directory.server";
@@ -78,7 +78,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const { session } = await privateAdmin(request);
+  const { admin, session } = await privateAdmin(request);
   const shop = session.shop;
   const variantId = String(params.variantId ?? "");
   if (!/^\d+$/.test(variantId)) return { ok: false, message: "Unknown product" };
@@ -88,8 +88,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   switch (f.get("intent")) {
     case "toggle": {
       const on = f.get("managed") === "true";
-      await setManaged(shop, { variantId, sku: String(f.get("sku") || "") || null, title: String(f.get("title") ?? "") }, on);
-      return { ok: true, message: on ? "Automatic restocking enabled" : "Automatic restocking disabled" };
+      return manageProduct(admin,shop,{variantId,sku:String(f.get("sku")||"")||null,title:String(f.get("title")??"")},on);
     }
     case "link": {
       const price = Math.round(Number(f.get("price")) * 100);

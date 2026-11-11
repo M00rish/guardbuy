@@ -31,14 +31,6 @@
   font-size: 12px;
   color: #707a74;
 }
-.signature summary {
-  color: #40564a;
-  cursor: pointer;
-}
-.signature p {
-  margin: 8px 0 0;
-  overflow-wrap: anywhere;
-}
 .active {
   display: flex;
   align-items: center;
@@ -453,4 +445,107 @@
     grid-template-columns: 16px minmax(0, 1fr) 50px;
     gap: 10px;
   }
+}
+
+.signatureDetails {
+  border-top: 1px solid #dce3da;
+  margin-top: 20px;
+  padding-top: 15px;
+  font-size: 12px;
+}
+.signatureDetails > summary {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  cursor: pointer;
+  list-style: none;
+  color: #345641;
+}
+.signatureDetails > summary::-webkit-details-marker {
+  display: none;
+}
+.signatureDetails > summary::after {
+  content: "+";
+  margin-left: auto;
+  font-size: 16px;
+  color: #6d8071;
+}
+.signatureDetails[open] > summary::after {
+  content: "−";
+}
+.signatureDetails > summary > span:nth-child(2) {
+  color: #7d887e;
+  font-size: 10px;
+}
+.signatureRows {
+  margin: 15px 0 18px;
+}
+.signatureRows > div {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 12px;
+  border-bottom: 1px solid #e2e8df;
+  padding: 9px 0;
+}
+.signatureRows dt {
+  color: #788478;
+}
+.signatureRows dd {
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+  color: #344d3b;
+}
+.fingerprintHeader {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  color: #778576;
+  margin-bottom: 7px;
+  font-size: 11px;
+}
+.fingerprintHeader button {
+  background: transparent;
+  padding: 2px 0;
+  border: 0;
+  font: inherit;
+  color: #08775b;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.fingerprint {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  resize: none;
+  border: 1px solid #d8e0d5;
+  border-radius: 5px;
+  background: #fff;
+  color: #51664f;
+  font:
+    11px/1.7 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  padding: 9px 10px;
+  overflow-wrap: anywhere;
+}
+.signatureNote {
+  color: #7e887b;
+  font-size: 10px;
+  line-height: 1.6;
+  margin: 9px 0;
+}
+.auditLink {
+  color: #08775b;
+  font-size: 11px;
+  text-underline-offset: 3px;
+}
+.fingerprint:focus-visible,
+.fingerprintHeader button:focus-visible,
+.signatureDetails > summary:focus-visible {
+  outline: 2px solid #08775b;
+  outline-offset: 3px;
 }

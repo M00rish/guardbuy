@@ -1,29 +1,46 @@
 import { randomUUID } from "node:crypto";
-import type { RestockJob } from "@prisma/client";
+import type { RestockJob, Prisma } from "@prisma/client";
 import db from "../../db.server";
 import { privacyWriteAllowed } from "../privacy/state.server";
 
 const HOLD_MS = 120_000;
-export type ClaimedRestockJob = RestockJob & { holder: string; claimedGeneration: number };
-export const restockJobKey = (job: ClaimedRestockJob) => `${job.id}:${job.claimedGeneration}`;
+export type ClaimedRestockJob = RestockJob & {
+  holder: string;
+  claimedGeneration: number;
+};
+export const restockJobKey = (job: ClaimedRestockJob) =>
+  `${job.id}:${job.claimedGeneration}`;
 
 /** Persist before acknowledging Shopify. Repeated stock changes coalesce without losing a new generation. */
-export async function enqueueRestock(shop: string, inventoryItemId: string | number) {
+export async function enqueueRestock(
+  shop: string,
+  inventoryItemId: string | number,
+) {
+  return db.$transaction(
+    (tx) => enqueueRestockInTransaction(tx, shop, inventoryItemId),
+    { maxWait: 15_000, timeout: 20_000 },
+  );
+}
+
+/** Allows a merchant enable and its first check to commit together. */
+export async function enqueueRestockInTransaction(
+  tx: Prisma.TransactionClient,
+  shop: string,
+  inventoryItemId: string | number,
+) {
   const item = String(inventoryItemId);
-  if (!shop || !/^\d+$/.test(item)) throw new Error("Invalid restock trigger");
-  return db.$transaction(async (tx) => {
-    if (!await privacyWriteAllowed(tx, shop)) return null;
-    const rows = await tx.$queryRaw<RestockJob[]>`
-      INSERT INTO "RestockJob" ("id", "shop", "inventoryItemId", "updatedAt")
-      VALUES (${randomUUID()}, ${shop}, ${item}, clock_timestamp())
-      ON CONFLICT ("shop", "inventoryItemId") DO UPDATE
-      SET "generation" = "RestockJob"."generation" + 1,
-          "availableAt" = CASE WHEN "RestockJob"."claimedGeneration" IS NULL
-            THEN LEAST("RestockJob"."availableAt", clock_timestamp()) ELSE "RestockJob"."availableAt" END,
-          "updatedAt" = clock_timestamp()
-      RETURNING *`;
-    return rows[0];
-  }, { maxWait: 15_000, timeout: 20_000 });
+  if (!shop || !/^\d+$/.test(item)) throw Error("Invalid restock trigger");
+  if (!(await privacyWriteAllowed(tx, shop))) return null;
+  const rows = await tx.$queryRaw<RestockJob[]>`
+    INSERT INTO "RestockJob" ("id", "shop", "inventoryItemId", "updatedAt")
+    VALUES (${randomUUID()}, ${shop}, ${item}, clock_timestamp())
+    ON CONFLICT ("shop", "inventoryItemId") DO UPDATE
+    SET "generation" = "RestockJob"."generation" + 1,
+        "availableAt" = CASE WHEN "RestockJob"."claimedGeneration" IS NULL
+          THEN LEAST("RestockJob"."availableAt", clock_timestamp()) ELSE "RestockJob"."availableAt" END,
+        "updatedAt" = clock_timestamp()
+    RETURNING *`;
+  return rows[0];
 }
 
 export async function claimRestockJob(): Promise<ClaimedRestockJob | null> {
@@ -53,19 +70,26 @@ export async function renewRestockJob(job: ClaimedRestockJob) {
 
 /** A late worker cannot complete a newer claim or acknowledge webhooks received during its run. */
 export async function finishRestockJob(job: ClaimedRestockJob) {
-  return (await db.$executeRaw`
+  return (
+    (await db.$executeRaw`
     UPDATE "RestockJob" SET "completedGeneration" = ${job.claimedGeneration}, "claimedGeneration" = NULL,
       "holder" = NULL, "lockedUntil" = NULL, "attempts" = 0, "lastError" = NULL,
       "availableAt" = clock_timestamp(), "updatedAt" = clock_timestamp()
     WHERE "id" = ${job.id} AND "holder" = ${job.holder} AND "claimedGeneration" = ${job.claimedGeneration}
-      AND "lockedUntil" > clock_timestamp()`) === 1;
+      AND "lockedUntil" > clock_timestamp()`) === 1
+  );
 }
 
-export async function retryRestockJob(job: ClaimedRestockJob, delayMs = Math.min(300_000, 1000 * 2 ** Math.min(job.attempts, 8))) {
-  return (await db.$executeRaw`
+export async function retryRestockJob(
+  job: ClaimedRestockJob,
+  delayMs = Math.min(300_000, 1000 * 2 ** Math.min(job.attempts, 8)),
+) {
+  return (
+    (await db.$executeRaw`
     UPDATE "RestockJob" SET "holder" = NULL, "lockedUntil" = NULL,
       "availableAt" = clock_timestamp() + ${delayMs} * interval '1 millisecond',
       "lastError" = 'Restock processing failed; retry scheduled', "updatedAt" = clock_timestamp()
     WHERE "id" = ${job.id} AND "holder" = ${job.holder} AND "claimedGeneration" = ${job.claimedGeneration}
-      AND "lockedUntil" > clock_timestamp()`) === 1;
+      AND "lockedUntil" > clock_timestamp()`) === 1
+  );
 }

@@ -1,3 +1,4 @@
+import { coverLabel, coverExplanation } from "../lib/inventory/cover-label";
 import { ViewFilter } from "./view-tabs";
 import { DataGrid, cell, GridBadge } from "./data-grid";
 import { useEffect } from "react";
@@ -121,10 +122,16 @@ export function ProductsPanel({ data }: { data: ProductsPageData }) {
                 {
                   field: "cover",
                   headerName: "Days of cover",
+                  getQuickFilterText: (p) =>
+                    coverLabel(p.value, p.data?.perDay),
                   type: "numericColumn",
                   width: 130,
                   cellRenderer: cell<ProductsPageData["products"][number]>(
-                    (p) => <>{p.cover === null ? "Unavailable" : p.cover}</>,
+                    (p) => (
+                      <span title={coverExplanation(p.cover, p.perDay)}>
+                        {coverLabel(p.cover, p.perDay)}
+                      </span>
+                    ),
                   ),
                 },
                 {

@@ -1,3 +1,4 @@
+import { coverLabel, coverExplanation } from "../lib/inventory/cover-label";
 import { GridBadge } from "./data-grid";
 import { useMemo } from "react";
 import { Link } from "react-router";
@@ -197,8 +198,9 @@ export function ProductsGrid({
         width: 165,
         hide: narrow,
         filter: "agNumberColumnFilter",
-        valueFormatter: (p) =>
-          p.value === null ? "Unavailable" : String(p.value),
+        valueFormatter: (p) => coverLabel(p.value, p.data?.perDay),
+        tooltipValueGetter: (p) => coverExplanation(p.value, p.data?.perDay),
+        getQuickFilterText: (p) => coverLabel(p.value, p.data?.perDay),
       },
       {
         field: "supplier",

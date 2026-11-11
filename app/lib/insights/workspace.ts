@@ -16,6 +16,7 @@ export type WorkspaceProduct = {
   stock: number;
   incoming: number;
   cover: number | null;
+  perDay?:number;
   managed: boolean;
   status: { label: string; tone: string; at?: string };
 };
