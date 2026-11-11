@@ -79,7 +79,7 @@ await build({
           loader: "js",
           resolveDir: root,
           contents: {
-            auth: `import {redirect} from 'react-router';export async function privateAdmin(request){if(request.headers.get('x-test-auth')!=='yes')throw new Response('Unauthorized',{status:401});return{session:{shop:process.env.GUARDBUY_NAVIGATION_TEST_SHOP},sessionToken:request.headers.get('x-test-staff')==='no'?{}:{sub:'offline-staff'},redirect}}export async function adminWithStaff(request){const ctx=await privateAdmin(request);if(!ctx.sessionToken.sub)throw new Response('Staff required',{status:403});return{...ctx,actor:'shopify-staff:'+ctx.sessionToken.sub}}`,
+            auth: `import {redirect} from 'react-router';export async function privateAdmin(request){if(request.headers.get('x-test-auth')!=='yes')throw new Response('Unauthorized',{status:401});return{admin:{graphql:async(query,args)=>{if(!query.includes("GuardBuyEnableRestock"))throw Error("Unexpected Shopify query");return Response.json({data:{productVariant:{id:args.variables.id,title:"Default Title",sku:"COFFEE",product:{title:"Test coffee"},inventoryItem:{id:"gid://shopify/InventoryItem/777",tracked:true}}}})}},session:{shop:process.env.GUARDBUY_NAVIGATION_TEST_SHOP},sessionToken:request.headers.get('x-test-staff')==='no'?{}:{sub:'offline-staff'},redirect}}export async function adminWithStaff(request){const ctx=await privateAdmin(request);if(!ctx.sessionToken.sub)throw new Response('Staff required',{status:403});return{...ctx,actor:'shopify-staff:'+ctx.sessionToken.sub}}`,
             catalog: `import db from '${root}/app/db.server.ts';export async function productOverview(){const p=await db.managedProduct.findFirst({where:{shop:process.env.GUARDBUY_NAVIGATION_TEST_SHOP,variantId:'123'}});return[{variantId:'123',title:'Test coffee',sku:'COFFEE',stock:3,cover:1.5,managed:p?.managed??false}]}export async function feedNames(){return{product:()=> 'Test coffee',supplier:()=> 'Test supplier'}}`,
             sweep: `export async function sweepPayPalOrders(){globalThis.__navigationSweeps=(globalThis.__navigationSweeps??0)+1}`,
             refresh: `export async function refreshPayouts(){return{running:false,checkedAt:null,retryAt:null,incomplete:false,failed:false,awaitingConfirmation:false}}`,
@@ -472,6 +472,7 @@ try {
   });
   await db.productSupplier.deleteMany({ where: { shop } });
   await db.supplier.deleteMany({ where: { shop } });
+  await db.restockJob.deleteMany({ where: { shop } });
   await db.managedProduct.deleteMany({ where: { shop } });
   await db.shopSettings.deleteMany({ where: { shop } });
   await db.$disconnect();

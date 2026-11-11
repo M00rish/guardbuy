@@ -1,3 +1,4 @@
+import { manageProduct } from "../lib/merchant/manage-product.server";
 import { LoadingState } from "../components/loading-state";
 import { homeWorkspace } from "../lib/insights/workspace";
 import { deliveries } from "../lib/inventory/deliveries";
@@ -20,7 +21,7 @@ import { agentOn, currentRuleSet, setAgentState, spending } from "../lib/agent/r
 import { scoreboard } from "../lib/agent/scoreboard.server";
 import { cachedBalanceCents, feedNames, productOverview, productStatus } from "../lib/merchant/dashboard.server";
 import { adminWithStaff } from "../lib/merchant/staff.server";
-import { setManaged, setupStatus, supplierRoster } from "../lib/suppliers/directory.server";
+import { setupStatus, supplierRoster } from "../lib/suppliers/directory.server";
 import { plural } from "../components/ui";
 
 // Home: what the agent is doing, what it spent, which products need attention, and what changed.
@@ -93,7 +94,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session, actor } = await adminWithStaff(request);
+  const { admin, session, actor } = await adminWithStaff(request);
   const f = await request.formData();
   if (f.get("intent") === "agent") {
     await setAgentState(session.shop, f.get("on") === "true", actor);
@@ -103,8 +104,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     const variantId = String(f.get("variantId") ?? "");
     if (!/^\d+$/.test(variantId)) return { ok: false, message: "Unknown product" };
     const on = f.get("managed") === "true";
-    await setManaged(session.shop, { variantId, sku: String(f.get("sku") || "") || null, title: String(f.get("title") ?? "") }, on);
-    return { ok: true, message: on ? "Automatic restocking enabled" : "Automatic restocking disabled" };
+    return manageProduct(admin,session.shop,{variantId,sku:String(f.get("sku")||"")||null,title:String(f.get("title")??"")},on);
   }
   return { ok: false, message: "Unknown action" };
 };

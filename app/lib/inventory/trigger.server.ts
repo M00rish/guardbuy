@@ -36,6 +36,7 @@ export async function stockForInventoryItem(admin: AdminApiContext, inventoryIte
     `#graphql
     query Stock($id: ID!) {
       inventoryItem(id: $id) {
+        tracked
         variant { id sku createdAt }
         inventoryLevels(first: 50) { nodes { quantities(names: ["available"]) { quantity } } }
       }
@@ -44,13 +45,14 @@ export async function stockForInventoryItem(admin: AdminApiContext, inventoryIte
   );
   type Data = {
     inventoryItem: {
+      tracked: boolean;
       variant: { id: string; sku: string | null; createdAt: string } | null;
       inventoryLevels: { nodes: { quantities: { quantity: number }[] }[] };
     } | null;
   };
   const { data } = (await res.json()) as { data: Data };
   const item = data.inventoryItem;
-  if (!item?.variant) return null;
+  if (!item?.variant || item.tracked !== true) return null;
   const available = item.inventoryLevels.nodes.reduce((sum, l) => sum + (l.quantities[0]?.quantity ?? 0), 0);
   return { variantId: variantKey(item.variant.id), sku: item.variant.sku || null, createdAt: new Date(item.variant.createdAt), available };
 }

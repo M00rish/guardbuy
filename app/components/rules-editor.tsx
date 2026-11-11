@@ -1,3 +1,4 @@
+import { readableTime } from "../lib/format";
 import styles from "./rules-workspace.module.css";
 import { FormField, FormButton } from "./form-design";
 import { DataGrid, cell, compareMoney, GridBadge } from "./data-grid";
@@ -30,6 +31,86 @@ const when = (iso: string) =>
     hour: "numeric",
     minute: "2-digit",
   });
+
+function PolicySignature({
+  entry,
+  draft,
+}: {
+  entry: RulesPageData["history"][number];
+  draft: boolean;
+}) {
+  const [copyState, setCopyState] = useState("");
+  const fingerprint = useRef<HTMLTextAreaElement>(null);
+  useEffect(()=>setCopyState(""),[entry.hash]);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(entry.hash);
+      setCopyState("Fingerprint copied");
+    } catch {
+      fingerprint.current?.focus();
+      fingerprint.current?.select();
+      setCopyState("Fingerprint selected. Copy it using your device.");
+    }
+  };
+  return (
+    <details className={styles.signatureDetails}>
+      <summary>
+        <span>Signature details</span>
+        <span>Saved policy</span>
+      </summary>
+      <dl className={styles.signatureRows}>
+        <div>
+          <dt>Signed by</dt>
+          <dd>{entry.by}</dd>
+        </div>
+        <div>
+          <dt>Signed on</dt>
+          <dd>
+            <time dateTime={entry.at}>{readableTime(entry.at)}</time>
+          </dd>
+        </div>
+        <div>
+          <dt>Audit entry</dt>
+          <dd>#{entry.seq}</dd>
+        </div>
+      </dl>
+      <div className={styles.fingerprintHeader}>
+        <label htmlFor="saved-policy-fingerprint">Fingerprint</label>
+        <button
+          type="button"
+          onClick={() => {
+            void copy();
+          }}
+        >
+          Copy
+        </button>
+      </div>
+      <textarea
+        id="saved-policy-fingerprint"
+        aria-label="Saved policy fingerprint"
+        ref={fingerprint}
+        className={styles.fingerprint}
+        readOnly
+        value={entry.hash}
+        rows={3}
+        onFocus={(e) => e.currentTarget.select()}
+      />
+      {copyState && (
+        <p className={styles.signatureNote} role="status">
+          {copyState}
+        </p>
+      )}
+      <p className={styles.signatureNote}>
+        {draft
+          ? "This signature belongs to your saved policy. Signing your changes records a new one."
+          : "Recorded with the policy in your audit trail."}
+      </p>
+      <a className={styles.auditLink} href="/app/activity">
+        Open audit trail →
+      </a>
+    </details>
+  );
+}
 
 export function RulesEditor({ data }: { data: RulesPageData }) {
   const { signed, rules, suppliers, history } = data;
@@ -152,16 +233,6 @@ export function RulesEditor({ data }: { data: RulesPageData }) {
             <span className={styles.active}>
               Policy signed · {when(current.at)}
             </span>
-            <details>
-              <summary>Signature details</summary>
-              <p>
-                Signed by {current.by}
-                <br />
-                Fingerprint {current.hash}
-                <br />
-                Audit log entry #{current.seq}
-              </p>
-            </details>
           </div>
         ) : (
           <span className={styles.signature}>
@@ -435,6 +506,9 @@ export function RulesEditor({ data }: { data: RulesPageData }) {
             purchases still need your approval. Your signature is recorded in
             Activity.
           </p>
+          {signed && current && (
+            <PolicySignature entry={current} draft={changed} />
+          )}
         </aside>
       </fetcher.Form>
 

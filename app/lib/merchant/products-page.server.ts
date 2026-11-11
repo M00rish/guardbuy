@@ -5,7 +5,7 @@ import { privateAdmin } from "../merchant/staff.server";
 import { productOverview } from "../merchant/dashboard.server";
 import { auditEntries } from "../audit/log.server";
 import { currentRuleSet } from "../agent/restock.server";
-import { setManaged } from "../suppliers/directory.server";
+import { manageProduct } from "./manage-product.server";
 import { usd } from "../format";
 
 // Products & suppliers (index): every product, whether GuardBuy restocks it, and from whom.
@@ -36,6 +36,7 @@ export const loadProducts = async ({ request }: LoaderFunctionArgs) => {
       title: p.title,
       sku: p.sku,
       stock: p.stock,
+      perDay:p.perDay,
       cover: Number.isFinite(p.cover) ? Number(p.cover.toFixed(1)) : null,
       managed: p.managed,
       suppliers: links
@@ -51,25 +52,15 @@ export const loadProducts = async ({ request }: LoaderFunctionArgs) => {
 };
 
 export const toggleProduct = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await privateAdmin(request);
+  const { admin, session } = await privateAdmin(request);
   const f = await request.formData();
   const variantId = String(f.get("variantId") ?? "");
   if (f.get("intent") !== "toggle" || !/^\d+$/.test(variantId))
     return { ok: false, message: "Unknown action" };
   const on = f.get("managed") === "true";
-  await setManaged(
-    session.shop,
-    {
-      variantId,
-      sku: String(f.get("sku") || "") || null,
-      title: String(f.get("title") ?? ""),
-    },
-    on,
-  );
-  return {
-    ok: true,
-    message: on ? "Automatic restocking enabled" : "Automatic restocking disabled",
-  };
+  return manageProduct(admin,session.shop,{
+    variantId,sku:String(f.get("sku")||"")||null,title:String(f.get("title")??"")
+  },on);
 };
 
 export type ProductsPageData = Awaited<ReturnType<typeof loadProducts>>;

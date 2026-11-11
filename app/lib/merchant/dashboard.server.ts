@@ -72,6 +72,8 @@ export function productStatus(
     if (d?.event.type === "decision" && d.event.decision.verdict === "approval") return { label: `${APPROVAL_LABEL.waiting} · ${total}`, tone: "warning", at: last.at };
     if (d?.event.type === "decision" && d.event.decision.verdict === "block") return { label: "Blocked by your rules", tone: "critical", at: last.at };
   }
+  if(p.cover===Number.POSITIVE_INFINITY)return {label:"No recent sales · cover unknown",tone:"neutral"};
+  if(!Number.isFinite(p.cover))return {label:"Stock cover unavailable",tone:"warning"};
   if (rules && p.cover < rules.reorderBelowDaysOfCover) {
     return agentRunning ? { label: "Low stock · awaiting restock check", tone: "info" } : { label: "Low stock · agent paused", tone: "warning" };
   }

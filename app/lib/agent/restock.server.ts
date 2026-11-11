@@ -380,6 +380,9 @@ async function restock(shop: string, check: StockCheck, lease: PaymentLease, job
     const skip = skipReason(check, log);
     if (skip) return { outcome: "skipped", reason: skip };
   }
+  if (!Number.isFinite(check.perDay) || check.perDay <= 0 || !Number.isFinite(check.daysOfCover)) {
+    return { outcome: "skipped", reason: "No usable recent sales rate; stock cover cannot be estimated." };
+  }
   // Incoming may have changed since the stock read (for example, a receipt or explicit closure).
   const incoming = incomingFor(log, check.variantId);
   const coverage = check.perDay > 0 ? Math.max(0, check.available + incoming) / check.perDay : check.daysOfCover;
