@@ -1,3 +1,4 @@
+import { FormCheck, FormField, FormSelect, FormSection, FormButton } from "../components/form-design";
 import {
   DataGrid,
   cell,
@@ -304,7 +305,7 @@ export default function ProductSuppliers() {
         )}
       </s-section>
 
-      <s-section heading="Link a supplier">
+      <FormSection title="Link a supplier">
         {p.available.length === 0 ? (
           <s-text tone="neutral">
             Every supplier you added is linked already.{" "}
@@ -321,49 +322,49 @@ export default function ProductSuppliers() {
                 gridTemplateColumns="@container (inline-size <= 640px) 1fr 1fr, 2fr 1fr 1fr 1fr"
                 gap="base"
               >
-                <s-select label="Supplier" name="supplierId">
+                <FormSelect label="Supplier" name="supplierId">
                   {p.available.map((s) => (
-                    <s-option key={s.id} value={s.id}>
+                    <option key={s.id} value={s.id}>
                       {s.name}
-                    </s-option>
+                    </option>
                   ))}
-                </s-select>
-                <s-number-field
+                </FormSelect>
+                <FormField type="number"
                   label="Price per unit ($)"
                   name="price"
                   min={0.01}
                   step={0.01}
                 />
-                <s-number-field
+                <FormField type="number"
                   label="Usual order"
                   name="usualQuantity"
                   min={1}
                   step={1}
                 />
-                <s-number-field
+                <FormField type="number"
                   label="Lead time (days)"
                   name="leadTimeDays"
                   min={0}
                   step={1}
-                  value="3"
+                  defaultValue="3"
                 />
               </s-grid>
             </s-query-container>
             <s-box paddingBlockStart="base">
               <s-stack direction="inline" gap="base" alignItems="center">
-                <s-checkbox
+                <FormCheck
                   label="Make this the preferred supplier"
                   name="preferred"
                   value="on"
                 />
-                <s-button type="submit" variant="primary" disabled={busy}>
+                <FormButton type="submit" disabled={busy}>
                   Link supplier
-                </s-button>
+                </FormButton>
               </s-stack>
             </s-box>
           </fetcher.Form>
         )}
-      </s-section>
+      </FormSection>
     </s-page>
   );
 }

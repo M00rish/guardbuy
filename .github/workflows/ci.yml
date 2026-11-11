@@ -105,6 +105,7 @@ jobs:
         run: |
           npx tsx scripts/check-delivery-lifecycle-db.ts
           npx tsx scripts/check-payout-schedule-db.ts
+          npx tsx scripts/check-paypal-webhooks-db.ts
       - name: Telegram alerts and background delivery
         env:
           DATABASE_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism36_test

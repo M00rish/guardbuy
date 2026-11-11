@@ -1,3 +1,11 @@
+import {
+  FormSection,
+  FormGrid,
+  FormField,
+  FormCheck,
+  FormButton,
+  formStyles,
+} from "./form-design";
 import { DataGrid, cell, compareMoney, GridBadge } from "./data-grid";
 import { COPY } from "../lib/wording";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -82,10 +90,28 @@ export function RulesEditor({ data }: { data: RulesPageData }) {
     details: string,
     props: { min?: number; max?: number; step: number },
   ) => (
-    <s-number-field
-      label={label}
+    <FormField
+      type="number"
+      label={label.replace(" ($)", " (USD)")}
+      prefix={
+        [
+          "approvalAbove",
+          "weeklySpendCap",
+          "cashFloor",
+          "priceTolerance",
+        ].includes(name)
+          ? "$"
+          : undefined
+      }
+      suffix={
+        name.includes("DaysOfCover")
+          ? "days"
+          : name === "maxQuantityMultiple"
+            ? "× usual"
+            : undefined
+      }
       name={name}
-      value={saved[name]}
+      defaultValue={saved[name]}
       details={details}
       {...props}
       {...(errors[name] ? { error: errors[name] } : {})}
@@ -112,6 +138,7 @@ export function RulesEditor({ data }: { data: RulesPageData }) {
       </s-section>
 
       <fetcher.Form
+        noValidate
         key={formKey}
         method="post"
         action="/app/rules?tab=rules"
@@ -121,75 +148,77 @@ export function RulesEditor({ data }: { data: RulesPageData }) {
       >
         <input type="hidden" name="intent" value="sign-rules" />
         <s-stack gap="base">
-          <s-section heading="When to buy, and how much">
-            <s-query-container>
-              <s-grid
-                gridTemplateColumns="@container (inline-size <= 640px) 1fr, 1fr 1fr 1fr"
-                gap="base"
-              >
-                {field(
-                  "reorderBelowDaysOfCover",
-                  "Restock when stock lasts fewer than (days)",
-                  "Based on each product's recent sales",
-                  { min: 1, step: 1 },
-                )}
-                {field(
-                  "targetDaysOfCover",
-                  "Buy enough for (days)",
-                  "The agent's suggested quantity aims for this",
-                  { min: 1, step: 1 },
-                )}
-                {field(
-                  "maxQuantityMultiple",
-                  "Largest order (times the usual)",
-                  "Blocks orders this many times above a supplier’s usual order",
-                  { min: 1, step: 0.5 },
-                )}
-              </s-grid>
-            </s-query-container>
-          </s-section>
+          <FormSection
+            title="When to buy, and how much"
+            description="Set the stock threshold and the size of each restock."
+            number="01"
+          >
+            <FormGrid>
+              {field(
+                "reorderBelowDaysOfCover",
+                "Restock when stock lasts fewer than (days)",
+                "Based on each product's recent sales",
+                { min: 1, step: 1 },
+              )}
+              {field(
+                "targetDaysOfCover",
+                "Buy enough for (days)",
+                "The agent's suggested quantity aims for this",
+                { min: 1, step: 1 },
+              )}
+              {field(
+                "maxQuantityMultiple",
+                "Largest order (times the usual)",
+                "Blocks orders this many times above a supplier’s usual order",
+                { min: 1, step: 0.5 },
+              )}
+            </FormGrid>
+          </FormSection>
 
-          <s-section heading="Money">
-            <s-query-container>
-              <s-grid
-                gridTemplateColumns="@container (inline-size <= 640px) 1fr, 1fr 1fr 1fr"
-                gap="base"
-              >
-                {field(
-                  "approvalAbove",
-                  `${COPY.approvalAbove} ($)`,
-                  "Larger purchases need approval in Rules & Approvals",
-                  { min: 0, step: 1 },
-                )}
-                {field(
-                  "weeklySpendCap",
-                  `${COPY.spendingCap} ($)`,
-                  "Rolling 7 days, all suppliers",
-                  { min: 0, step: 1 },
-                )}
-                {field(
-                  "cashFloor",
-                  `${COPY.cashFloor} ($)`,
-                  "Purchases that would go below are blocked",
-                  { min: 0, step: 1 },
-                )}
-                {field(
-                  "priceTolerance",
-                  "Price increase without asking ($ per unit)",
-                  "Above the price you entered or last approved",
-                  { min: 0, step: 0.05 },
-                )}
-                {field(
-                  "maxPurchasesPer24h",
-                  "Purchases per 24 hours",
-                  "Across all products",
-                  { min: 1, step: 1 },
-                )}
-              </s-grid>
-            </s-query-container>
-          </s-section>
+          <FormSection
+            title="Money"
+            description="Keep purchases within the budget and approval limits you choose."
+            number="02"
+          >
+            <FormGrid>
+              {field(
+                "approvalAbove",
+                `${COPY.approvalAbove} ($)`,
+                "Larger purchases need approval in Rules & Approvals",
+                { min: 0, step: 1 },
+              )}
+              {field(
+                "weeklySpendCap",
+                `${COPY.spendingCap} ($)`,
+                "Rolling 7 days, all suppliers",
+                { min: 0, step: 1 },
+              )}
+              {field(
+                "cashFloor",
+                `${COPY.cashFloor} ($)`,
+                "Purchases that would go below are blocked",
+                { min: 0, step: 1 },
+              )}
+              {field(
+                "priceTolerance",
+                "Price increase without asking ($ per unit)",
+                "Above the price you entered or last approved",
+                { min: 0, step: 0.05 },
+              )}
+              {field(
+                "maxPurchasesPer24h",
+                "Purchases per 24 hours",
+                "Across all products",
+                { min: 1, step: 1 },
+              )}
+            </FormGrid>
+          </FormSection>
 
-          <s-section heading="Approved suppliers">
+          <FormSection
+            title="Approved suppliers"
+            description="Select the suppliers GuardBuy is allowed to pay."
+            number="03"
+          >
             <s-stack gap="small-200">
               {suppliers.length === 0 ? (
                 <Empty
@@ -202,20 +231,22 @@ export function RulesEditor({ data }: { data: RulesPageData }) {
                   GuardBuy can only buy from suppliers you add and approve here.
                 </Empty>
               ) : (
-                suppliers.map((s) => (
-                  <s-checkbox
-                    key={s.id}
-                    name="allow"
-                    value={s.id}
-                    label={s.name}
-                    details={
-                      s.products
-                        ? `Linked to ${s.products} ${s.products === 1 ? "product" : "products"}`
-                        : "Not linked to any product yet"
-                    }
-                    {...(saved.allow.includes(s.id) ? { checked: true } : {})}
-                  />
-                ))
+                <FormGrid>
+                  {suppliers.map((s) => (
+                    <FormCheck
+                      key={s.id}
+                      name="allow"
+                      value={s.id}
+                      label={s.name}
+                      details={
+                        s.products
+                          ? `Linked to ${s.products} ${s.products === 1 ? "product" : "products"}`
+                          : "Not linked to any product yet"
+                      }
+                      defaultChecked={saved.allow.includes(s.id)}
+                    />
+                  ))}
+                </FormGrid>
               )}
               {errors.allow && suppliers.length > 0 ? (
                 <s-text tone="critical">{errors.allow}</s-text>
@@ -226,26 +257,31 @@ export function RulesEditor({ data }: { data: RulesPageData }) {
                 </s-text>
               )}
             </s-stack>
-          </s-section>
+          </FormSection>
 
-          <s-section heading="In plain words">
+          <FormSection
+            title="In plain words"
+            description="Review what these rules allow before you sign."
+            number="04"
+          >
             <s-stack gap="base">
-              <s-text>{rulesSummary(form, names)}</s-text>
+              <div className={formStyles.summary}>
+                {rulesSummary(form, names)}
+              </div>
               <s-stack direction="inline" gap="base" alignItems="center">
-                <s-button
-                  type="submit"
-                  variant="primary"
-                  disabled={busy || !canSign}
-                  {...(busy ? { loading: true } : {})}
-                >
-                  {signed ? "Sign updated rules" : "Sign these rules"}
-                </s-button>
+                <FormButton type="submit" disabled={busy || !canSign}>
+                  {busy
+                    ? "Signing…"
+                    : signed
+                      ? "Sign updated rules"
+                      : "Sign these rules"}
+                </FormButton>
                 {changed && signed && (
                   <GridBadge tone="caution">Unsaved changes</GridBadge>
                 )}
                 {signed && changed && (
-                  <s-button
-                    variant="tertiary"
+                  <FormButton
+                    secondary
                     disabled={busy}
                     onClick={() => {
                       setFormKey((k) => k + 1);
@@ -253,7 +289,7 @@ export function RulesEditor({ data }: { data: RulesPageData }) {
                     }}
                   >
                     Discard
-                  </s-button>
+                  </FormButton>
                 )}
               </s-stack>
               <s-text tone="neutral">
@@ -263,7 +299,7 @@ export function RulesEditor({ data }: { data: RulesPageData }) {
                 log.
               </s-text>
             </s-stack>
-          </s-section>
+          </FormSection>
         </s-stack>
       </fetcher.Form>
 

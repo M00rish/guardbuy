@@ -1,3 +1,4 @@
+import { FormField, FormSection, FormButton } from "../components/form-design";
 import {
   DataGrid,
   cell,
@@ -110,7 +111,7 @@ export default function Supplier() {
         </s-banner>
       )}
 
-      <s-section heading="Details">
+      <FormSection title="Details">
         <s-stack gap="base">
           <Row label="In your rules">
             {s.approved === null ? (
@@ -134,20 +135,20 @@ export default function Supplier() {
                 gap="base"
                 alignItems="end"
               >
-                <s-text-field label="Name" name="name" value={s.name} />
-                <s-email-field
+                <FormField label="Name" name="name" defaultValue={s.name} />
+                <FormField type="email"
                   label="Supplier PayPal email"
                   name="paypalEmail"
-                  value={s.paypalEmail}
+                  defaultValue={s.paypalEmail}
                 />
-                <s-button type="submit" disabled={busy}>
+                <FormButton type="submit" disabled={busy}>
                   Save supplier
-                </s-button>
+                </FormButton>
               </s-grid>
             </s-query-container>
           </fetcher.Form>
         </s-stack>
-      </s-section>
+      </FormSection>
 
       <s-section heading="Products they supply">
         {s.products.length === 0 ? (

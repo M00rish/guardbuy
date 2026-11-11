@@ -1,3 +1,4 @@
+import { FormCheck, FormField } from "../components/form-design";
 import { DataGrid, cell, GridBadge } from "../components/data-grid";
 import { readableTime } from "../lib/format";
 import { useState } from "react";
@@ -147,12 +148,12 @@ export default function Alerts() {
                   )}
                 {data.pairing && (
                   <s-stack gap="base">
-                    <s-text-field
+                    <FormField
                       label="Connection code from Telegram"
                       value={code}
                       onInput={(e) => setCode(e.currentTarget.value)}
                       maxLength={6}
-                      autocomplete="off"
+                      autoComplete="off"
                     />
                     <s-button
                       onClick={() => submit("confirm")}
@@ -184,7 +185,7 @@ export default function Alerts() {
             A delivery marked unconfirmed may already have arrived. Retrying can
             send a duplicate alert. Alert delivery never changes payment state.
           </s-text>
-          <s-checkbox
+          <FormCheck
             label="I understand retrying may send a duplicate alert"
             checked={acceptDuplicate}
             onChange={(e) => setAcceptDuplicate(e.currentTarget.checked)}

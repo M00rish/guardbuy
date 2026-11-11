@@ -1,3 +1,4 @@
+import { FormField, FormSection, FormButton } from "./form-design";
 import { DataGrid, cell, GridBadge } from "./data-grid";
 import { useEffect } from "react";
 import { useFetcher } from "react-router";
@@ -19,7 +20,7 @@ export function SuppliersPanel({ data }: { data: SuppliersPageData }) {
 
   return (
     <s-stack gap="base">
-      <s-section heading="Add a supplier">
+      <FormSection title="Add a supplier">
         <add.Form method="post" action="/app/products?tab=suppliers">
           <input type="hidden" name="intent" value="add-supplier" />
           <s-query-container>
@@ -28,19 +29,19 @@ export function SuppliersPanel({ data }: { data: SuppliersPageData }) {
               gap="base"
               alignItems="end"
             >
-              <s-text-field label="Name" name="name" />
-              <s-email-field label="Supplier PayPal email" name="paypalEmail" />
-              <s-button
-                type="submit"
-                variant="primary"
-                disabled={add.state !== "idle"}
-              >
+              <FormField label="Name" name="name" />
+              <FormField
+                type="email"
+                label="Supplier PayPal email"
+                name="paypalEmail"
+              />
+              <FormButton type="submit" disabled={add.state !== "idle"}>
                 Add supplier
-              </s-button>
+              </FormButton>
             </s-grid>
           </s-query-container>
         </add.Form>
-      </s-section>
+      </FormSection>
 
       <s-section heading="Your suppliers">
         {suppliers.length === 0 ? (
