@@ -1,5 +1,6 @@
 // Exercise the production planner with explicit model responses, never provider traffic.
 import assert from "node:assert/strict";
+import { modelChain } from "../app/lib/agent/proposer.server";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { generateText, Output } from "ai";
@@ -13,6 +14,16 @@ import { build } from "esbuild";
 import { mkdtemp, rm } from "node:fs/promises";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
+
+assert.deepEqual(modelChain(""), [
+  "openrouter:liquid/lfm-3-1.7b:free",
+  "openrouter:nvidia/nemotron-3.5-super-vl:free",
+  "openrouter:dots-studio/dots-3-note-preview:free",
+]);
+assert.deepEqual(modelChain("google:custom,openrouter:custom:free"), [
+  "google:custom",
+  "openrouter:custom:free",
+]);
 
 // Exercise actual SDK serialization and parsing, with explicit HTTP responses.
 // No provider credentials or traffic; provider transports are injected here only.
@@ -163,7 +174,7 @@ try {
   await build({
     stdin: {
       contents:
-        "export {planInsightView} from './app/lib/insights/planner.server';",
+        "export {planInsightView,insightsAiConfigured} from './app/lib/insights/planner.server';",
       resolveDir: root,
       loader: "ts",
     },
@@ -198,7 +209,7 @@ try {
       },
     ],
   });
-  const { planInsightView } = await import(
+  const { planInsightView, insightsAiConfigured } = await import(
     pathToFileURL(resolve(work, "planner.mjs")).href
   );
   // Hosted failure: first two candidates fail, third retired, fourth is healthy.
@@ -282,6 +293,15 @@ try {
     0,
     "cancelled requests never start another provider call",
   );
+  fixture.__plannerModels = ["openrouter:fixture"];
+  delete process.env.OPENROUTER_API_KEY;
+  assert.equal(
+    insightsAiConfigured(),
+    false,
+    "an unrelated Google key cannot enable OpenRouter-only defaults",
+  );
+  process.env.OPENROUTER_API_KEY = "offline-router";
+  assert.equal(insightsAiConfigured(), true);
   fixture.__plannerGenerate = async () => {
     throw new Error("private provider body");
   };

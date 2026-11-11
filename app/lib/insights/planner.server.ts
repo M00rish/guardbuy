@@ -16,9 +16,13 @@ import {
 } from "./plan";
 
 export const insightsAiConfigured = () =>
-  !!(
-    process.env.GOOGLE_GENERATIVE_AI_API_KEY || process.env.OPENROUTER_API_KEY
-  );
+  modelChain()
+    .slice(0, 4)
+    .some((entry) =>
+      entry.startsWith("openrouter:")
+        ? !!process.env.OPENROUTER_API_KEY
+        : !!process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+    );
 /** Only the user's short request goes to the provider; no audit data, payment IDs or tool credentials. */
 export async function planInsightView(
   prompt: string,
