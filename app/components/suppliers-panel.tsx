@@ -1,4 +1,10 @@
-import { FormField, FormSection, FormButton } from "./form-design";
+import {
+  FormField,
+  FormSection,
+  FormButton,
+  FormGrid,
+  formStyles,
+} from "./form-design";
 import { DataGrid, cell, GridBadge } from "./data-grid";
 import { useEffect } from "react";
 import { useFetcher } from "react-router";
@@ -20,26 +26,26 @@ export function SuppliersPanel({ data }: { data: SuppliersPageData }) {
 
   return (
     <s-stack gap="base">
-      <FormSection title="Add a supplier">
+      <FormSection
+        title="Add a supplier"
+        description="Keep the supplier’s name and PayPal payment address together."
+      >
         <add.Form method="post" action="/app/products?tab=suppliers">
           <input type="hidden" name="intent" value="add-supplier" />
-          <s-query-container>
-            <s-grid
-              gridTemplateColumns="@container (inline-size <= 640px) 1fr, 1fr 1fr auto"
-              gap="base"
-              alignItems="end"
-            >
-              <FormField label="Name" name="name" />
-              <FormField
-                type="email"
-                label="Supplier PayPal email"
-                name="paypalEmail"
-              />
-              <FormButton type="submit" disabled={add.state !== "idle"}>
-                Add supplier
-              </FormButton>
-            </s-grid>
-          </s-query-container>
+          <FormGrid>
+            <FormField label="Name" name="name" />
+            <FormField
+              type="email"
+              label="Supplier PayPal email"
+              name="paypalEmail"
+            />
+          </FormGrid>
+          <div className={formStyles.actions}>
+            <FormButton type="submit" disabled={add.state !== "idle"}>
+              Add supplier
+            </FormButton>
+            <p>Adding a supplier does not authorize purchases.</p>
+          </div>
         </add.Form>
       </FormSection>
 

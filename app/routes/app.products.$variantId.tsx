@@ -1,4 +1,4 @@
-import { FormCheck, FormField, FormSelect, FormSection, FormButton } from "../components/form-design";
+import { FormCheck, FormField, FormSelect, FormSection, FormButton, FormGrid, formStyles } from "../components/form-design";
 import {
   DataGrid,
   cell,
@@ -156,12 +156,12 @@ export default function ProductSuppliers() {
           </s-text>
         </s-stack>
         {p.managed && p.links.length === 0 && (
-          <s-box paddingBlockStart="base">
+          <div className={formStyles.actions}>
             <s-banner tone="warning" heading="Link a supplier">
               GuardBuy can’t restock this product until it has at least one
               supplier.
             </s-banner>
-          </s-box>
+          </div>
         )}
       </s-section>
 
@@ -305,7 +305,7 @@ export default function ProductSuppliers() {
         )}
       </s-section>
 
-      <FormSection title="Link a supplier">
+      <FormSection title="Link a supplier" description="Set the cost and delivery terms for this product’s supply route.">
         {p.available.length === 0 ? (
           <s-text tone="neutral">
             Every supplier you added is linked already.{" "}
@@ -316,12 +316,7 @@ export default function ProductSuppliers() {
         ) : (
           <fetcher.Form method="post">
             <input type="hidden" name="intent" value="link" />
-            <s-query-container>
-              {/* Responsive values are comma-separated, so the column lists must not contain commas themselves */}
-              <s-grid
-                gridTemplateColumns="@container (inline-size <= 640px) 1fr 1fr, 2fr 1fr 1fr 1fr"
-                gap="base"
-              >
+            <FormGrid>
                 <FormSelect label="Supplier" name="supplierId">
                   {p.available.map((s) => (
                     <option key={s.id} value={s.id}>
@@ -330,7 +325,7 @@ export default function ProductSuppliers() {
                   ))}
                 </FormSelect>
                 <FormField type="number"
-                  label="Price per unit ($)"
+                  label="Price per unit (USD)" prefix="$"
                   name="price"
                   min={0.01}
                   step={0.01}
@@ -348,8 +343,7 @@ export default function ProductSuppliers() {
                   step={1}
                   defaultValue="3"
                 />
-              </s-grid>
-            </s-query-container>
+            </FormGrid>
             <s-box paddingBlockStart="base">
               <s-stack direction="inline" gap="base" alignItems="center">
                 <FormCheck

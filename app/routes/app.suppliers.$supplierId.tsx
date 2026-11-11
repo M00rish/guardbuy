@@ -1,4 +1,4 @@
-import { FormField, FormSection, FormButton } from "../components/form-design";
+import { FormField, FormSection, FormButton, FormGrid, formStyles } from "../components/form-design";
 import {
   DataGrid,
   cell,
@@ -111,7 +111,7 @@ export default function Supplier() {
         </s-banner>
       )}
 
-      <FormSection title="Details">
+      <FormSection title="Payment contact" description="The PayPal address used for this supplier’s payments.">
         <s-stack gap="base">
           <Row label="In your rules">
             {s.approved === null ? (
@@ -129,23 +129,11 @@ export default function Supplier() {
             <s-text>{date(s.addedAt)}</s-text>
           </Row>
           <fetcher.Form method="post">
-            <s-query-container>
-              <s-grid
-                gridTemplateColumns="@container (inline-size <= 640px) 1fr, 1fr 1fr auto"
-                gap="base"
-                alignItems="end"
-              >
-                <FormField label="Name" name="name" defaultValue={s.name} />
-                <FormField type="email"
-                  label="Supplier PayPal email"
-                  name="paypalEmail"
-                  defaultValue={s.paypalEmail}
-                />
-                <FormButton type="submit" disabled={busy}>
-                  Save supplier
-                </FormButton>
-              </s-grid>
-            </s-query-container>
+            <FormGrid>
+              <FormField label="Name" name="name" defaultValue={s.name}/>
+              <FormField type="email" label="Supplier PayPal email" name="paypalEmail" defaultValue={s.paypalEmail}/>
+            </FormGrid>
+            <div className={formStyles.actions}><FormButton type="submit" disabled={busy}>Save supplier</FormButton></div>
           </fetcher.Form>
         </s-stack>
       </FormSection>
