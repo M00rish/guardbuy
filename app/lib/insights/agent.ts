@@ -8,6 +8,8 @@ import {
   type InsightPlan,
   type InsightAnalysis,
 } from "./plan";
+import { GuardQuerySchema, type GuardQuery } from "./query-schema";
+import type { GuardQueryResult } from "./query";
 import {
   INSIGHT_VIEWS,
   describeInsightView,
@@ -16,11 +18,29 @@ import {
   type InsightView,
 } from "./types";
 
+export const ASSISTANT_ERRORS = {
+  rate_limit: "Please wait a few seconds before asking another question.",
+  unavailable:
+    "The GuardBuy assistant is unavailable. Use the grid filters or try again later.",
+  timeout:
+    "The question took too long. Try again or ask a more specific question.",
+} as const;
+export class AssistantRequestError extends Error {
+  constructor(readonly kind: keyof typeof ASSISTANT_ERRORS) {
+    super(ASSISTANT_ERRORS[kind]);
+  }
+}
+export function safeAssistantError(message: string) {
+  return Object.values(ASSISTANT_ERRORS).some((value) => value === message)
+    ? message
+    : ASSISTANT_ERRORS.unavailable;
+}
 export type InsightAgentPorts = {
   plan: (prompt: string, signal?: AbortSignal) => Promise<InsightPlan>;
   select: (view: InsightView) => void;
   analyze?: (analysis: InsightAnalysis) => void;
   rows: () => InsightRow[];
+  query?: (query: GuardQuery) => GuardQueryResult;
 };
 /** One view-selection tool, no built-in agent roster, no backend/business write capability. */
 export function createInsightsAgent(
@@ -64,11 +84,26 @@ export function createInsightsAgent(
         );
       },
     });
+  const queryTool = () =>
+    api.defineAiTool({
+      name: "query_guardbuy",
+      description:
+        "Calculate a bounded read-only answer from the loaded GuardBuy snapshot and show the supporting grid records.",
+      params: (s) => s.object({ query: s.string() }),
+      execute: async ({ query }, ctx) => {
+        if (ctx.signal.aborted) return ctx.error("The request was cancelled.");
+        if (query.length > 4096) return ctx.error("The query is too large.");
+        const validated = GuardQuerySchema.parse(JSON.parse(query));
+        if (!ports.query) return ctx.error("Workspace data is unavailable.");
+        return ctx.success(ports.query(validated).answer);
+      },
+    });
   return {
     id: "guardbuy-insights",
     name: "GuardBuy insights",
-    description: "Explore recorded purchases without changing them.",
-    tools: () => [show()],
+    description:
+      "Answer GuardBuy questions and show supporting records without changing business data.",
+    tools: () => [show(), ...(ports.query ? [queryTool()] : [])],
     run: async function* (input, ctx) {
       const { threadId, runId } = input;
       yield { type: "RUN_STARTED", threadId, runId };
@@ -81,11 +116,19 @@ export function createInsightsAgent(
         );
         if (ctx.signal?.aborted) return;
         let answer =
-          "I can explore purchases, compare suppliers and pivot payment statuses. I cannot approve purchases, send payments or change rules.";
+          plan.reason === "write"
+            ? "I can explain and analyze GuardBuy data, but I cannot approve purchases, send payments or change rules."
+            : plan.reason === "clarify"
+              ? `I need one detail before choosing the data: ${plan.clarification || "Which product, purchase or metric do you mean?"}`
+              : `I cannot answer that from the available GuardBuy snapshot yet.${plan.clarification ? ` ${plan.clarification}` : " Ask about products, stock, purchases, suppliers, budgets or recorded activity."}`;
         if (!plan.refused) {
           const tool = ctx
             .tools()
-            .find((candidate) => candidate.name === "show_purchases");
+            .find(
+              (candidate) =>
+                candidate.name ===
+                (plan.query ? "query_guardbuy" : "show_purchases"),
+            );
           if (!tool?.execute) throw new Error("View tool is unavailable.");
           const toolCallId = crypto.randomUUID();
           yield {
@@ -93,20 +136,20 @@ export function createInsightsAgent(
             toolCallId,
             toolCallName: tool.name,
           };
+          const args = plan.query
+            ? { query: JSON.stringify(plan.query) }
+            : { view: plan.view, analysis: plan.analysis ?? "purchases" };
           yield {
             type: "TOOL_CALL_ARGS",
             toolCallId,
-            delta: JSON.stringify({
-              view: plan.view,
-              analysis: plan.analysis ?? "purchases",
-            }),
+            delta: JSON.stringify(args),
           };
           yield { type: "TOOL_CALL_END", toolCallId };
           const result = await tool.execute(
             {
               toolCallId,
               name: tool.name,
-              args: { view: plan.view, analysis: plan.analysis ?? "purchases" },
+              args,
             },
             createAiToolContext({
               signal: ctx.signal,
@@ -115,7 +158,7 @@ export function createInsightsAgent(
           );
           answer = result.success
             ? result.response
-            : "The view could not be opened. Use the purchase filters instead.";
+            : "The question could not be answered. Try a different metric or use the grid filters.";
           yield {
             type: "TOOL_CALL_RESULT",
             messageId: crypto.randomUUID(),
@@ -129,12 +172,16 @@ export function createInsightsAgent(
         yield { type: "TEXT_MESSAGE_CONTENT", messageId, delta: answer };
         yield { type: "TEXT_MESSAGE_END", messageId };
         yield { type: "RUN_FINISHED", threadId, runId };
-      } catch {
+      } catch (error) {
         if (!ctx.signal?.aborted)
           yield {
             type: "RUN_ERROR",
             message:
-              "Insights assistant is unavailable. Use the purchase filters or try again later.",
+              error instanceof AssistantRequestError
+                ? error.message
+                : error instanceof DOMException && error.name === "TimeoutError"
+                  ? ASSISTANT_ERRORS.timeout
+                  : ASSISTANT_ERRORS.unavailable,
           };
       }
     },

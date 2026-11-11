@@ -33,6 +33,16 @@ import {
   createPurchaseGridStore,
   parseSavedGridView,
 } from "../lib/insights/grid-view";
+import {
+  runGuardQuery,
+  productAnalytics,
+  guardQueryLabel,
+} from "../lib/insights/query";
+import type { GuardQuery } from "../lib/insights/query-schema";
+import {
+  applyQueryToGrid,
+  PRODUCT_ANALYTIC_COLUMNS,
+} from "../lib/insights/grid-query";
 import { demoSnapshot } from "../lib/insights/demo";
 import {
   demoWorkspace,
@@ -40,7 +50,10 @@ import {
   type WorkspaceProduct,
 } from "../lib/insights/workspace";
 import { type InsightAnalysis, InsightPlanSchema } from "../lib/insights/plan";
-import { createInsightsAgent } from "../lib/insights/agent";
+import {
+  createInsightsAgent,
+  AssistantRequestError,
+} from "../lib/insights/agent";
 import {
   VIEW_LABEL,
   inInsightView,
@@ -194,6 +207,31 @@ export default function InsightsStudio({
     [demo, demoData, liveWorkspace],
   );
   const [dataView, setDataView] = useState<DataView>("products");
+  const viewRef = useRef<DataView>(dataView);
+  viewRef.current = dataView;
+  const [guardQuery, setGuardQuery] = useState<GuardQuery>();
+  const queryResult = useMemo(
+    () =>
+      guardQuery
+        ? runGuardQuery(guardQuery, { snapshot, workspace })
+        : undefined,
+    [guardQuery, snapshot, workspace],
+  );
+  const resultRef = useRef(queryResult);
+  resultRef.current = queryResult;
+  const displayedWorkspace = useMemo(
+    () => ({
+      ...workspace,
+      products:
+        queryResult?.products ??
+        (workspace.products
+          ? productAnalytics(snapshot.rows, workspace.products)
+          : null),
+      activity: queryResult?.activity ?? workspace.activity,
+      details: queryResult?.details ?? workspace.details,
+    }),
+    [workspace, snapshot, queryResult],
+  );
   const [analysis, setAnalysis] = useState<InsightAnalysis>("purchases");
   const [selection, setSelection] = useState<InsightView>("all");
   const [search, setSearch] = useState("");
@@ -235,6 +273,7 @@ export default function InsightsStudio({
     };
   }, [dataView, narrow, demo]);
   const apiRef = useRef<GridApi<unknown>>();
+  const purchaseApiRef = useRef<GridApi<InsightRow>>();
   const [harness, setHarness] = useState<AgAiHarness>();
   const harnessRef = useRef<AgAiHarness>();
   const studioRef = useRef<AgStudioApi<GuardRegistry>>();
@@ -245,6 +284,7 @@ export default function InsightsStudio({
     query.addEventListener("change", update);
     return () => query.removeEventListener("change", update);
   }, []);
+  const boundApis = useRef(new WeakSet<GridApi<unknown>>());
   const bindGrid = useCallback((api: GridApi<unknown> | undefined) => {
     apiRef.current = api;
     const update = () =>
@@ -253,14 +293,46 @@ export default function InsightsStudio({
           !api.isDestroyed() &&
           Object.keys(api.getFilterModel()).length > 0,
       );
-    api?.addEventListener("filterChanged", update);
+    if (api && !boundApis.current.has(api)) {
+      api.addEventListener("filterChanged", update);
+      api.addEventListener("modelUpdated", () => {
+        const grid = resultRef.current?.grid;
+        if (
+          !api.isDestroyed() &&
+          grid?.view === viewRef.current &&
+          grid.expandPurchase !== undefined
+        ) {
+          const node = api.getRowNode(String(grid.expandPurchase));
+          if (node && !node.expanded) node.setExpanded(true);
+        }
+      });
+      boundApis.current.add(api);
+    }
     update();
+    if (api && resultRef.current?.grid)
+      applyQueryToGrid(
+        api,
+        resultRef.current.grid,
+        window.matchMedia("(max-width:700px)").matches,
+      );
   }, []);
   const bindPurchases = useCallback(
-    (api: GridApi<InsightRow> | undefined) =>
-      bindGrid(api as GridApi<unknown> | undefined),
+    (api: GridApi<InsightRow> | undefined) => {
+      purchaseApiRef.current = api;
+      if (viewRef.current === "purchases")
+        bindGrid(api as GridApi<unknown> | undefined);
+    },
     [bindGrid],
   );
+  useEffect(() => {
+    if (dataView === "purchases")
+      bindGrid(purchaseApiRef.current as GridApi<unknown> | undefined);
+    const frame = requestAnimationFrame(() => {
+      if (apiRef.current && queryResult?.grid)
+        applyQueryToGrid(apiRef.current, queryResult.grid, narrow);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [dataView, queryResult, narrow, bindGrid]);
   const resetLinked = useCallback(() => {
     const api = studioRef.current;
     if (!api) return;
@@ -276,6 +348,17 @@ export default function InsightsStudio({
       });
   }, []);
   const resetFilters = () => {
+    if (guardQuery && apiRef.current) {
+      apiRef.current.applyColumnState({
+        defaultState: { sort: null },
+        state: [],
+      });
+      if (dataView === "products") {
+        apiRef.current.setColumnsVisible(PRODUCT_ANALYTIC_COLUMNS, false);
+        apiRef.current.setColumnsVisible(["state", "stock"], true);
+      }
+    }
+    setGuardQuery(undefined);
     setSearch("");
     setSelection("all");
     apiRef.current?.setFilterModel(null);
@@ -283,7 +366,7 @@ export default function InsightsStudio({
   };
   const changeView = (view: DataView) => {
     setDataView(view);
-    setAiOpen(false);
+    setGuardQuery(undefined);
     setSearch("");
     setNotice("");
     setSelection("all");
@@ -291,8 +374,11 @@ export default function InsightsStudio({
     resetLinked();
   };
   const shown = useMemo(
-    () => snapshot.rows.filter((row) => inInsightView(row, selection)),
-    [snapshot, selection],
+    () =>
+      (queryResult?.purchases ?? snapshot.rows).filter((row) =>
+        inInsightView(row, selection),
+      ),
+    [snapshot, selection, queryResult],
   );
   const data = useMemo<AgDataSourcesDefinition<GuardRegistry>>(
     () => ({
@@ -406,15 +492,31 @@ export default function InsightsStudio({
       panels: state.panels,
     });
   }, [initialState, showCharts]);
-  const latest = useRef({ snapshot, shopify });
-  latest.current = { snapshot, shopify };
+  const latest = useRef({ snapshot, workspace, shopify });
+  latest.current = { snapshot, workspace, shopify };
   const buildAi = useCallback(
     (api: AgStudioApi) =>
       createAiHarness(api, () => ({
         agents: [
           createInsightsAgent(api as AgStudioApi, {
             rows: () => latest.current.snapshot.rows,
+            query: (query) => {
+              const result = runGuardQuery(query, latest.current);
+              if (result.grid) {
+                setGuardQuery(query);
+                setDataView(result.grid.view);
+                setAnalysis(result.grid.analysis ?? "purchases");
+                setSelection("all");
+                setSearch("");
+                setNotice("");
+                apiRef.current?.setFilterModel(null);
+                resetLinked();
+              }
+              return result;
+            },
             select: (view) => {
+              setGuardQuery(undefined);
+              setDataView("purchases");
               setSelection(view);
               setSearch("");
               apiRef.current?.setFilterModel(null);
@@ -430,9 +532,15 @@ export default function InsightsStudio({
                   Authorization: `Bearer ${token}`,
                 },
                 body: JSON.stringify({ prompt }),
-                signal,
+                signal: AbortSignal.any([
+                  AbortSignal.timeout(30000),
+                  ...(signal ? [signal] : []),
+                ]),
               });
-              if (!response.ok) throw new Error("Assistant unavailable");
+              if (!response.ok)
+                throw new AssistantRequestError(
+                  response.status === 429 ? "rate_limit" : "unavailable",
+                );
               return InsightPlanSchema.parse(await response.json());
             },
           }),
@@ -527,6 +635,7 @@ export default function InsightsStudio({
                 aria-label="Data mode"
                 value={demo ? "demo" : "live"}
                 onChange={(e) => {
+                  setGuardQuery(undefined);
                   setDemo(e.target.value === "demo");
                   setSearch("");
                   setSelection("all");
@@ -580,6 +689,7 @@ export default function InsightsStudio({
                   aria-label="Purchase layout"
                   value={analysis}
                   onChange={(e) => {
+                    setGuardQuery(undefined);
                     setAnalysis(e.target.value as InsightAnalysis);
                     setSearch("");
                     resetLinked();
@@ -646,8 +756,15 @@ export default function InsightsStudio({
                 )}
               </div>
             </div>
-            {(filtered || search || linked || selection !== "all") && (
+            {(guardQuery ||
+              filtered ||
+              search ||
+              linked ||
+              selection !== "all") && (
               <div className={styles.activeFilters} role="status">
+                {guardQuery
+                  ? `AI result: ${guardQueryLabel(guardQuery)} · `
+                  : ""}
                 {selection !== "all"
                   ? `AI view: ${VIEW_LABEL[selection]} · `
                   : ""}
@@ -677,10 +794,10 @@ export default function InsightsStudio({
                     : panelHeight,
               }}
             >
-              {dataView === "products" ? (
+              {dataView === "products" && (
                 <ProductsGrid
                   key={`${demo}-products`}
-                  workspace={workspace}
+                  workspace={displayedWorkspace}
                   purchases={snapshot.rows}
                   demo={demo}
                   busy={busy}
@@ -691,72 +808,77 @@ export default function InsightsStudio({
                   narrow={narrow}
                   onReady={bindGrid}
                 />
-              ) : dataView === "purchases" ? (
-                <div className={styles.studio} style={{ height: "100%" }}>
-                  <AgStudio<GuardRegistry>
-                    key={demo ? "demo" : "live"}
-                    style={{ height: "100%", width: "100%" }}
-                    data={data}
-                    context={widgetContext}
-                    widgets={widgets}
-                    initialState={initialState}
-                    theme={theme}
-                    mode="view"
-                    onStudioReady={({ api }) => {
-                      studioRef.current = api as AgStudioApi<GuardRegistry>;
-                      if (aiConfigured) {
-                        harnessRef.current = buildAi(api as AgStudioApi);
-                        setHarness(harnessRef.current);
-                      }
-                    }}
-                    onStudioPreDestroyed={({ api }) => {
-                      if (studioRef.current === api) {
-                        studioRef.current = undefined;
-                        harnessRef.current?.dispose?.();
-                        harnessRef.current = undefined;
-                        setHarness(undefined);
-                      }
-                    }}
-                    onStateUpdated={({ state }) =>
-                      setLinked(
-                        state.pages.some((page) =>
-                          Object.values(page.crossFilter?.values ?? {}).some(
-                            (values) => values.length > 0,
-                          ),
-                        ),
-                      )
+              )}
+              <div
+                hidden={dataView !== "purchases"}
+                className={styles.studio}
+                style={{ height: "100%" }}
+              >
+                <AgStudio<GuardRegistry>
+                  key={demo ? "demo" : "live"}
+                  style={{ height: "100%", width: "100%" }}
+                  data={data}
+                  context={widgetContext}
+                  widgets={widgets}
+                  initialState={initialState}
+                  theme={theme}
+                  mode="view"
+                  onStudioReady={({ api }) => {
+                    studioRef.current = api as AgStudioApi<GuardRegistry>;
+                    if (aiConfigured) {
+                      harnessRef.current = buildAi(api as AgStudioApi);
+                      setHarness(harnessRef.current);
                     }
-                    aiToolDisplay={{
-                      show_purchases: {
-                        label: () => ({ text: "Update purchase view" }),
-                      },
-                    }}
-                    panels={{ view: { right: [], left: [] } }}
-                    layout={{
-                      columns: 24,
-                      rowHeight: 20,
-                      minWidth: 260,
-                      pagePadding: 0,
-                      widgetPadding: 0,
-                    }}
-                    loadThemeGoogleFonts={false}
-                  />
-                </div>
-              ) : (
+                  }}
+                  onStudioPreDestroyed={({ api }) => {
+                    if (studioRef.current === api) {
+                      studioRef.current = undefined;
+                      harnessRef.current?.dispose?.();
+                      harnessRef.current = undefined;
+                      setHarness(undefined);
+                    }
+                  }}
+                  onStateUpdated={({ state }) =>
+                    setLinked(
+                      state.pages.some((page) =>
+                        Object.values(page.crossFilter?.values ?? {}).some(
+                          (values) => values.length > 0,
+                        ),
+                      ),
+                    )
+                  }
+                  aiToolDisplay={{
+                    show_purchases: {
+                      label: () => ({ text: "Update purchase view" }),
+                    },
+                  }}
+                  panels={{ view: { right: [], left: [] } }}
+                  layout={{
+                    columns: 24,
+                    rowHeight: 20,
+                    minWidth: 260,
+                    pagePadding: 0,
+                    widgetPadding: 0,
+                  }}
+                  loadThemeGoogleFonts={false}
+                />
+              </div>
+              {(dataView === "activity" || dataView === "details") && (
                 <RecordsGrid
                   key={`${demo}-${dataView}`}
                   view={dataView}
-                  workspace={workspace}
+                  workspace={displayedWorkspace}
                   demo={demo}
                   search={search}
                   onReady={bindGrid}
                 />
               )}
             </div>
-            {aiOpen && dataView === "purchases" && harness && (
+            {aiOpen && harness && (
               <WorkspaceAssistant
                 key={demo ? "demo" : "live"}
                 harness={harness}
+                demo={demo}
                 onClose={() => setAiOpen(false)}
               />
             )}
