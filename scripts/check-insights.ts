@@ -456,3 +456,97 @@ assert.throws(() => parseSavedGridView("x".repeat(100001)));
 console.log(
   "PASS current widget snapshots, 28-day UTC proposal history and validated presentation-only saved views",
 );
+
+// Home views share the same projections without mixing demo or product identities.
+const { demoWorkspace, homeWorkspace, purchasesForProduct } =
+  await import("../app/lib/insights/workspace");
+const exampleWorkspace = demoWorkspace(demo);
+assert.equal(exampleWorkspace.products!.length, 8);
+assert.equal(exampleWorkspace.summary.spentCents, demo.summary.spentCents);
+assert.equal(
+  exampleWorkspace.summary.reservedCents,
+  demo.summary.reservedCents,
+);
+assert.ok(
+  exampleWorkspace.products!.every(
+    (product) => purchasesForProduct(demo.rows, product.variantId).length > 0,
+  ),
+);
+assert.ok(exampleWorkspace.details.every((detail) => !detail.href));
+assert.ok(
+  !JSON.stringify(exampleWorkspace).includes("/app/"),
+  "demo metadata has no real-store navigation",
+);
+assert.deepEqual(
+  purchasesForProduct(
+    [
+      { ...demo.rows[0], variantId: "product-a", product: "Same name" },
+      { ...demo.rows[1], variantId: "product-b", product: "Same name" },
+      { ...demo.rows[2], variantId: undefined, product: "Same name" },
+    ],
+    "product-a",
+  ).map((row) => row.purchase),
+  [demo.rows[0].purchase],
+);
+const scoped = insightsSnapshot(
+  log.map((entry) =>
+    entry.event.type === "proposal"
+      ? {
+          ...entry,
+          event: {
+            ...entry.event,
+            proposal: { ...entry.event.proposal, variantId: "exact-variant" },
+          },
+        }
+      : entry,
+  ),
+  {},
+  now,
+);
+assert.ok(scoped.rows.every((row) => row.variantId === "exact-variant"));
+const homeData = homeWorkspace({
+  products: [],
+  recent: [
+    {
+      seq: 1,
+      at: now.toISOString(),
+      kind: "paid",
+      title: "Paid",
+      detail: "Recorded payment",
+    },
+  ],
+  spentCents: 1234,
+  budget: { reserved: 200, remaining: 8566 },
+  balanceCents: null,
+  waiting: 1,
+  blocked: { count: 2 },
+  head: "fingerprint",
+  chain: { valid: true, length: 10 },
+  signed: null,
+  rules: {
+    approvalAbove: "$10.00",
+    weeklyCapCents: 10000,
+    cashFloorCents: 5000,
+    reorderBelow: 3,
+    allowlist: ["Supplier"],
+  },
+});
+assert.equal(homeData.summary.spentCents, 1234);
+assert.equal(
+  homeData.summary.balanceCents,
+  null,
+  "unavailable balance is not zero",
+);
+assert.equal(homeData.summary.remainingCents, 8566);
+assert.equal(
+  homeData.details.find((row) => row.setting === "7-day spending cap")?.value,
+  "$100.00",
+);
+assert.equal(
+  homeData.details.find((row) => row.setting === "Fingerprint")?.href,
+  "/app/activity",
+);
+assert.equal(homeData.activity.length, 1);
+console.log(
+  "PASS Home financial scopes, exact product joins, coherent demo grids and store details",
+);

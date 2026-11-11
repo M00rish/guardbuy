@@ -6,13 +6,9 @@ import {
   useCallback,
   useLayoutEffect,
 } from "react";
-import PurchaseAnalysisGrid, {
-  type PurchaseGridData,
-} from "./purchase-analysis-grid";
-import { createPurchaseGridStore } from "../lib/insights/grid-view";
-import { demoSnapshot } from "../lib/insights/demo";
-import { ANALYSES, type InsightAnalysis } from "../lib/insights/plan";
 import { useAppBridge } from "@shopify/app-bridge-react";
+import { AgGridProvider } from "ag-grid-react";
+import type { GridApi } from "ag-grid-community";
 import {
   AgStudio,
   AgStudioProvider,
@@ -25,23 +21,42 @@ import {
   studioTheme,
   type AgCoreDefaultRegistry,
   type AgReportState,
-  type AgAiHarnessSetup,
+  type AgAiHarness,
   type AgStudioApi,
   type AgDataSourcesDefinition,
 } from "ag-studio";
-import { createInsightsAgent } from "../lib/insights/agent";
-import { InsightPlanSchema } from "../lib/insights/plan";
+import PurchaseAnalysisGrid, {
+  purchaseGridModules,
+  type PurchaseGridData,
+} from "./purchase-analysis-grid";
 import {
-  INSIGHT_VIEWS,
+  createPurchaseGridStore,
+  parseSavedGridView,
+} from "../lib/insights/grid-view";
+import { demoSnapshot } from "../lib/insights/demo";
+import {
+  demoWorkspace,
+  type HomeWorkspaceData,
+  type WorkspaceProduct,
+} from "../lib/insights/workspace";
+import { type InsightAnalysis, InsightPlanSchema } from "../lib/insights/plan";
+import { createInsightsAgent } from "../lib/insights/agent";
+import {
   VIEW_LABEL,
   inInsightView,
   type InsightsSnapshot,
   type InsightView,
+  type InsightRow,
 } from "../lib/insights/types";
 import { readableTime, usd } from "../lib/format";
-import { Metric } from "./ui";
-import styles from "./insights.module.css";
-
+import {
+  ProductsGrid,
+  RecordsGrid,
+  StoreSummary,
+  type DataView,
+} from "./home-data-grid";
+import { WorkspaceAssistant } from "./workspace-assistant";
+import styles from "./home-workspace.module.css";
 interface GuardRegistry extends Omit<AgCoreDefaultRegistry, "widgets"> {
   widgets: readonly (
     | AgCoreDefaultRegistry["widgets"][number]
@@ -66,15 +81,10 @@ const widgets = createWidgets<GuardRegistry>({
           dataMappingItems: [{ key: "purchase", label: "Purchase identifier" }],
         }),
       defaultSize: { width: 1000, height: 650 },
-      minSize: { width: 280, height: 450 },
+      minSize: { width: 260, height: 280 },
     },
   ],
 });
-const ANALYSIS_LABELS = {
-  purchases: "Purchase details",
-  suppliers: "Supplier comparison",
-  status: "Status pivot",
-};
 function analysisWidget(): PurchaseGridData {
   return {
     type: "guardbuy-purchases",
@@ -143,97 +153,146 @@ const desktopState: AgReportState<GuardRegistry> = {
         purchases: analysisWidget(),
       },
       widgetLayout: {
-        outcomes: { xTrack: 0, yTrack: 34, xSpan: 10, ySpan: 15 },
-        trend: { xTrack: 10, yTrack: 34, xSpan: 14, ySpan: 15 },
-        purchases: { xTrack: 0, yTrack: 0, xSpan: 24, ySpan: 34 },
+        outcomes: { xTrack: 0, yTrack: 31, xSpan: 10, ySpan: 14 },
+        trend: { xTrack: 10, yTrack: 31, xSpan: 14, ySpan: 14 },
+        purchases: { xTrack: 0, yTrack: 0, xSpan: 24, ySpan: 31 },
       },
     },
   ],
 };
+
+const viewLabels: Record<DataView, string> = {
+  products: "Products",
+  purchases: "Purchases",
+  activity: "Activity",
+  details: "Store details",
+};
 export default function InsightsStudio({
   snapshot: liveSnapshot,
+  workspace: liveWorkspace,
   licenseKey,
   gridLicenseKey,
   aiConfigured,
-  shop = "preview",
-  home = false,
+  shop,
+  busy = false,
+  onManage,
 }: {
   snapshot: InsightsSnapshot;
+  workspace: HomeWorkspaceData;
   licenseKey: string;
   gridLicenseKey: string;
   aiConfigured: boolean;
-  shop?: string;
-  home?: boolean;
+  shop: string;
+  busy?: boolean;
+  onManage?: (product: WorkspaceProduct) => void;
 }) {
   const [demo, setDemo] = useState(false);
   const demoData = useMemo(() => demoSnapshot(), []);
   const snapshot = demo ? demoData : liveSnapshot;
-  const [days, setDays] = useState(0);
-  const datedRows = useMemo(
-    () =>
-      snapshot.rows.filter(
-        (row) =>
-          !days ||
-          Date.parse(row.proposedAt) >=
-            Date.parse(snapshot.checkedAt) - days * 86400000,
-      ),
-    [snapshot, days],
+  const workspace = useMemo(
+    () => (demo ? demoWorkspace(demoData) : liveWorkspace),
+    [demo, demoData, liveWorkspace],
   );
+  const [dataView, setDataView] = useState<DataView>("products");
   const [analysis, setAnalysis] = useState<InsightAnalysis>("purchases");
-  const studioApi = useRef<AgStudioApi<GuardRegistry>>();
+  const [selection, setSelection] = useState<InsightView>("all");
+  const [search, setSearch] = useState("");
+  const [notice, setNotice] = useState("");
+  const [showCharts, setShowCharts] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
   const [linked, setLinked] = useState(false);
-  const resetLinked = useCallback(() => {
-    const api = studioApi.current;
-    if (!api) return;
-    const state = api.getState();
-    if (!state.pages.some((page) => page.crossFilter || page.filter)) return;
-    api.setState({
-      ...state,
-      pages: state.pages.map((page) => ({
-        ...page,
-        crossFilter: undefined,
-        filter: undefined,
-      })),
-    });
-  }, []);
-  const analyze = useCallback(
-    (next: InsightAnalysis) => {
-      setAnalysis(next);
-      resetLinked();
-    },
-    [resetLinked],
-  );
-  const [view, setView] = useState<InsightView>("all");
-  const shopify = useAppBridge();
+  const [filtered, setFiltered] = useState(false);
   const [narrow, setNarrow] = useState(
-    () => window.matchMedia("(max-width: 700px)").matches,
+    () => window.matchMedia("(max-width:700px)").matches,
   );
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [panelHeight, setPanelHeight] = useState(440);
+  const gridTracks = Math.ceil(panelHeight / 20);
+  // Measure from the document top: scrolling must not change the grid's height.
+  useLayoutEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    const update = () => {
+      const top = panel.getBoundingClientRect().top + window.scrollY;
+      const available = Math.round(
+        Math.max(
+          narrow ? 360 : 320,
+          Math.min(760, window.innerHeight - top - 56),
+        ),
+      );
+      setPanelHeight((previous) =>
+        previous === available ? previous : available,
+      );
+    };
+    const observer = new ResizeObserver(update);
+    observer.observe(document.body);
+    if (panel.parentElement) observer.observe(panel.parentElement);
+    window.addEventListener("resize", update);
+    update();
+    return () => {
+      observer.disconnect();
+      window.removeEventListener("resize", update);
+    };
+  }, [dataView, narrow, demo]);
+  const apiRef = useRef<GridApi<unknown>>();
+  const [harness, setHarness] = useState<AgAiHarness>();
+  const harnessRef = useRef<AgAiHarness>();
+  const studioRef = useRef<AgStudioApi<GuardRegistry>>();
+  const shopify = useAppBridge();
   useEffect(() => {
-    const query = window.matchMedia("(max-width: 700px)");
+    const query = window.matchMedia("(max-width:700px)");
     const update = () => setNarrow(query.matches);
     query.addEventListener("change", update);
     return () => query.removeEventListener("change", update);
   }, []);
-  const initialState = useMemo<AgReportState<GuardRegistry>>(
-    () =>
-      narrow
-        ? {
-            ...desktopState,
-            pages: desktopState.pages.map((page) => ({
-              ...page,
-              widgetLayout: {
-                outcomes: { xTrack: 0, yTrack: 36, xSpan: 24, ySpan: 15 },
-                trend: { xTrack: 0, yTrack: 51, xSpan: 24, ySpan: 15 },
-                purchases: { xTrack: 0, yTrack: 0, xSpan: 24, ySpan: 36 },
-              },
-            })),
-          }
-        : desktopState,
-    [narrow],
+  const bindGrid = useCallback((api: GridApi<unknown> | undefined) => {
+    apiRef.current = api;
+    const update = () =>
+      setFiltered(
+        !!api &&
+          !api.isDestroyed() &&
+          Object.keys(api.getFilterModel()).length > 0,
+      );
+    api?.addEventListener("filterChanged", update);
+    update();
+  }, []);
+  const bindPurchases = useCallback(
+    (api: GridApi<InsightRow> | undefined) =>
+      bindGrid(api as GridApi<unknown> | undefined),
+    [bindGrid],
   );
+  const resetLinked = useCallback(() => {
+    const api = studioRef.current;
+    if (!api) return;
+    const state = api.getState();
+    if (state.pages.some((page) => page.crossFilter || page.filter))
+      api.setState({
+        ...state,
+        pages: state.pages.map((page) => ({
+          ...page,
+          crossFilter: undefined,
+          filter: undefined,
+        })),
+      });
+  }, []);
+  const resetFilters = () => {
+    setSearch("");
+    setSelection("all");
+    apiRef.current?.setFilterModel(null);
+    resetLinked();
+  };
+  const changeView = (view: DataView) => {
+    setDataView(view);
+    setAiOpen(false);
+    setSearch("");
+    setNotice("");
+    setSelection("all");
+    setFiltered(false);
+    resetLinked();
+  };
   const shown = useMemo(
-    () => datedRows.filter((row) => inInsightView(row, view)),
-    [datedRows, view],
+    () => snapshot.rows.filter((row) => inInsightView(row, selection)),
+    [snapshot, selection],
   );
   const data = useMemo<AgDataSourcesDefinition<GuardRegistry>>(
     () => ({
@@ -243,38 +302,20 @@ export default function InsightsStudio({
           name: "Recorded purchases",
           data: shown.map((row) => ({ ...row, count: 1 })),
           fields: [
-            {
-              id: "purchase",
-              name: "Purchase",
-              format: "integerFormat",
-              createValueFormatter: () => (value) => `#${value}`,
-            },
-            ...[
-              "product",
-              "supplier",
-              "status",
-              "reason",
-              "paymentReference",
-              "route",
-            ].map((id) => ({
+            { id: "purchase", name: "Purchase", format: "integerFormat" },
+            ...["product", "supplier", "status", "reason"].map((id) => ({
               id,
-              name: (
-                {
-                  paymentReference: "Payment reference",
-                  reason: "Decision reasons",
-                } as Record<string, string>
-              )[id],
+              name: id,
               format: "textFormat" as const,
             })),
             ...["amount", "settled", "reserved"].map((id) => ({
               id,
-              name: (
-                {
-                  amount: "Proposal value",
-                  settled: "Settled (net refunds)",
-                  reserved: "Reserved",
-                } as Record<string, string>
-              )[id],
+              name:
+                id === "amount"
+                  ? "Proposal value"
+                  : id === "settled"
+                    ? "Settled (net refunds)"
+                    : "Reserved",
               format: "integerFormat" as const,
               createValueFormatter: () => (value: number) =>
                 usd(Math.round(value * 100)),
@@ -282,22 +323,35 @@ export default function InsightsStudio({
             { id: "count", name: "Purchases", format: "integerFormat" },
           ],
         },
-        { id: "trend", name: "Settled spend by UTC day", data: snapshot.trend },
       ],
     }),
-    [shown, snapshot.trend],
+    [shown],
   );
   const context = useMemo(
     () => ({
-      gridLicenseKey,
       rows: shown,
       allRows: snapshot.rows,
       analysis,
       demo,
       checkedAt: snapshot.checkedAt,
       storageKey: `guardbuy-grid:${shop}:${demo ? "demo" : "live"}`,
+      gridLicenseKey,
+      compact: true,
+      search,
+      narrow,
+      onReady: bindPurchases,
     }),
-    [snapshot, shown, analysis, demo, shop, gridLicenseKey],
+    [
+      shown,
+      snapshot,
+      analysis,
+      demo,
+      shop,
+      gridLicenseKey,
+      search,
+      narrow,
+      bindPurchases,
+    ],
   );
   const [purchaseStore] = useState(() => createPurchaseGridStore(context));
   useLayoutEffect(
@@ -305,242 +359,433 @@ export default function InsightsStudio({
     [purchaseStore, context],
   );
   const widgetContext = useMemo(() => ({ purchaseStore }), [purchaseStore]);
-  // The AI harness is initial-only too: callbacks must read current date-filtered rows.
-  const latest = useRef({ datedRows, shopify });
-  latest.current = { datedRows, shopify };
-  const ai = useMemo<AgAiHarnessSetup>(
-    () =>
-      ({ api }) =>
-        createAiHarness(api as AgStudioApi, () => ({
-          agents: [
-            createInsightsAgent(api as AgStudioApi, {
-              rows: () => latest.current.datedRows,
-              select: (next) => {
-                setView(next);
-                resetLinked();
-              },
-              analyze,
-              plan: async (prompt, signal) => {
-                const token = await latest.current.shopify.idToken();
-                const response = await fetch("/app/insights/plan", {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                  },
-                  body: JSON.stringify({ prompt }),
-                  signal,
-                });
-                if (!response.ok) throw new Error("Assistant unavailable");
-                return InsightPlanSchema.parse(await response.json());
-              },
-            }),
-          ],
-          primary: "guardbuy-insights",
-          promptStarters: [
-            {
-              label: "Compare suppliers",
-              prompt: "Compare suppliers by settled spend",
-            },
-            {
-              label: "Why were proposals blocked?",
-              prompt: "Show blocked proposals and their reasons",
-            },
-            {
-              label: "Payment status by supplier",
-              prompt: "Show payment status by supplier",
-            },
-          ],
-        })),
-    [analyze, resetLinked],
+  const initialState = useMemo<AgReportState<GuardRegistry>>(
+    () => ({
+      ...desktopState,
+      pages: desktopState.pages.map((page) => ({
+        ...page,
+        widgets: showCharts
+          ? page.widgets
+          : { purchases: page.widgets!.purchases },
+        widgetLayout: {
+          purchases: { xTrack: 0, yTrack: 0, xSpan: 24, ySpan: gridTracks },
+          ...(showCharts
+            ? {
+                outcomes: {
+                  xTrack: 0,
+                  yTrack: gridTracks,
+                  xSpan: narrow ? 24 : 10,
+                  ySpan: 14,
+                },
+                trend: {
+                  xTrack: narrow ? 0 : 10,
+                  yTrack: narrow ? gridTracks + 14 : gridTracks,
+                  xSpan: narrow ? 24 : 14,
+                  ySpan: 14,
+                },
+              }
+            : {}),
+        },
+      })),
+    }),
+    [showCharts, narrow, gridTracks],
   );
+  // Reflow the fixed report without destroying the grid or its current filters.
+  useEffect(() => {
+    const api = studioRef.current;
+    if (!api) return;
+    const state = api.getState();
+    api.setState({
+      ...state,
+      pages: initialState.pages.map((page) => ({
+        ...page,
+        crossFilter: showCharts
+          ? state.pages.find((old) => old.id === page.id)?.crossFilter
+          : undefined,
+      })),
+      panels: state.panels,
+    });
+  }, [initialState, showCharts]);
+  const latest = useRef({ snapshot, shopify });
+  latest.current = { snapshot, shopify };
+  const buildAi = useCallback(
+    (api: AgStudioApi) =>
+      createAiHarness(api, () => ({
+        agents: [
+          createInsightsAgent(api as AgStudioApi, {
+            rows: () => latest.current.snapshot.rows,
+            select: (view) => {
+              setSelection(view);
+              setSearch("");
+              apiRef.current?.setFilterModel(null);
+              resetLinked();
+            },
+            analyze: (next) => setAnalysis(next),
+            plan: async (prompt, signal) => {
+              const token = await latest.current.shopify.idToken();
+              const response = await fetch("/app/insights/plan", {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  Authorization: `Bearer ${token}`,
+                },
+                body: JSON.stringify({ prompt }),
+                signal,
+              });
+              if (!response.ok) throw new Error("Assistant unavailable");
+              return InsightPlanSchema.parse(await response.json());
+            },
+          }),
+        ],
+        primary: "guardbuy-insights",
+        promptStarters: [
+          {
+            label: "Compare suppliers",
+            prompt: "Compare suppliers by settled spend",
+          },
+          {
+            label: "Explain blocked purchases",
+            prompt: "Show blocked proposals and their reasons",
+          },
+        ],
+      })),
+    [resetLinked],
+  );
+  const viewKey = `guardbuy-workspace:v2:${shop}:${demo ? "demo" : "live"}:${dataView}:${dataView === "purchases" ? analysis : "default"}`;
+  const savedAction = (action: string) => {
+    const api = apiRef.current;
+    if (!api || api.isDestroyed()) return;
+    try {
+      if (action === "save") {
+        localStorage.setItem(
+          viewKey,
+          JSON.stringify({
+            version: 1,
+            columns: api.getColumnState(),
+            filters: api.getFilterModel(),
+            pivot: api.isPivotMode(),
+            search,
+          }),
+        );
+        setNotice("View saved for this store, data mode and grid view.");
+      } else if (action === "restore") {
+        const raw = localStorage.getItem(viewKey);
+        if (!raw) {
+          setNotice("No saved layout for this view yet.");
+          return;
+        }
+        const saved = parseSavedGridView(raw);
+        api.setGridOption("pivotMode", saved.pivot);
+        api.applyColumnState({ state: saved.columns, applyOrder: true });
+        api.setFilterModel(saved.filters);
+        setSearch(saved.search);
+        setNotice("Saved columns and filters restored.");
+      } else resetFilters();
+    } catch {
+      setNotice("The saved view is unavailable in this browser.");
+    }
+  };
+  const chartSelection = () => {
+    const api = apiRef.current;
+    const range = api?.getCellRanges()?.at(-1);
+    if (
+      !range?.startRow ||
+      !range.endRow ||
+      !range.columns.some(
+        (column) => column.getColDef().chartDataType === "series",
+      )
+    ) {
+      setNotice(
+        "Select numeric cells in the grid, then choose Chart selection.",
+      );
+      return;
+    }
+    api?.createRangeChart({
+      cellRange: {
+        rowStartIndex: range.startRow.rowIndex,
+        rowEndIndex: range.endRow.rowIndex,
+        columns: range.columns,
+      },
+      chartType: "groupedColumn",
+    });
+  };
   return (
     <AgStudioProvider
       licenseKey={licenseKey || undefined}
       modules={[AgStudioAiModule]}
     >
-      <s-stack gap="base">
-        <div className={styles.hero}>
-          <div>
-            <span className={styles.eyebrow}>GUARDBUY / PURCHASE EXPLORER</span>
-            <h2>Your purchasing, in focus.</h2>
-            <p>
-              Compare suppliers, follow the money, and explore the decisions
-              behind it.
-            </p>
+      <AgGridProvider
+        modules={purchaseGridModules}
+        licenseKey={gridLicenseKey || undefined}
+      >
+        <section className={styles.workspace} aria-label="Home data workspace">
+          <div className={styles.overviewHeading}>
+            <strong>{demo ? "Demo store summary" : "Store summary"}</strong>
+            <label>
+              Data{" "}
+              <select
+                aria-label="Data mode"
+                value={demo ? "demo" : "live"}
+                onChange={(e) => {
+                  setDemo(e.target.value === "demo");
+                  setSearch("");
+                  setSelection("all");
+                  setNotice("");
+                  setFiltered(false);
+                }}
+              >
+                <option value="live">Live store</option>
+                <option value="demo">Fictional demo</option>
+              </select>
+            </label>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setDemo(!demo);
-              setView("all");
-              analyze("purchases");
-            }}
-            aria-pressed={demo}
-          >
-            {demo ? "Return to live data" : "Explore demo data"}
-          </button>
-        </div>
-        {demo && (
-          <s-banner heading="Demo data · fictional purchases" tone="info">
-            64 example purchases across four suppliers. This does not create
-            products, submit payments or change store records. Return to live
-            data to inspect your store. Home’s status and budget totals above
-            remain live.
-          </s-banner>
-        )}
-        {!home && (
-          <s-section>
-            <div className={styles.metrics}>
-              <Metric
-                label="Spent · last 7 days"
-                value={usd(snapshot.summary.spentCents)}
-                detail="Settled payments, net of recorded refunds"
-              />
-              <Metric
-                label="Reserved"
-                value={usd(snapshot.summary.reservedCents)}
-                detail="Pending payments and unexpired approval commitments"
-              />
-              <Metric
-                label="Remaining budget"
-                value={usd(snapshot.summary.remainingCents)}
-                detail="7-day spending cap minus spent and reserved"
-              />
-              <Metric
-                label="Blocked proposal value · all time"
-                value={usd(snapshot.summary.blockedCents)}
-                detail={`${snapshot.summary.blockedCount} blocked ${snapshot.summary.blockedCount === 1 ? "proposal" : "proposals"}; not realized savings`}
-              />
+          {demo && (
+            <div className={styles.demo} role="status">
+              Fictional demo · all workspace values are examples. Store controls
+              above remain live. Product actions and real-record links are
+              disabled.
             </div>
-          </s-section>
-        )}
-        <s-section>
-          <s-stack gap="base">
-            <s-heading>
-              {demo ? "Demo purchasing analysis" : "Purchasing analysis"}
-            </s-heading>
-            <div className={styles.filters} aria-label="Analysis mode">
-              {ANALYSES.map((id) => (
+          )}
+          <StoreSummary summary={workspace.summary} narrow={narrow} />
+          <div className={styles.main}>
+            <div
+              className={styles.tabs}
+              role="tablist"
+              aria-label="Home data views"
+            >
+              {(Object.keys(viewLabels) as DataView[]).map((view) => (
                 <button
-                  key={id}
+                  key={view}
+                  id={`tab-${view}`}
                   type="button"
-                  aria-pressed={analysis === id}
-                  onClick={() => analyze(id)}
+                  role="tab"
+                  aria-selected={dataView === view}
+                  aria-controls="home-grid-panel"
+                  onClick={() => changeView(view)}
                 >
-                  {ANALYSIS_LABELS[id]}
+                  {viewLabels[view]}
                 </button>
               ))}
-              <button type="button" onClick={resetLinked}>
-                Reset chart filters{linked ? " · selection active" : ""}
-              </button>
             </div>
-            <div className={styles.filters} aria-label="Date range">
-              {[0, 7, 30].map((value) => (
-                <button
-                  key={value}
-                  type="button"
-                  aria-pressed={days === value}
-                  onClick={() => {
-                    setDays(value);
+            <div className={styles.toolbar}>
+              <input
+                aria-label={`Search ${viewLabels[dataView].toLowerCase()}`}
+                placeholder={`Search ${viewLabels[dataView].toLowerCase()}…`}
+                value={search}
+                maxLength={800}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+              {dataView === "purchases" && (
+                <select
+                  aria-label="Purchase layout"
+                  value={analysis}
+                  onChange={(e) => {
+                    setAnalysis(e.target.value as InsightAnalysis);
+                    setSearch("");
                     resetLinked();
                   }}
                 >
-                  {value
-                    ? `Proposed in last ${value} days`
-                    : "All recorded dates"}
-                </button>
-              ))}
-            </div>
-            <div className={styles.filters} aria-label="Purchase views">
-              {INSIGHT_VIEWS.map((id) => (
+                  <option value="purchases">Purchase details</option>
+                  <option value="suppliers">Supplier comparison</option>
+                  <option value="status">Status pivot</option>
+                </select>
+              )}
+              <div className={styles.actions}>
+                <select
+                  aria-label="Saved view actions"
+                  value=""
+                  onChange={(e) => savedAction(e.target.value)}
+                >
+                  <option value="" disabled>
+                    Saved views
+                  </option>
+                  <option value="save">Save this view</option>
+                  <option value="restore">Restore saved view</option>
+                  <option value="clear">Clear all filters</option>
+                </select>
+                {(dataView === "products" || dataView === "purchases") && (
+                  <button type="button" onClick={chartSelection}>
+                    Chart selection
+                  </button>
+                )}
                 <button
-                  key={id}
                   type="button"
-                  aria-pressed={view === id}
+                  onClick={() =>
+                    apiRef.current?.exportDataAsExcel({
+                      fileName: `guardbuy-${demo ? "demo-" : ""}${dataView}.xlsx`,
+                      columnKeys: apiRef.current
+                        .getAllDisplayedColumns()
+                        .filter((column) => column.getColId() !== "history"),
+                      exportedRows: "filteredAndSorted",
+                      autoConvertFormulas: false,
+                    })
+                  }
+                >
+                  Export
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={showCharts && dataView === "purchases"}
                   onClick={() => {
-                    setView(id);
-                    resetLinked();
+                    setDataView("purchases");
+                    setShowCharts(!showCharts);
                   }}
                 >
-                  {VIEW_LABEL[id]}
+                  Insights
                 </button>
-              ))}
+                {aiConfigured && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDataView("purchases");
+                      setAiOpen(true);
+                    }}
+                  >
+                    Ask AI
+                  </button>
+                )}
+              </div>
             </div>
-            <s-text>
-              {days
-                ? `Proposed in last ${days} days · `
-                : "All recorded dates · "}
-              {VIEW_LABEL[view]} · {shown.length}{" "}
-              {shown.length === 1 ? "purchase" : "purchases"} before chart
-              selections. Sort or cross-filter with a chart selection. Expand
-              supplier rows to explore products; use the purchase view for
-              decision details.
-            </s-text>
-            {aiConfigured && (
-              <s-text tone="neutral">
-                The assistant sends your request to the configured AI provider.
-                Do not enter secrets or personal information.
-              </s-text>
+            {(filtered || search || linked || selection !== "all") && (
+              <div className={styles.activeFilters} role="status">
+                {selection !== "all"
+                  ? `AI view: ${VIEW_LABEL[selection]} · `
+                  : ""}
+                {linked ? "Chart selection active · " : ""}
+                {filtered ? "Column filters active · " : ""}
+                {search ? `Search: ${search} · ` : ""}
+                <button type="button" onClick={resetFilters}>
+                  Clear filters
+                </button>
+              </div>
             )}
-            {!aiConfigured && (
-              <s-text tone="neutral">
-                The assistant is unavailable. You can still explore purchases
-                with the filters.
-              </s-text>
+            {notice && (
+              <div className={styles.notice} role="status">
+                {notice}
+              </div>
             )}
-            <s-text tone="neutral">
-              Recorded snapshot: {readableTime(snapshot.checkedAt)}. This page
-              does not refresh PayPal or submit payments.
-            </s-text>
-            <div className={styles.studio}>
-              <AgStudio<GuardRegistry>
-                style={{ height: "100%", width: "100%" }}
-                key={`${demo ? "demo" : "live"}-${narrow ? "mobile" : "desktop"}`}
-                onStudioReady={({ api }) => {
-                  studioApi.current = api as AgStudioApi<GuardRegistry>;
-                }}
-                onStudioPreDestroyed={({ api }) => {
-                  if (studioApi.current === api) studioApi.current = undefined;
-                }}
-                onStateUpdated={({ state }) =>
-                  setLinked(
-                    state.pages.some((page) =>
-                      Object.values(page.crossFilter?.values ?? {}).some(
-                        (values) => Array.isArray(values) && values.length > 0,
-                      ),
-                    ),
-                  )
-                }
-                data={data}
-                context={widgetContext}
-                initialState={initialState}
-                widgets={widgets}
-                theme={theme}
-                mode="edit"
-                ai={aiConfigured ? ai : undefined}
-                aiToolDisplay={{
-                  show_purchases: {
-                    label: () => ({ text: "Update analysis" }),
-                  },
-                }}
-                panels={{
-                  edit: { right: aiConfigured ? ["ai"] : [], left: [] },
-                }}
-                layout={{
-                  minWidth: 280,
-                  columns: 24,
-                  rowHeight: 20,
-                  pagePadding: 12,
-                  widgetPadding: 12,
-                }}
-                loadThemeGoogleFonts={false}
+            <div
+              id="home-grid-panel"
+              role="tabpanel"
+              aria-labelledby={`tab-${dataView}`}
+              className={styles.gridPanel}
+              ref={panelRef}
+              style={{
+                height:
+                  dataView === "purchases"
+                    ? gridTracks * 20 + (showCharts ? (narrow ? 560 : 280) : 0)
+                    : panelHeight,
+              }}
+            >
+              {dataView === "products" ? (
+                <ProductsGrid
+                  key={`${demo}-products`}
+                  workspace={workspace}
+                  purchases={snapshot.rows}
+                  demo={demo}
+                  busy={busy}
+                  onManage={(product) => {
+                    if (!demo) onManage?.(product);
+                  }}
+                  search={search}
+                  narrow={narrow}
+                  onReady={bindGrid}
+                />
+              ) : dataView === "purchases" ? (
+                <div className={styles.studio} style={{ height: "100%" }}>
+                  <AgStudio<GuardRegistry>
+                    key={demo ? "demo" : "live"}
+                    style={{ height: "100%", width: "100%" }}
+                    data={data}
+                    context={widgetContext}
+                    widgets={widgets}
+                    initialState={initialState}
+                    theme={theme}
+                    mode="view"
+                    onStudioReady={({ api }) => {
+                      studioRef.current = api as AgStudioApi<GuardRegistry>;
+                      if (aiConfigured) {
+                        harnessRef.current = buildAi(api as AgStudioApi);
+                        setHarness(harnessRef.current);
+                      }
+                    }}
+                    onStudioPreDestroyed={({ api }) => {
+                      if (studioRef.current === api) {
+                        studioRef.current = undefined;
+                        harnessRef.current?.dispose?.();
+                        harnessRef.current = undefined;
+                        setHarness(undefined);
+                      }
+                    }}
+                    onStateUpdated={({ state }) =>
+                      setLinked(
+                        state.pages.some((page) =>
+                          Object.values(page.crossFilter?.values ?? {}).some(
+                            (values) => values.length > 0,
+                          ),
+                        ),
+                      )
+                    }
+                    aiToolDisplay={{
+                      show_purchases: {
+                        label: () => ({ text: "Update purchase view" }),
+                      },
+                    }}
+                    panels={{ view: { right: [], left: [] } }}
+                    layout={{
+                      columns: 24,
+                      rowHeight: 20,
+                      minWidth: 260,
+                      pagePadding: 0,
+                      widgetPadding: 0,
+                    }}
+                    loadThemeGoogleFonts={false}
+                  />
+                </div>
+              ) : (
+                <RecordsGrid
+                  key={`${demo}-${dataView}`}
+                  view={dataView}
+                  workspace={workspace}
+                  demo={demo}
+                  search={search}
+                  onReady={bindGrid}
+                />
+              )}
+            </div>
+            {aiOpen && dataView === "purchases" && harness && (
+              <WorkspaceAssistant
+                key={demo ? "demo" : "live"}
+                harness={harness}
+                onClose={() => setAiOpen(false)}
               />
+            )}
+            <div className={styles.footer}>
+              <span>
+                Snapshot {readableTime(snapshot.checkedAt)} ·{" "}
+                {demo
+                  ? "Fictional data"
+                  : "Store summary is independent of grid filters"}
+                {dataView === "activity" ? " · Latest 100 recorded events" : ""}
+                {dataView === "purchases"
+                  ? " · Row totals cover filtered purchase history"
+                  : ""}
+              </span>
+              <details>
+                <summary>Help</summary>
+                <p>
+                  Use column menus or the Filters panel to narrow records.
+                  Expand a product for its purchases, or a purchase for its
+                  recorded decision. Select numeric cells for totals and charts.
+                  Exports include filtered, sorted rows. The assistant sends
+                  only your request to the configured AI provider; keep secrets
+                  and personal information out of prompts.
+                </p>
+              </details>
             </div>
-            {!demo && <s-link href="/app/activity">View all activity</s-link>}
-          </s-stack>
-        </s-section>
-      </s-stack>
+          </div>
+        </section>
+      </AgGridProvider>
     </AgStudioProvider>
   );
 }

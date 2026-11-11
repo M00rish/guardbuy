@@ -1,3 +1,4 @@
+import type { GridApi } from "ag-grid-community";
 import { z } from "zod";
 import type { InsightRow } from "./types";
 import type { InsightAnalysis } from "./plan";
@@ -10,6 +11,10 @@ export type PurchaseGridSnapshot = {
   storageKey: string;
   checkedAt: string;
   gridLicenseKey: string;
+  search?: string;
+  compact?: boolean;
+  narrow?: boolean;
+  onReady?: (api: GridApi<InsightRow> | undefined) => void;
 };
 // Studio's context is initial-only. The widget subscribes explicitly so date,
 // view and AI changes always read the current, correctly scoped snapshot.
@@ -46,6 +51,18 @@ const columnId = z
         "reserved",
         "history",
         "proposedAt",
+        "title",
+        "sku",
+        "stock",
+        "incoming",
+        "cover",
+        "managed",
+        "state",
+        "at",
+        "kind",
+        "category",
+        "setting",
+        "value",
       ].includes(id) || id.startsWith("ag-Grid-AutoColumn"),
   );
 // Persist only presentation state, never rows, payment details or licence keys.

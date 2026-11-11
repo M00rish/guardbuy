@@ -1,0 +1,304 @@
+.workspace {
+  font:
+    13px/1.4 Arial,
+    sans-serif;
+  color: #213c35;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  padding: 0 16px;
+}
+.overviewHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.overviewHeading label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #64766e;
+}
+.summary {
+  min-width: 0;
+}
+.summaryValue {
+  font-size: 16px;
+  font-weight: 650;
+}
+.main {
+  min-width: 0;
+  border: 1px solid #dce7e1;
+  border-radius: 10px;
+  background: white;
+  overflow: hidden;
+}
+.tabs {
+  display: flex;
+  border-bottom: 1px solid #dce7e1;
+  overflow: auto;
+}
+.tabs button {
+  white-space: nowrap;
+  background: transparent;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  padding: 12px 18px;
+  color: #64766e;
+  font: inherit;
+  cursor: pointer;
+}
+.tabs button[aria-selected="true"] {
+  border-bottom-color: #007f65;
+  color: #006b55;
+  font-weight: 700;
+}
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #f7faf8;
+}
+.toolbar input {
+  width: 240px;
+  max-width: 100%;
+}
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+.workspace input:not([type="checkbox"]),
+.workspace select,
+.toolbar button {
+  font: inherit;
+  border: 1px solid #cddbd4;
+  border-radius: 6px;
+  background: white;
+  color: #213c35;
+  padding: 8px 10px;
+  box-sizing: border-box;
+}
+.toolbar button,
+.workspace select {
+  cursor: pointer;
+}
+.workspace button:focus-visible,
+.workspace input:focus-visible,
+.workspace select:focus-visible {
+  outline: 2px solid #007f65;
+  outline-offset: 2px;
+}
+.gridPanel {
+  height: 440px;
+  min-width: 0;
+}
+.studio {
+  width: 100%;
+  min-width: 0;
+}
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 12px;
+  font-size: 11px;
+  color: #64766e;
+  border-top: 1px solid #dce7e1;
+}
+.footer details {
+  max-width: 60ch;
+}
+.footer summary {
+  cursor: pointer;
+  color: #006b55;
+}
+.demo,
+.notice,
+.activeFilters {
+  padding: 8px 12px;
+  font-size: 12px;
+  background: #edf7f3;
+}
+.activeFilters button {
+  border: 0;
+  background: none;
+  color: #006b55;
+  font: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+.demo {
+  border: 1px solid #c5dfd3;
+  border-radius: 6px;
+}
+.productName {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  height: 100%;
+  line-height: 1.3;
+  overflow: hidden;
+}
+.productName strong,
+.productName small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.productName small {
+  color: #64766e;
+  font-size: 11px;
+}
+.badge {
+  display: inline-block;
+  max-width: 100%;
+  vertical-align: middle;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 11px;
+  border-radius: 5px;
+  line-height: 24px;
+  padding: 0 7px;
+  color: #56635d;
+  background: #eef1ef;
+}
+.badge[data-tone="success"] {
+  background: #e0f5e9;
+  color: #087450;
+}
+.badge[data-tone="warning"] {
+  background: #fff2da;
+  color: #865918;
+}
+.badge[data-tone="critical"] {
+  background: #ffeded;
+  color: #ad3c3c;
+}
+.badge[data-tone="info"] {
+  background: #e5f0ff;
+  color: #275b91;
+}
+.productDetail {
+  height: 100%;
+  padding: 12px 20px;
+  box-sizing: border-box;
+  background: #f2f8f5;
+}
+.detailHeading {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.detailHeading a,
+.productDetail a {
+  color: #006b55;
+}
+.history {
+  height: 240px;
+}
+.empty {
+  padding: 30px;
+}
+@media (max-width: 700px) {
+  .workspace {
+    padding: 0 8px;
+    gap: 8px;
+  }
+  .summaryValue {
+    font-size: 14px;
+  }
+  .tabs button {
+    padding: 10px;
+    font-size: 12px;
+  }
+  .toolbar {
+    padding: 8px;
+  }
+  .toolbar input {
+    width: 100%;
+  }
+  .actions {
+    margin-left: 0;
+  }
+  .actions button,
+  .actions select {
+    font-size: 12px;
+    padding: 7px;
+  }
+  .gridPanel {
+    height: 460px;
+  }
+  .footer {
+    line-height: 1.5;
+  }
+  .productDetail {
+    padding: 10px;
+  }
+}
+.assistant {
+  position: fixed;
+  right: 20px;
+  top: 90px;
+  bottom: 20px;
+  width: 350px;
+  max-width: calc(100vw - 40px);
+  z-index: 1000;
+  background: white;
+  box-shadow: 0 8px 40px #153c3240;
+  border: 1px solid #cddbd4;
+  border-radius: 10px;
+  padding: 16px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.assistant p {
+  margin: 4px 0;
+}
+.assistant .detailHeading button,
+.assistant form button {
+  font: inherit;
+  background: #007f65;
+  color: white;
+  border: 0;
+  border-radius: 5px;
+  padding: 7px 10px;
+  cursor: pointer;
+}
+.assistant button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.transcript {
+  flex: 1;
+  overflow: auto;
+}
+.message {
+  padding: 10px;
+  margin: 8px 0;
+  border-radius: 6px;
+  background: #f2f8f5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.message[data-role="user"] {
+  background: #edf2f7;
+}
+.assistant textarea {
+  display: block;
+  width: 100%;
+  margin: 6px 0;
+  box-sizing: border-box;
+  resize: vertical;
+  font: inherit;
+}
