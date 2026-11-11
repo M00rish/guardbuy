@@ -18,7 +18,7 @@ export const unauthenticated = {
     graphql: async (query: string) => {
       if (!query.includes("inventoryItem")) throw new Error("Unexpected Shopify query in worker test");
       const stock = await (await fetch(`${base()}/test/stock?shop=${encodeURIComponent(shop)}`)).json() as { available: number };
-      return Response.json({ data: { inventoryItem: { variant: { id: "gid://shopify/ProductVariant/123", sku: "coffee", createdAt: new Date(Date.now() - 40 * 86400_000).toISOString() }, inventoryLevels: { nodes: [{ quantities: [{ quantity: stock.available }] }] } } } });
+      return Response.json({ data: { inventoryItem: { tracked: true, variant: { id: "gid://shopify/ProductVariant/123", sku: "coffee", createdAt: new Date(Date.now() - 40 * 86400_000).toISOString() }, inventoryLevels: { nodes: [{ quantities: [{ quantity: stock.available }] }] } } } });
     },
   } }),
 };
