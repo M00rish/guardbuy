@@ -60,9 +60,9 @@ assert.equal(publicAudit(unknown).payments.total, 1, "resolved attempts and thei
 for (let i = 0; i < 40; i++) add({ type: "approved", decisionSeq: d, approvedBy: "private-staff" });
 assert.equal(publicAudit(log).timeline.length, 30);
 
-// Public code must stay read-only, authenticated through the proxy, and explicitly opt-in.
-const api = readFileSync("app/routes/proxy_.api.tsx", "utf8");
-const shell = readFileSync("app/routes/proxy.tsx", "utf8");
+// The relocated real-store dashboard stays read-only, proxy-authenticated and explicitly opt-in.
+const api = readFileSync("app/routes/proxy_.store_.api.tsx", "utf8");
+const shell = readFileSync("app/routes/proxy_.store.tsx", "utf8");
 const server = readFileSync("app/lib/demo/dashboard.server.ts", "utf8");
 for (const code of [api, shell]) {
   assert.ok(code.includes("authenticate.public.appProxy(request)"));
@@ -73,10 +73,15 @@ assert.ok(/export const action = \(\) => new Response\("Read-only dashboard", \{
 assert.ok(!/appendAudit|runRestock|runPayPalTool|refreshPayouts|reconcileShop|sweepPayPalOrders/.test(server));
 assert.ok(!/innerHTML|localStorage|data-action=|method: "POST"/.test(shell));
 assert.ok(server.includes("test:true created_at:"));
-// Compile the exact JavaScript served inside the static template (without importing Shopify).
+// Compile both served browser scripts without importing Shopify.
 const rawShell = shell.match(/export const SHELL = `([\s\S]*?)`;/)![1];
 const html = new Script("`" + rawShell + "`").runInNewContext() as string;
 new Script(html.match(/<script>([\s\S]*?)<\/script>/)![1]);
+const consoleSource = readFileSync("app/lib/judge/console-shell.ts", "utf8");
+const rawConsole = consoleSource.match(/export const CONSOLE_SHELL = `([\s\S]*?)`;/)![1];
+const consoleHtml = new Script("`" + rawConsole + "`").runInNewContext() as string;
+new Script(consoleHtml.match(/<script>([\s\S]*?)<\/script>/)![1]);
+assert.ok(!/innerHTML/.test(consoleHtml), "untrusted judge data must be rendered as text");
 const privateTests = readFileSync("app/routes/app.attack-tests.tsx", "utf8");
 assert.ok(privateTests.includes("adminWithStaff(request)"));
 assert.ok(privateTests.includes("sha256Hex(actor)"));
