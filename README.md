@@ -1,351 +1,162 @@
-# GuardBuy
+# GuardBuy: judge deployment and testing
 
-**An AI restocking agent for Shopify that can't overspend.** The AI proposes what to reorder. A deterministic policy engine, running rules the merchant signed, decides. PayPal pays the supplier. Every step is written to a hash-chained audit log that anyone can verify.
+Use this guide to deploy your own GuardBuy instance and Shopify development store. Give it to your coding agent; the agent performs the setup and tests, while you supply credentials through a local `.env` file or your hosting service’s secret manager.
 
-Built for the PayPal AI Hackathon (Devpost, 2026). MIT licensed.
+**Fresh accounts still require their owner to sign in and approve Shopify installation/permissions. PayPal account creation, service entitlements and Telegram pairing may also require owner interaction. This repository does not automate those provider requirements.** An agent can handle the remaining commands and browser setup once accounts are accessible. Never paste secrets into chat, commits or deployment logs.
 
----
+## 1. Supply accounts and environment values
 
-## Why
+Use a new Shopify development store, a separate Shopify app, an empty Postgres database and PayPal **sandbox** accounts. Do not reuse the original demo’s app ID, database or payment mapping.
 
-Small Shopify merchants reorder stock by hand: watch inventory, guess quantities, email the supplier, pay. AI agents can do this, but nobody should hand an LLM their PayPal account. A supplier's message can carry a prompt injection, an inflated price, or a changed payout address, and the model may go along with it.
+The agent needs Node.js 22.12+, npm, Git, Shopify CLI, authenticated Shopify access and access to your hosting provider. Render and Neon are the reference hosting/database combination; another persistent Node host and Postgres also work.
 
-GuardBuy's answer is to keep the AI away from the decision:
+| Value                                      | What to supply                                                                                                                                                      |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`    | Client ID and secret for your own Shopify app. The agent can create/link the app using Shopify CLI after you sign in.                                               |
+| `SHOPIFY_APP_URL`                          | Your deployed HTTPS app origin, without a trailing slash. The agent fills this after provisioning hosting.                                                          |
+| `DATABASE_URL`                             | Initially your owner’s pooled Postgres URL. The agent replaces it with the restricted app-role URL in step 2.                                                       |
+| `DIRECT_URL`                               | Owner’s direct Postgres URL, used for migrations and role setup.                                                                                                    |
+| `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET` | Sandbox REST app credentials for the merchant funding business account.                                                                                             |
+| `SUPPLIER_EMAIL`                           | Email of a different sandbox account that receives supplier payments.                                                                                               |
+| `GUARDBUY_PAYPAL_STORES`                   | Store/account binding JSON below. Merchant payer ID is the sandbox account’s PayPal merchant/account ID, not its email or supplier ID.                              |
+| `OPENROUTER_API_KEY`                       | Required for the default purchase model chain. Use an account with working model access and quota.                                                                  |
+| `GOOGLE_GENERATIVE_AI_API_KEY`             | Optional additional provider for advanced Insights questions. A Google key alone requires an explicit working Google model in `GUARDBUY_LLM_MODELS` for purchasing. |
+| `AG_STUDIO_LICENSE_KEY`                    | Valid AG Studio Pro entitlement for the Home workspace and assistant.                                                                                               |
+| `AG_GRID_LICENSE_KEY`                      | Valid combined AG Grid / AG Charts Enterprise entitlement. Both AG licence variables are required to enable Home analysis in production.                            |
+| `GUARDBUY_PRIVACY_CONTACT`                 | Your public HTTPS support URL or `mailto:` address.                                                                                                                 |
+| `JOBS_SECRET`                              | Agent-generated random secret, at least 24 characters.                                                                                                              |
+| `GUARDBUY_DEMO_STORE`                      | Your new store’s exact `*.myshopify.com` domain.                                                                                                                    |
 
-- **The AI only proposes.** It reads stock, sales speed and supplier offers, and suggests a purchase with its reasoning.
-- **Signed rules decide.** A plain TypeScript policy engine checks every proposal against limits the merchant signed. The AI can't change them, and its output is treated as untrusted.
-- **One executor moves money**, and only after the rules allow it. It re-checks the rules at the moment of payment.
-- **Everything is logged** in an append-only, hash-chained audit log. A public page lets anyone check a PayPal payment against it.
+Create two distinct PayPal sandbox accounts: merchant funding and supplier receiving. The funding app needs Payouts and access to balance/transaction reporting. Fund the merchant sandbox account above the cash floor plus planned purchases. An app key being valid does not guarantee its reporting/Payouts permissions work; check these before payment tests. GuardBuy supports the exact sandbox API origin only.
 
-## How it works
-
-```mermaid
-flowchart LR
-  S["Shopify<br>stock + sales"] --> T["Low stock<br>(inventory webhook)"]
-  T --> A["AI proposes<br>(Gemini, fallback models)"]
-  A --> P{"Policy engine<br>signed rules"}
-  P -->|allow| X["Executor<br>PayPal Payouts"]
-  P -->|needs a person| Q["Approvals<br>in-app or in PayPal (Orders)"]
-  P -->|block| B["Blocked + reason"]
-  Q --> X
-  X --> L["Hash-chained audit log"]
-  B --> L
-  Q --> L
-  L --> V["Public verify page"]
+```dotenv
+# Replace every placeholder; this is one JSON line.
+GUARDBUY_PAYPAL_STORES={"your-store.myshopify.com":{"clientId":"YOUR_PAYPAL_CLIENT_ID","payerIds":["YOUR_MERCHANT_SANDBOX_PAYER_ID"]}}
+PAYPAL_API_BASE=https://api-m.sandbox.paypal.com
+SCOPES=read_products,read_orders,read_inventory,read_locations,write_inventory,write_app_proxy
+GUARDBUY_PUBLIC_DEMO_ENABLED=false
+TELEGRAM_ALERTS_ENABLED=false
+# Keep payments and the inventory worker off during provisioning/seeding.
+GUARDBUY_PAYMENTS_DISABLED=1
+GUARDBUY_RESTOCK_WORKER=off
 ```
 
-1. **Trigger.** Shopify's `inventory_levels/update` webhook commits a durable inventory job before responding; `orders/create` keeps daily sales current. A web-process worker reads current stock/sales and handles queued jobs. No scheduled stock sweep is enabled; a webhook that never reaches the app still has no automatic hourly fallback.
-2. **Proposal.** When a switched-on product drops below the merchant's restock point (days of stock left), the AI picks a supplier and quantity from the suppliers the merchant linked, with its reasoning. The model that answered is recorded.
-3. **Decision.** The policy engine runs every rule. The strictest result wins: `allow`, `approval` (a person decides) or `block`.
-4. **Payment.**
-   - Allowed purchases are paid by PayPal Payout to the supplier's PayPal email on file.
-   - Purchases that need a person wait in **Approvals**. The merchant approves in GuardBuy, or in PayPal itself through a PayPal order with the supplier as payee.
-   - At payment time the rules are checked again against fresh numbers.
-5. **Reconciliation.** Visiting Activity or Approvals checks existing supplier payouts with PayPal and confirms transaction IDs through the Agent Toolkit. Checks append status evidence without sending payments. The refresh button and its polling skip the Approvals page's existing order-capture sweep; a normal Approvals visit retains that sweep. No scheduled payment or stock job is enabled.
+The agent derives store URLs, IDs and configuration from the accounts you provision; judges should not have to edit source code. Start from [`.env.example`](.env.example), but use the current scope list above and model configuration described here rather than its older model-order comment. Optional supplier refill credentials are not required for normal payments.
 
-   Verified item-level PayPal webhooks are the primary payout update path. At startup the deployed app registers `/paypal/webhook` on the configured sandbox REST app (using `SHOPIFY_APP_URL` and existing PayPal credentials), reuses an existing matching subscription and stores its webhook ID server-side. No additional webhook key is needed. Registration retries safely if PayPal is unavailable; until connected the UI reports reconciliation mode.
+Credential portals: [Shopify Dev Dashboard](https://dev.shopify.com/dashboard), [PayPal Developer](https://developer.paypal.com/dashboard/), [OpenRouter](https://openrouter.ai/settings/keys), [Google AI Studio](https://aistudio.google.com/apikey), [AG Grid licensing](https://www.ag-grid.com/license-pricing/).
 
-   Notifications are verified through PayPal's signature API before a minimal receipt and coalescing batch signal are committed. A worker matches the provider batch to a bound GuardBuy payout and reads its current state; notification status and URLs are never used as payment proof or provider endpoints. This handles duplicates, delayed events and notifications arriving before the payment audit commit. Provider reads retain durable leases and stale-worker fencing. Uncertain payments remain reserved; no webhook can send/capture a payment. The UI refreshes recorded data while pending, rather than querying PayPal every minute.
-
-   When webhooks are connected, missed-event reconciliation is due every six hours (daily for transaction-confirmed payouts) while app pages/jobs run. If registration is unavailable, the 5/15/30/60-minute backoff remains available. Hidden tabs pause page refreshes. Receipts keep event IDs only and are pruned after seven days; coalesced signals contain batch IDs and matched shop references, never recipient details or webhook bodies. Unknown signals wait up to three days for audit commit; matched jobs are removed on shop suppression/erasure. Subscription metadata belongs to the shared PayPal app, not an individual shop. Set `GUARDBUY_PAYPAL_WEBHOOKS=off` to disable registration and the webhook worker. The independent audit checkpoint workflow remains unchanged.
-
-### The rules
-
-| Rule | What it does |
-| --- | --- |
-| Product switched on / supplier linked / supplier approved | Only products and suppliers the merchant chose, ever |
-| PayPal email on file | The AI never chooses who gets paid |
-| Price cap | An optional hard maximum price per product |
-| Price you accepted | A price more than your tolerance (default $0.50 per unit) above the one you entered or last approved → a person approves once, and that becomes the new accepted price. Small automatic increases can't add up |
-| Quantity limit, order size vs your history | No orders many times larger than usual; more than 1.5× what you usually buy of a product → a person confirms |
-| Split orders | Purchases of the same product from the same supplier within 24 h count together against the approval limit |
-| New or lookalike supplier | The first purchase from a supplier added in the last 30 days, or any purchase from one whose name imitates another supplier's → a person confirms |
-| Purchases per 24 h, weekly spending cap | Limits how often and how much; the weekly cap also counts purchases still waiting for approval |
-| Cash floor | Never takes the PayPal balance below a set amount |
-| Recent payee change | A supplier's PayPal email changed in the last 14 days → a person confirms |
-| "No approval needed" claims | Supplier text claiming pre-approval or urgency → a person confirms |
-| Approval limit | Purchases above the limit wait for the merchant |
-
-Rules are signed by a Shopify staff member: their id and the rules' SHA-256 fingerprint are written to the audit log, and every decision records which rule set it used.
-
-### Safety details
-
-- **Durable payment attempts (ISM-134).** Before any Payout, Order creation or capture, GuardBuy appends the chosen route, account fingerprint, request ID and exact request body to the audit chain. No credentials are stored in that snapshot. Unknown outcomes keep the product and committed budget reserved indefinitely; recorded provider-pending payments also retain their budget reservation until an item/capture status settles. A missing transaction-search result never releases money. Known captures can be recovered with a read-only Order lookup after a restart.
-
-  For a missing Payout or Order-creation response, use **Approvals → Resume original payment**. This is an explicit payment action: it may perform the original payment if the first call never reached PayPal. It always reuses the persisted body/account/key, re-checks current safety rules, and cannot select another payment route. Payout duplicate recovery verifies the original batch's sender ID, recipient, amount and currency. Read-only refresh never replays an unknown payment POST; the normal Approvals sweep may still capture a newly approved Order with no prior uncertain capture.
-
-  Retries stop after conservative API-specific windows: 29 days for Payouts and 5 hours for Order creation/capture. A known Order can still be checked read-only afterwards. An expired unknown request, changed funding account or failed replay safety check requires manual provider reconciliation; its reservation remains. Do not create a replacement purchase or edit/delete audit rows to release it. Legacy `payment_failed` entries without positive failure evidence are conservatively held too; historical requests with no recorded evidence cannot be reconstructed automatically. There is no scheduled payment-recovery worker or manual release of uncertain reservations. The inventory worker below recovers restock processing and never automatically replays an uncertain payment POST.
-
-  Payment writers share a renewable database lease for the configured funding account across stores. Audit reservation writes verify lease ownership, and conditional audit inserts prevent route races. Separate product leases coordinate restock proposals. Offline regression checks: `npx tsx scripts/check-payment-attempts.ts`, `npx tsx scripts/check-payment-http.ts`, and `npx tsx scripts/check-paypal-errors.ts`; they use in-memory state or a localhost fake provider and send no real payments.
-
-- **Unpaid approvals stay visible (ISM-135).** Approvals separates staff approval from payment confirmation. A definitively rejected request stays on its card with a reason. **Retry payment** keeps the same purchase, supplier and amount, re-checks current safety rules, and records a new attempt only after confirmed rejection. **Resume original payment** handles an unknown outcome using its saved request and idempotency key; it never changes routes. Provider-pending payments remain visible until confirmation. Refreshing payout status does not submit a retry.
-
-  Staff can cancel an unpaid failed purchase; the cancellation is logged, and the existing decline cooldown applies before the agent proposes it again. Unknown or provider-pending payments cannot be cancelled through this flow. Failed purchases stop accepting retries after the original 48-hour approval window but remain visible for cancellation. Older approvals with no saved request or positive failure evidence require manual PayPal reconciliation and retain their reservation. Approval actions use a database lease plus conditional audit writes across workers. `npx tsx scripts/check-unpaid-approvals.ts` runs offline workflow regressions; `scripts/check-unpaid-approvals-db.ts` additionally tests the actual queue and database coordination against a disposable local Postgres database named `guardbuy_ism135_test`.
-
-- **Durable inventory jobs (ISM-43).** The inventory webhook saves one `RestockJob` per shop/inventory item before acknowledging delivery. Bursts coalesce into generations; a worker can finish only its claimed generation, and later webhooks remain pending. Expired claims resume after a restart. Audit proposals carry a stable job/generation ID, so recovery completes the original proposal/decision rather than generating a replacement. A recorded or uncertain payment is never automatically submitted again by job recovery. Each money-moving action still uses the current signed rules, bound payee/amount, emergency stop and a shared funding-account lease.
-
-  A worker starts with the production web process. It polls the database every five seconds while idle, drains work sequentially in each process, and renews job leases every 20 seconds (120-second expiry). Product and funding leases use the database clock, renew every 15 seconds and expire after 60 seconds; stale workers cannot append new reservations or definitive failures. Queue failures back off up to five minutes; AI proposal failures retain the original generation for a 15-minute retry. New webhooks do not bypass an active retry cooldown. Reads use fresh stock and sales; paused or uninstalled stores do not start new purchases.
-
-  Render free instances can sleep: saved jobs resume when the web process wakes, not while it is stopped. Polling can keep Neon awake while the web service is running. Set `GUARDBUY_RESTOCK_WORKER=off` to pause queue processing without deleting work; local development opts in with `on`. `GUARDBUY_PAYMENTS_DISABLED=1` still blocks money movement. The optional `/jobs/hourly` sweep now enqueues durable checks, but no scheduler is enabled by this change.
-
-  Deployment requires `prisma migrate deploy` for `RestockJob`. The migration grants the existing `guardbuy_app` role read/write access to this mutable coordination table; the audit log's append-only restrictions stay in place. No new credentials, Shopify scopes or external worker service are needed. Real multi-process regressions run via `npx tsx scripts/check-payment-workers.ts` against the disposable local `guardbuy_ism43_test` database: route races, approval/decline, forced lease loss, process death, callback/sweep capture, shared funding, coalesced jobs and startup recovery. Provider/AI/Shopify responses are simulated; the executor, queue, audit writes and leases use the actual code and Postgres.
-
-- **Append-only audit log, enforced in three places.**
-  - *Hash chain:* each entry's hash covers the previous hash, so editing, deleting or reordering any past entry breaks every hash after it. Home and Activity verify the whole chain on load.
-  - *Database:* the running app connects as `guardbuy_app`, a role that can read and add audit entries but has no UPDATE, DELETE or TRUNCATE privilege on them. A trigger also rejects edits and deletes from the owner role, unless the transaction explicitly opts in (only check scripts cleaning up throwaway test shops do that). `scripts/check-audit-readonly.ts` proves both.
-  - *Outside the database:* historical fingerprints are in `anchors/fingerprints.jsonl`. The independent R2 checkpoint workflow is enabled every six hours. It recomputes database history and checks existing external checkpoints before publishing changes. Bootstrap and an unchanged repeat run passed on 31 October 2026. The app's Home/Activity checks currently verify internal consistency only; they do not establish external verification. See [checkpoint status and setup](anchors/README.md).
-- **Re-check at payment.** Approvals expire after 48 hours, and the rules and balance are checked again just before money moves.
-- **One payment per decision.** A database lock (`PaymentLock`) and PayPal idempotency keys mean a double click, a second tab or a retry can't pay twice.
-- **Approve in PayPal.** Only merchant payer IDs explicitly bound to the store and configured client ID can fund capture (`GUARDBUY_PAYPAL_STORES`). Missing and wrong payers are refused. A fresh wrong-payer order can be closed without a capture; an uncertain earlier capture stays reserved for reconciliation. The obsolete global `GUARDBUY_APPROVER_PAYER_IDS` is ignored.
-- **Kill switch.** `GUARDBUY_PAYMENTS_DISABLED=1` refuses every payout and capture.
-- **Least privilege.**
-  - Shopify scopes: `read_products`, `read_orders`, `read_inventory`, `read_locations`, `write_inventory`, `write_app_proxy`. Inventory writes record physical delivery receipts and reset demo stock.
-  - PayPal Agent Toolkit: only the read-only `get_order` and `list_transactions` tools are loaded.
-- **Untrusted text stays labelled.** Supplier notes and the AI's explanation are shown as "not verified" and never drive a payment on their own.
-
-## PayPal
-
-| What | How GuardBuy uses it |
-| --- | --- |
-| **Payouts API** (`/v1/payments/payouts`) | Pays suppliers for purchases the rules allow, or that a staff member approved in GuardBuy |
-| **Orders API v2** (`/v2/checkout/orders`) | "Approve in PayPal": an order with the supplier as payee, approved by the merchant in PayPal, then captured |
-| **Balances** (`/v1/reporting/balances`) | Cash-floor rule, adjusted for PayPal's reporting lag |
-| **Agent Toolkit: `get_order`** | Checks order status on return from PayPal and in the background sweep |
-| **Agent Toolkit: `list_transactions`** | Confirms each payout in PayPal's own transaction records |
-
-**Sandbox account ownership (ISM-37).** This server reads one global `PAYPAL_CLIENT_ID` / `PAYPAL_CLIENT_SECRET`. Automatic and in-app-approved Payouts spend that sandbox business account's balance. PayPal Orders pay the recorded supplier from the sandbox account whose payer approves checkout; it must be one of the merchant payer IDs explicitly bound to that shop. These can be different accounts. Supplier credentials are used only by test/refill scripts. There is no per-store PayPal credential storage or onboarding.
-
-Before enabling payments, set `GUARDBUY_PAYPAL_STORES` as server-side JSON, for example:
-
-```json
-{"your-store.myshopify.com":{"clientId":"your-sandbox-client-id","payerIds":["YOURMERCHANTPAYERID"]}}
-```
-
-Use the exact Shopify shop domain, the configured client ID and the intended merchant's sandbox payer ID (not its email or the supplier's payer). A shop absent from this mapping cannot submit Payouts, create Orders or capture them. Empty/malformed lists, missing payer identity and another shop's payer fail closed. Bind only shops whose owner has deliberately authorized this account; a configuration entry is operator configuration, not a merchant consent/onboarding product. Startup validates mappings before starting the restock worker. An enabled public demo must name a bound demo store. Account/client changes require rebinding and manual reconciliation of saved attempts from the old account. Coordinate real credential changes with ISM-133; this PR does not rotate any credentials.
-
-REST and Agent Toolkit both require the exact `https://api-m.sandbox.paypal.com` origin. Live and alternate API origins are rejected, including with the public judge dashboard enabled. This app does not enable live payments. Before real merchant use, establish the supported PayPal ownership, onboarding, merchant consent and production permissions model separately.
-
-Deployment: add the explicit mapping before starting this version with payments enabled. If it is not ready, set `GUARDBUY_PAYMENTS_DISABLED=1` to run a sandbox server that displays history while refusing payment writes. There is no permissive development payer exception. Offline HTTP tests alone opt into a loopback fake REST API with both `NODE_ENV=test` and `GUARDBUY_PAYPAL_TEST_API=1`; the real Toolkit refuses that different environment and integration tests replace its reads with a local adapter. Do not set the test flag in deployment. Existing read-only settlement recovery continues to record already completed payments, even when a mapping is later removed; removing authorization never proves an earlier attempt unpaid.
-
-Checks: `npx tsx scripts/check-paypal-binding.ts` covers store/account binding and startup configuration without provider I/O. The multi-process/Postgres suite also exercises the actual executor with a simulated provider to prove refused identities send zero capture requests.
-
-Start production with `npm run start`. Its logger preload keeps request methods, paths and response status while omitting every query parameter, including Shopify session tokens and PayPal return identities. Do not bypass the preload by invoking `react-router-serve` directly. `node scripts/check-access-logs.mjs` exercises the logger with real local HTTP requests. This does not remove historical deployment logs; review prior exposure and credential rotation separately under ISM-133.
-
-## Try it
-
-**Judges:** open the demo store in one tab and `/apps/guardbuy` in another. The public dashboard is read-only and shows actual managed stock, today’s test-order count (UTC), recorded restock decisions, and supplier payment outcomes. Place a test checkout order in the storefront and watch the stock change. All visitors see the same store; this is no longer a per-judge simulated sandbox.
-
-**Enable the dashboard:** explicitly set `GUARDBUY_PUBLIC_DEMO_ENABLED=true` and `GUARDBUY_DEMO_STORE` to the intended demo shop domain. It is disabled by default and refuses to open if PayPal’s configured API base is not the sandbox. The delivery feature requires `read_inventory`, `read_locations` and `write_inventory` in addition to the existing app scopes; release the updated Shopify configuration and approve permissions. No database migration is required. Opening the page is consent to expose only aggregate activity for that store: no customer records, supplier emails, payment IDs, approval URLs, AI reasoning, staff identities, or raw provider errors are returned.
-
-The page polls every 15 seconds while visible, with a shared 15-second server cache. This polling can keep Render and Neon awake while judges watch. Test-order counts come from Shopify (only `test:true` orders created today UTC; cancelled test orders still count as orders placed). Stock shows up to 50 managed variants. Missing data is labelled unavailable rather than zero. Restock/payment totals cover recorded non-simulation history, not just today. Stock change arrows are observations in the current browser tab, not guaranteed attribution to a particular customer order.
-
-Public requests never send payments, capture orders, reconcile PayPal or change inventory. The old proxy action API returns 405. Payment outcomes are the last known audit evidence; keep the merchant Activity/Approvals page available and refresh statuses there. A batch-level payout SUCCESS alone is not shown as recipient success. A supplier payment does not replenish Shopify stock until goods are recorded as received.
-
-**Prepare and manually test the demo:**
-
-1. Configure Shopify test checkout (Bogus Gateway or a payment provider’s test mode) on the dedicated demo store, and give judges test checkout instructions. Never ask them to use a real card. Verify that a completed checkout is marked as a test order.
-2. In GuardBuy, manage a published product, link its supplier and sandbox payee, sign appropriate rules, and check the sales rate/reorder threshold. Ensure there is no unresolved restock already blocking another proposal.
-3. Pause the agent while preparing stock. Use Shopify Admin’s inventory adjustment to set available stock just above the reorder threshold, then resume the agent. Buy enough units in test checkout to cross the threshold. The existing reset script sets coffee directly to low stock and also tops up the PayPal sandbox balance: do not use it as a blind reset for this purchase-triggered scenario.
-4. Confirm the order count increases and stock decreases on the public dashboard. Allow time for Shopify webhooks, order indexing and AI processing. The timeline should show a proposal and policy decision. Outcomes can require merchant review; do not weaken rules merely to guarantee automatic payment.
-5. If review is required, approve from the merchant app. Refresh payout status in Activity and confirm the public outcome updates on its next poll. Compare with PayPal sandbox. Check that no second payment appears when the public page is refreshed.
-6. Verify a POST to the public proxy API returns 405, a non-enabled store cannot access either route, and dashboard JSON contains no personal data or payment credentials. Test stock/order API errors: show unavailable or stale data, never an invented zero.
-7. Reset stock only through Shopify Admin or the authenticated backend reset tooling. Never delete production audit history to rerun a demo. Use the isolated environment planned in ISM-137 for repeatable fixture resets.
-
-**Optional attack tests:** enabled demo-store staff can open Rules & Approvals → Rules → Open private demo attack tests (`/app/attack-tests`). Tests use an authenticated staff-specific record namespace, not the real shop’s inventory or orders. The real AI attack and explicitly simulated “AI fooled” options remain separate, and neither pays suppliers. Refresh results after the background AI run finishes. These tests may consume AI API usage.
-
-**Merchant admin:** Home, Products & suppliers (Products and Suppliers tabs), Rules & Approvals (Approvals and Rules tabs), Deliveries, Activity (audit log and public verification settings), and Alerts.
-
-**Public verify page:** `/verify?id=<PayPal payout or order id>` shows whether a payment is on a store's audit log, which signed rules allowed it, and whether the log is intact.
-
-### Receiving supplier deliveries
-
-Approval submits a payment; it does not increase stock. Open **Deliveries** in the merchant app to see ordered, received and outstanding quantities. Successful payment must be recorded before starting a receipt. Pick the actual receiving location and enter the units physically received. Partial receipts are supported; over-receipts and stale submissions are rejected. Pending receipt attempts can be retried using **Confirm existing receipt**. No public route can receive deliveries.
-
-A receipt appends a durable intent to the audit chain, calls Shopify `inventoryAdjustQuantities` with the same UUID idempotency key on every retry, then records completion. An atomic database audit condition prevents concurrent reservations or duplicate completion entries even if the outer coordination lease expires. If the API response or final audit write is lost, the pending intent remains and blocks a second receipt. [Shopify retains idempotency keys for 24 hours](https://shopify.dev/docs/apps/build/apis/graphql-admin/implementing-idempotency); after 23 hours an ambiguous receipt is refused and requires manual reconciliation against Shopify inventory history. Do not adjust inventory manually and then retry the same receipt.
-
-Incoming quantity is GuardBuy's outstanding order total, not Shopify's native inventory-transfer `incoming` state. Available stock stays unchanged until a receipt succeeds. Failed/refunded payments do not erase already received goods. Outstanding variant orders no longer expire after three days; they keep duplicate restocks blocked until received. Legacy audit entries without a variant ID retain the old cooldown and cannot be received through this screen.
-
-Existing purchases with a variant ID and no recorded receipts appear outstanding. Review them before receiving: goods that were already added manually to Shopify must not be added again through a new receipt. Shipping, cancellations and administrative reconciliation of historical deliveries are outside this first receipt flow.
-
-For deployment, release the updated `shopify.app.toml` scopes (`read_inventory`, `read_locations`, existing `write_inventory`) and approve Shopify's permission update. No database migration or new secret is needed. Manually test a paid order with a partial receipt: available stock rises only by the received amount, remaining incoming decreases, repeating the same submission adds nothing, and the final receipt closes the order. Keep payment approval and inventory receipt as separate actions.
-
-## Run it locally
-
-Requirements:
-- Node 22.12+
-- [Shopify CLI](https://shopify.dev/docs/apps/tools/cli) and a Shopify Partner account with a development store
-- A Postgres database (Neon works)
-- A PayPal developer account with sandbox apps
-- A Gemini API key (an OpenRouter key is optional, for fallback models)
+## 2. Agent: prepare the application and database
 
 ```bash
 git clone https://github.com/M00rish/guardbuy.git
-```
-
-```bash
-cd guardbuy && npm ci
-```
-
-```bash
+cd guardbuy
+npm ci
 cp .env.example .env
 ```
 
-Fill in `.env` (every variable is described there), then apply the database migrations:
+Have the judge fill the secret values before continuing. Include the Shopify app values listed above in `.env`; they are not all present in the example. For Neon, use the provider’s pooled/direct connection strings with SSL enabled.
 
 ```bash
+npx prisma generate
 npx prisma migrate deploy
-```
-
-Create the app's restricted database role. This makes `DATABASE_URL` in `.env` connect as `guardbuy_app`, which can't change the audit log; `DIRECT_URL` stays the owner, for migrations:
-
-```bash
 npx tsx scripts/create-app-role.ts --rotate
 ```
 
-Start the app. This opens a tunnel and installs it on your dev store:
+The role script reads `DIRECT_URL`, creates `guardbuy_app`, generates its password and rewrites `DATABASE_URL` in `.env`. It never prints the password. Keep `DIRECT_URL` as the owner connection. Transfer the resulting restricted `DATABASE_URL` to the host’s secret manager securely. Do not run `--rotate` repeatedly against an existing deployment; it changes the running app role’s password.
+
+## 3. Agent: create and seed the Shopify store
+
+1. Use an existing empty development store, or run `shopify store create dev --name "CoffeBuy Judging" --plan basic --json`. Follow the authenticated organization-selection prompts. Use the returned domain throughout this guide.
+2. Create the judge’s app in Shopify’s Dev Dashboard, then run `shopify app config link --client-id YOUR_SHOPIFY_API_KEY --file-name judging` to link it. This creates `shopify.app.judging.toml`; retain its newly assigned client ID. Copy the repository configuration’s required scopes, webhook subscriptions, API version `2026-10`, auth callbacks and app proxy into this new configuration. Keep the webhook API version aligned with `app/shopify.server.ts`.
+3. Temporarily add `write_products,write_orders,write_publications` to the judging app’s required scopes for seeding. Keep all normal scopes. Enable local URL updates only in this separate judging configuration while using the development tunnel.
+4. Start the development session:
 
 ```bash
-npm run dev
+shopify app dev --config judging --store YOUR_STORE.myshopify.com
 ```
 
-Optional demo data, with `shopify app dev` running. The CLI prints the GraphiQL URL:
-- `scripts/seed-dev-store.ts` creates the demo products and 30 days of test orders. It needs write scopes added temporarily; see the comment at the top of the script.
-- `scripts/seed-demo-suppliers.ts` adds the demo suppliers and links them.
+Complete installation and approve the temporary seed scopes. Leave this process running. Open the app once so its authenticated store session exists. Use the actual GraphiQL proxy URL offered by the CLI, including its local access key, as `GRAPHIQL_URL`; do not commit or print that URL. Select API version `2026-10`.
 
-Then in the app:
-1. Switch on products.
-2. Add suppliers with their PayPal emails.
-3. Link suppliers to products.
-4. Sign your rules.
-
-Home walks you through these steps.
-
-### Checks
-
-Offline and deterministic (they run in CI):
+In a second terminal, set `SHOP` to the new store domain and `GRAPHIQL_URL` to that private local proxy URL, then run:
 
 ```bash
-npx tsx scripts/check-policy.ts
+npx tsx scripts/seed-dev-store.ts
+npx tsx scripts/seed-demo-suppliers.ts
 ```
+
+The first script creates five coffee/homeware products, publishes them to Online Store, adds 30 days of test orders and sets starting stock. It can take several minutes due to Shopify’s test-order rate limits. The second uses `SUPPLIER_EMAIL`, links suppliers and switches on demo products. Both use the same database as the eventual hosted app. Existing SKUs/seeded days are reused, but rerunning seeding can reset stock and supplier setup; do not rerun it during an active payment test.
+
+The seed scripts do **not** create the recorded CoffeBuy storefront design or product images. This repository contains no exported CoffeBuy theme. For a reproducible judging store, the agent should use/publish the development store’s free Shopify theme, set its display name to CoffeBuy, show the seeded product collection and verify products are purchasable. Exact reproduction of the recording needs a separately supplied theme export/assets.
+
+In Shopify admin, the agent configures a test payment gateway, a shipping zone/rate and stock at the shipping location. Keep the development store’s password protection; give the judge its storefront password privately. No paid Shopify plan or live payment method is needed for these tests.
+
+## 4. Agent: deploy the hosted app
+
+Use [Render](https://dashboard.render.com/) to create a Node web service from your fork/checkout. [`render.yaml`](render.yaml) is a starting blueprint; override its original demo domain and its incomplete `SCOPES` value with your values from step 1. Add the AG licence values separately: they are not listed in the blueprint. Optional integrations can be left unset/disabled.
+
+| Setting       | Value                                            |
+| ------------- | ------------------------------------------------ |
+| Node          | 22.12+                                           |
+| Build command | `npm ci && npx prisma generate && npm run build` |
+| Start command | `npx prisma migrate deploy && npm run start`     |
+| Health check  | `/healthz`                                       |
+| `NODE_ENV`    | `production`                                     |
+
+Set all required environment values from step 1, including the rewritten app-role database URL, and deploy. Migrations use `DIRECT_URL`; the server uses `DATABASE_URL`. Use `npm run start` so the access-log preload is retained. A free Render instance can sleep and delay workers; an always-running instance gives a more predictable live demo.
+
+Update **only** `shopify.app.judging.toml` for the deployed origin:
+
+- `application_url`: your HTTPS app origin.
+- `auth.redirect_urls`: that origin plus `/auth/callback` and `/auth/shopify/callback`.
+- `app_proxy.url`: that origin plus `/proxy`; keep prefix `apps` and subpath `guardbuy`.
+- Required scopes: the normal `SCOPES` list from step 1; remove temporary product/order/publication write scopes after seeding.
+- `build.automatically_update_urls_on_dev = false` after returning to the hosted app.
 
 ```bash
-npx tsx scripts/check-scoreboard.ts
+shopify app config validate --config judging --json
+shopify app deploy --config judging
 ```
 
-The other `scripts/check-*.ts` scripts use the database, the PayPal sandbox or the AI: `check-verify`, `check-recheck`, `check-unhappy`, `check-paypal-errors`, `check-approvals`, `check-attacks`, `check-judge`. Read each script's header before running it: some move sandbox money. `check-recheck` and `check-unhappy` turn on the kill switch themselves.
+Stop the local development preview and open the deployed app from Shopify admin; end/reset the CLI development preview if Shopify still routes to the tunnel. Approve any permission change and confirm the hosted app has an installed offline session. **Deploying to Render does not deploy Shopify app configuration, and deploying Shopify configuration does not deploy the Node server.**
 
-## Deploy
+The agent checks `/healthz`, `/privacy`, authenticated Home, Products & Suppliers, Rules & Approvals, Deliveries and Activity. A direct `/app` visit outside Shopify can lead to login; open the embedded app through Shopify admin. Both AG licences must be valid, and the configured AI provider must actually answer. Never use the original demo’s licence keys or credentials.
 
-`render.yaml` describes a Render web service:
-- **Build:** `npm ci`, `prisma generate`, `react-router build`
-- **Start:** `prisma migrate deploy`, then the server
-- **Health check:** `/healthz`
+## 5. Agent: prepare a predictable judging run
 
-Secrets are set in the Render dashboard.
+Keep payments/worker disabled until configuration is complete. In the authenticated app:
 
-Steps:
-1. Set Render's `DATABASE_URL` to the `guardbuy_app` connection string from your `.env` (see *Run it locally*), and `DIRECT_URL` to the owner's direct connection.
-2. Set `application_url` in `shopify.app.toml` to the Render URL and `[app_proxy].url` to that URL plus `/proxy`. Keep `write_app_proxy` in the required scopes.
-3. Run `npm run deploy` to release the Shopify configuration. Reopen GuardBuy in Shopify admin and approve any requested permission update. This is separate from deploying the web server to Render.
-4. The independent audit workflow is enabled for this deployment, with its dedicated credentials stored in GitHub Actions. It connects directly to Neon and R2, never calls Render or payment/stock actions, and does not commit fingerprints to `main`. For a new deployment, follow [checkpoint setup](anchors/README.md) and keep its schedule disabled until setup and bootstrap verification are complete.
+1. Switch off every product except **House Blend Coffee 1kg** for the first test. Retain Atlas Roasters as its preferred supplier; do not approve Bean Bargains Wholesale. Check Atlas’s payee is the intended sandbox supplier.
+2. In product management set **Expected sales per day = 1**. In Shopify inventory set **available stock = 8**, at the checkout location. Ensure no earlier purchase or incoming shipment reserves this product.
+3. Set rules to **reorder below 7 days**, **target 14 days**, **approval above $500**, **7-day cap $1,500**, **minimum PayPal balance $1,000**, and **5 purchases per 24 hours**. Approve the intended legitimate suppliers. Sign through the authenticated staff UI; do not forge signatures or insert audit history directly.
+4. On the host set `GUARDBUY_PAYMENTS_DISABLED=0` and remove `GUARDBUY_RESTOCK_WORKER=off` (or set it to `on`), then redeploy. Resume the agent if paused. Home should show 8 stock, 8 days of cover and no outstanding approval.
+5. Tell the judge the app/store URLs, storefront password, deployed commit, enabled integrations and any actual setup blockers. Never include secrets in this handoff.
 
-The shared demo config disables automatic URL updates during `shopify app dev`. Use a separate app/config for tunnel development so local sessions cannot replace the public dashboard’s hosted destination. After deployment, verify the active Shopify app version points `/apps/guardbuy` to `https://guardbuy.onrender.com/proxy`. Test through the storefront: opening `/proxy` directly without Shopify's signature correctly returns 400.
+A new supplier’s **first purchase needs approval**. Do that bootstrap flow below before recording a fully automatic purchase. Existing same-product/same-supplier purchases within 24 hours count together toward the approval limit; reservations also consume budget. Resetting stock does not reset these limits or erase history. A declined purchase pauses that product for 24 hours; use the app’s **Reset cooldown and recheck** only when intentionally preparing another sandbox run.
 
-To reset the demo (stock back to the start, sandbox balance topped up):
+PayPal payout webhooks register automatically at `/paypal/webhook` using the existing sandbox app credentials and deployed origin. No separate webhook secret is required. Background workers require a running server. Open data pages update automatically approximately every five seconds after recorded changes; supplier settlement can take longer than page refresh.
 
-```bash
-npx tsx scripts/reset-demo.ts
-```
+### Optional deployment additions
 
-## Project layout
+- **Telegram:** set `TELEGRAM_ALERTS_ENABLED=true`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_BOT_USERNAME` without `@`, and an agent-generated 32+ character `TELEGRAM_WEBHOOK_SECRET`. The agent registers `SHOPIFY_APP_URL/telegram/webhook` with Telegram `setWebhook`, the same `secret_token`, and `allowed_updates=["message"]` using secrets in memory. In Alerts, the judge starts the private bot chat and confirms the pairing code. See [Telegram setup](docs/telegram-alerts.md). Pairing cannot be completed by environment variables alone.
+- **Public demo:** explicitly opt in with `GUARDBUY_PUBLIC_DEMO_ENABLED=true` and your bound `GUARDBUY_DEMO_STORE`. Open `https://YOUR_STORE.myshopify.com/apps/guardbuy` through Shopify’s signed proxy, not the app’s bare `/proxy` endpoint. Authenticated Home has a separate fictional-data mode; it does not exercise real purchases.
+- **External audit checkpoints:** optional for deployment; configure dedicated database-reader/R2 credentials and retention using [the checkpoint setup guide](anchors/README.md). Leave `AUDIT_CHECKPOINTS_ENABLED` unset until that setup is complete. Internal Activity chain verification works without R2.
+- **Sandbox refill:** only if needed, supply `SUPPLIER_PAYPAL_CLIENT_ID` and `SUPPLIER_PAYPAL_CLIENT_SECRET` and run `npx tsx scripts/refill-sandbox.ts`. This transfers sandbox funds from supplier to merchant. `scripts/reset-demo.ts` also changes inventory and can trigger restocks; it does not clear audit history, approvals, cooldowns or spending limits.
 
-```
-app/
-  lib/agent/       restock loop, AI proposer, executor, approvals, attack tests, payment lock
-  lib/policy/      rule schema, policy engine, rule labels, rules form checks
-  lib/audit/       hash-chained log, activity feed, public verification
-  lib/paypal/      REST client, Agent Toolkit wrapper, reconciliation, orders sweep
-  lib/inventory/   sales rates, days of cover, stock trigger
-  lib/suppliers/   supplier directory, demo catalog, attack scenarios
-  lib/judge/       judge console sandboxes and limits
-  lib/jobs/        hourly job, demo reset
-  routes/          admin pages (app.*), webhooks, app proxy (read-only demo dashboard), verify page, jobs
-prisma/            schema and hand-written migrations
-scripts/           checks, seeding, demo reset, sandbox refill
-anchors/           published audit-log fingerprints (created by the first hourly run)
-```
+## 6. Test the app flows
 
-## Stack
+Run one flow at a time against your new development store. Keep payment tests on the sandbox. Treat provider-pending outcomes as pending; do not submit replacements to make the demo appear complete.
 
-- Shopify React Router app template
-- Polaris web components and App Bridge
-- Prisma on Neon Postgres
-- AI SDK with Gemini, plus OpenRouter free models as fallbacks
-- PayPal REST APIs and the PayPal Agent Toolkit
-- Render, and GitHub Actions for the hourly job and CI
+| Flow                                | Actions                                                                                                                                                                                                                                      | Expected result                                                                                                                                                                                                                                                        |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| First supplier / approval bootstrap | With stock 8 and expected sales/day 1, buy **2 bags** using Shopify’s test gateway. Open Home, then expand the new row in Approvals. Approve the exact sandbox amount after reviewing the checks.                                            | Stock becomes 6; a proposal appears. A newly added supplier needs first-purchase approval. Submission shows pending until PayPal confirms; no duplicate payment is created.                                                                                            |
+| Receive the bootstrap purchase      | Wait for confirmed payment, open Deliveries, choose the new purchase, its correct location and the received quantity. Record receipt once.                                                                                                   | Available Shopify stock increases by the received quantity; remaining incoming falls. A full receipt closes the delivery.                                                                                                                                              |
+| Automatic restock                   | After the bootstrap purchase settles and its delivery is received, reset available stock to 8. Keep sales/day 1 and the signed rules above. Buy 2 bags again. Check cumulative 24-hour supplier/product spending and remaining budget first. | Home updates from 8 to 6 without clicking Refresh snapshot. If **all** policy checks pass, GuardBuy submits the new restock automatically; it appears in Purchases/Deliveries. A pending payment is not labelled as waiting for approval.                              |
+| Approval threshold                  | After resolving earlier purchases, set and sign an approval threshold below the next proposed amount. Restage stock and make one new low-stock event. Expand its approval row.                                                               | Facts, amount and failing check appear inside the expanded row. No payment occurs before an explicit approval. Decline is logged and activates the cooldown; resetting it queues a fresh check under current rules. Restore/sign the normal threshold after this flow. |
+| Approve in PayPal                   | On a fresh unpaid approval, choose **Approve in PayPal** instead of the in-app payment route. Sign in with a merchant sandbox payer listed in `GUARDBUY_PAYPAL_STORES`, approve and return.                                                  | The supplier and amount match the proposal. GuardBuy records the capture/outcome. An unrelated payer is refused. Do not try the alternate route for the same purchase.                                                                                                 |
+| Spending guardrails                 | Pause the agent, set/sign a cash floor above available funds or a weekly cap below the next purchase, then resume and trigger one stock change.                                                                                              | The purchase is blocked with a concrete reason and no payment. Restore/sign normal rules afterwards.                                                                                                                                                                   |
+| Product control                     | Switch a product off, then lower its Shopify stock. Switch it back on only after checking intended policy and budget.                                                                                                                        | Disabled products never start a purchase. Enabling queues a fresh stock check.                                                                                                                                                                                         |
+| AG Grid / assistant                 | On Home, filter and sort products, expand a product, switch to Purchases, and ask AI about stock risk or remaining budget. Try a request to make a payment. Switch to fictional data and back.                                               | Grids and answers use the selected data scope; routine supported answers match the snapshot. The assistant refuses payment/write requests. Fictional data cannot act on the live store.                                                                                |
+| Activity and verification           | Follow a purchase into Activity and select **Verify the log**. If available, follow its public payment-verification link.                                                                                                                    | Proposal, policy decision, staff approval where applicable, submission and later provider updates are traceable. Chain verification is intact. Public verification does not disclose private account details by default.                                               |
+| Telegram, if enabled                | Trigger a genuine unresolved approval and wait for the background notification. Open its link. Resolve the approval before testing another notification.                                                                                     | The private bot sends the actual state notification and links to that purchase. Opening the link does not approve or submit payment.                                                                                                                                   |
 
-## License
-
-MIT. See [LICENSE.md](LICENSE.md). Portions are from Shopify's app template (MIT).
-
-## Privacy and data handling (ISM-42)
-
-Read the [public privacy policy](https://guardbuy.onrender.com/privacy) (`/privacy` in a local build), also linked from Home and the public landing page. The hosted page exists after deployment; this PR does not deploy it. [Operator fulfillment runbook](docs/privacy-operations.md).
-
-GuardBuy reads products/stock/locations and order/refund dates, variant IDs and quantities to calculate sales rates and restocks. It stores variant/day/unit sales aggregates, supplier names/payment emails/terms/notes, signed rules, staff identifiers, connection sessions/tokens and payment/audit evidence. It does not request shopper names, email, addresses or card data for restocking, and does not persist raw order/privacy webhook bodies. Shopify sessions can contain **merchant staff** names/emails; merchant-entered notes/names and stored AI text may contain personal information. Do not claim the app stores no personal data at all.
-
-The **90-day cutoff applies to sales aggregates**, pruned during backfill/maintenance, not to all app records and not by a guaranteed daily scheduler. Webhook deduplication IDs have a seven-day cutoff. Audit history has no automatic 90-day deletion. Uninstall removes sessions/jobs; complete erasure uses the reviewed privacy workflow. Hosting logs, backups and provider copies have independently configured retention; checkpoint fingerprints can remain subject to external locks. No universal 90-day erasure promise is made.
-
-Google Gemini and fallback OpenRouter/model providers receive SKU, stock/sales/coverage, target/suggested quantity and supplier IDs/names/prices/lead times/preferences/notes. The prompt does not intentionally include Shopify/PayPal credentials, balances, payment emails or shopper records; personal data pasted into free text is not automatically removed. Default demo routing includes free tiers. **Use demo data only until a paid/no-training setup and every fallback's terms are verified.** No paid service or provider account change is made here. Render, Neon, Shopify, PayPal and Cloudflare R2 also process their respective app/payment/checkpoint data.
-
-The three mandatory Shopify `compliance_topics` point to the authenticated `/webhooks/privacy` endpoint. Receipt metadata is durably deduplicated before 200; no raw customer payload is kept. Requests enter a manual inbox with a 30-day deadline; receipt does not mean fulfillment. `shop/redact` revokes sessions and suppresses processing/public proofs. Owner-only whole-shop erasure preserves app-role append-only restrictions and refuses unresolved commitments; selective audit edits are not supported. External copies require a separate review. See the runbook for daily monitoring, fulfillment commands and limitations.
-
-Deployment requires the privacy migration, updated Shopify webhook configuration and a public `GUARDBUY_PRIVACY_CONTACT` (HTTPS support URL or `mailto:`). Without a configured contact the page clearly directs customers to the merchant's Shopify privacy-request tools; direct support contact remains a launch requirement. No privacy scheduler, notification messages or automatic provider deletion is enabled. This notice is **not** merchant terms or a DPA: keep the Partner Dashboard “privacy agreements” answer **No** until real agreements exist.
-
-## Incoming stock and delivery resolution (ISM-15)
-
-Deliveries keeps each variant's ordered, received, explicitly closed and remaining units separate. New restock proposals record the linked supplier's lead time under the audit hash; the AI cannot supply this value. The supplier estimate starts at the first recorded successful payment settlement and uses calendar days, displayed in UTC. Later supplier edits do not rewrite past estimates. Older proposals without recorded terms show **Expected arrival not recorded** until a merchant supplies an estimate.
-
-The stock check uses physical stock **plus incoming quantity** for projected coverage; its physical inventory value remains unchanged. An open incoming delivery also blocks replacement proposals/payment reservations regardless of age or whether projected cover has become low. Overdue shipments never expire after three days. Payment-pending quantities and ambiguous stock receipts stay held until their outcome is resolved.
-
-**Manage delivery → Update expected arrival** records a merchant estimate without changing incoming quantity. **Close undelivered remainder** requires confirmation that the supplier will send no more goods. It closes only the current remaining units, records a reason/staff actor, leaves received goods and spending unchanged, and allows a future replacement within the normal rules. This action does not refund PayPal or adjust Shopify inventory. A supplier delay alone is not a reason to release the incoming hold. If goods arrive after closure, reconcile them with Shopify inventory and any replacement order rather than assuming the old closed delivery can be received again.
-
-**Receive** still records only physically arrived goods and updates the selected Shopify location through the existing idempotent receipt protocol. Partial receipts replace incoming units with actual stock; full receipt releases the hold immediately. A partial refund does not establish which units were cancelled, so remaining units stay incoming and may still be physically received. A confirmed full refund/return/failure stops counting the unreceived units as incoming, while preserving goods already received. Pending receipts remain protected even if payment status changes. Closing/refunding a delivery never rewrites the original payment evidence.
-
-The Deliveries page shows estimates, overdue status, partial refunds, explicit closed quantities and a Closed filter. Refresh status reads captured Order outcomes through the existing Toolkit get_order permission as well as refreshing Payouts; it never captures or closes an open approval Order. Repeated partial refunds update the recorded amount even when the status text stays the same. It labels tracking as **not connected** and shipment status as unknown. No carrier scan or delivery is inferred from a missing tracker. The Toolkit exposes a tracking read, but access to supplier-owned tracker data under the merchant credential model has not been established; this change adds no supplier credentials, new Toolkit permissions or simulated tracking to the product. Merchant-authorized tracking integration can be enabled only after its access model is verified.
-
-Delivery management and receipts share the database coordination lock and conditionally append against current receipt/revision state. Stale tabs, duplicate updates and pending/uncertain receipts cannot release quantities twice. Privacy-suppressed shops cannot start delivery management or receipt adjustments. No database migration, new Shopify scopes, secrets or paid services are needed beyond the parent PRs.
-
-Validation: `npx tsx scripts/check-incoming-stock.ts` exercises the pure lifecycle and `scripts/check-delivery-lifecycle-db.ts` uses the actual management/receipt services against disposable local `guardbuy_ism15_test` Postgres with simulated Shopify adjustments. The ordinary receipt/idempotency checks and multi-process payment/job suite remain in CI. Hosted sandbox acceptance is separate from these local checks.
-
-### Optional Telegram alerts
-
-[Setup, delivery semantics and manual acceptance](docs/telegram-alerts.md). Telegram is opt-in per shop and globally disabled by default. The running server sends minimal state-aware notifications through a durable outbox, independent of an open browser. Unknown delivery outcomes require explicit duplicate-message consent before retrying; notification delivery never changes payment state. Free-host sleeping delays delivery until the server wakes. No bot webhook, external scheduler or hosted deployment is activated by this change.
-
-### Home workspace: AG Grid and AG Studio (ISM-17 / ISM-144)
-
-Authenticated Shopify staff open **Home** to a current-state chart overview and four AG Grid data views. **Products** is the default: stock, incoming quantities, days of cover, supplier, status and the existing automatic-restocking switch. Expand a product for purchase history, matched only by its exact variant ID. **Purchases** contains individual decisions, supplier → product grouping and a supplier-by-status pivot. **Activity** shows the latest 100 recorded events; **Store details** contains spending rules and audit verification links. Agent controls, urgent warnings and setup guidance remain above the workspace.
-
-All views use AG Grid Enterprise 36.3. The purchasing and current-state custom widgets run in AG Studio 3.1 **view mode**, without the report builder's selection/resize controls. The installed Studio version limits its built-in AI panel to edit mode, so **Ask AI** uses a separate transcript UI over the actual Studio Agent Framework harness and chat session. Routine whole-question intents (supplier/product counts, current budget, stock risk, rankings, current purchase states, rules and activity) plan directly in the browser from the staff-authorized snapshot, without a model request or token fetch. Unknown qualifiers and compound questions are never silently stripped; those go to the bounded AI planner. The agent exposes a legacy `show_purchases` view tool and a bounded `query_guardbuy` analytics tool. A strict query schema chooses an available source, operation, metric, literal conditions, date basis and result limit. Answers are calculated locally from the authorized snapshot; the same result selects the grid view, rows, metric columns, sorting and decision expansion. The assistant cannot approve, pay, refund, change rules, release reservations or append audit events. Product switches and agent controls retain their existing authenticated server actions; ordinary grid interactions do not execute them.
-
-Use search, column filters and the Filters panel rather than separate filter-button rows. Purchase dates filter by proposal date in UTC. Supplier sparklines show 28 UTC calendar days of proposal value on supplier summary rows; they are independent of grid filters. Proposal value, net settled payments and reservations are separate sums. Store summary figures retain their original scopes: spending uses the rolling seven-day settlement window; reservations, remaining budget and cached PayPal balance retain their current commitment semantics. Filtering purchase history does not change those store-wide values. Blocked proposal value is not realized savings.
-
-The overview uses AG Charts Enterprise 14.3 inside a custom Studio widget: a budget waterfall (signed cap minus rolling-seven-day settled spend and current reservations), managed-product stock-cover ranking with the signed threshold, and supplier-by-action attention heatmap. Over-cap headroom stays negative. Unknown cover is separate from zero/on-hand stock, and disabled products are not ranked. Attention comes from current approval/payment lifecycle state; old failed/blocked proposals are excluded once superseded, simulated proposals do not supersede real ones, and settled payments/expired approvals leave the matrix. Uncertain payments remain visible until reconciled. The matrix shows up to six suppliers; View all includes every matching record. Every chart selection carries exact product/purchase IDs into the appropriate grid without changing store-wide totals or business state. Refresh snapshot reloads current data; the display is not a streaming feed. The cached PayPal balance is already adjusted for commitments and is not subtracted a second time. Native chart keyboard controls and equivalent labelled buttons/category selection support access to supporting records.
-
-**Saved views** stores validated column/filter/search configuration in this browser's local storage, separately per shop, live/demo mode, data view and purchase preset. It persists across reloads until browser storage is cleared; it stores no dataset or licence keys. Use Restore saved view to reapply it. **Export** produces filtered, sorted Excel rows in the current visible column/group/pivot layout, excluding sparkline arrays. **Chart selection** uses the numeric cells selected in the active Products or Purchases grid. The always-visible overview replaces the old status/supplier history charts and summary grid; clear chart or native filters from the visible filter notice.
-
-**Fictional demo** supplies 64 purchases, eight matching products, five configured suppliers (one with no purchases), activity and settings entirely in the browser. Every workspace summary/view uses the same demo scope. Demo product actions are disabled and demo rows have no links into real store records. Agent controls and urgent warnings above the workspace remain live and are labelled separately. Switching back restores the authenticated store snapshot.
-
-For questions requiring AI, only the latest request (up to 800 characters) goes to the configured Google/OpenRouter planner—not purchase records, audit payloads, supplier emails or conversation history. Routine questions do not use an external model. Configured supplier counts/lists use the shop-scoped directory by ID, including suppliers with zero purchases; purchase-history supplier analytics are a separate source. Missing directory data is reported as unavailable rather than inferred from purchases. Plans allow only known views/analyses or a validated query, with separate write-refusal, unsupported-data and clarification outcomes. No arbitrary code, SQL, URLs or business commands are accepted. The authenticated JSON resource `/app/insights/plan` retains its bounded body, strict validation, rate limit, six-second per-model timeout, up to four configured fallbacks and overall 25-second deadline. Chat sessions are in memory, cancelled/closed with the panel or data scope, and not written to the audit log. The browser request has a 30-second ceiling, with loading feedback, Stop and safe rate-limit/error messages. Conversations remain open while the assistant navigates grid views and are reset on live/demo scope changes. Keep secrets and personal information out of prompts.
-
-**Questions and definitions (ISM-145):** ask “rank products by auto restock times”, “which products may run out soon?”, “what is my remaining budget?” or “why was purchase #123 blocked?”. Queries cover loaded products, purchase history, supplier aggregates, store summary/rules, recent activity and documented GuardBuy behavior. Automatic restock count means positive net settled purchases allowed without manual approval; it excludes manually approved, pending, failed and fully refunded/returned payments and does not assert physical stock receipt. Product counts use exact variant IDs and explicitly exclude unmatched history. Paid-purchase metrics can use settlement dates; proposal metrics use proposal dates. Stock and balances are current snapshots, spending is the established rolling seven-day metric, and activity is limited to loaded recent events. Missing profit, historical inventory or delivery-speed evidence is reported as unavailable; ambiguous questions request clarification. The assistant does not claim to answer every possible GuardBuy question.
-
-**Deployment:** set both `AG_STUDIO_LICENSE_KEY` (AG Studio Pro with AI) and `AG_GRID_LICENSE_KEY` (AG Grid + AG Charts Enterprise combined entitlement) in Render. Studio's licence covers its built-in widgets; the custom purchase explorer needs the separate grid/charts entitlement. Both keys are browser configuration, deliberately passed only to the authenticated staff UI. AI provider keys stay on the server. Home's purchasing analysis and assistant stay disabled in production until both licence variables exist. Once Home is enabled, routine assistant questions work even without a model key. A configured key is not proof of valid entitlement: verify after deployment and ensure validity through December 15 judging. Local evaluation uses AG's normal watermark/warnings; no validation is bypassed. Activity's standalone AG Grid Community remains under MIT.
-
-**Manual review:** open Home with authorized demo-store staff, confirm live defaults and licence entitlement, expand a product and purchase, and follow a real Activity link. Switch to fictional demo and confirm every grid/summary changes scope and product actions/real-record links are disabled. Compare suppliers, pivot statuses, filter a chart and clear the selection. Save/restore a filtered layout, export it and chart selected numeric cells. Ask the automatic-restock ranking, stock risk, remaining budget and a purchase-reason question; confirm the answer and grid agree and the conversation remains open. Then request unsupported profit data and a payment, and confirm distinct missing-data and write-refusal responses. Check mobile layouts and the live-provider assistant yourself; local fixture screenshots are not hosted entitlement/provider acceptance. Old `/app/insights` bookmarks redirect to Home. The public dashboard/Verify privacy boundaries remain unchanged.
-
-Automated projection, exact-identity/demo, agent, route/auth and planner regressions run in the existing **Tests** CI job: `scripts/check-insights.ts`, `scripts/check-insights-overview.ts`, `scripts/check-insights-common.ts`, `scripts/check-insights-queries.ts`, `scripts/check-insights-routes.ts`, `scripts/check-insights-planner.ts`.
-
-Assistant failure diagnostics: `/app/insights/plan` returns a sanitized `code`, `requestId` and bounded per-provider `attempts` when all models fail. Render logs with `insights.planner.failure` / `insights.planner.exhausted` share that ID. Only provider name, attempt number, fixed category and numeric HTTP status are recorded; prompts, provider bodies and credentials are excluded. Categories distinguish missing configuration, rejected credentials, quota/rate limits, unavailable models, timeout and invalid output. Mixed failures retain their individual categories in the response. Keys being present does not verify account quota or model availability. `GUARDBUY_LLM_MODELS` overrides the shared purchase/insights model chain; absent it, the defaults are Liquid LFM3 (`liquid/lfm-3-1.7b:free`), then NVIDIA Nemotron 3.5 Super VL (`nvidia/nemotron-3.5-super-vl:free`), then Dots3 Note Preview (`dots-studio/dots-3-note-preview:free`), all through OpenRouter. Purchasing defaults require `OPENROUTER_API_KEY`. Advanced insights questions insert `google:gemini-3.8-flash` after Liquid by default, using `GOOGLE_GENERATIVE_AI_API_KEY` when present, so fallbacks cross provider boundaries. An explicit `GUARDBUY_LLM_MODELS` override remains authoritative for both flows and is never widened. Missing-key candidates are skipped; Google documents a free tier for this model, while actual availability/limits depend on the configured account. Hosted provider acceptance still requires a deployed request with real credentials.
-
-The assistant is a modeless grid-style side panel with suggested snapshot questions, a single answer card for tool progress and output, expand/new-conversation controls, error retry/stop, and mobile layout. Closing/Escape preserves the conversation; New conversation clears it, and switching live/demo closes the old scoped thread. View grid returns to the current grid. All sessions remain read-only. Model/auth waits use a hard abortable promise boundary (30 seconds including token acquisition on the client; 25 seconds overall and 8 seconds per candidate on the server), so an SDK that ignores cancellation cannot hold the UI indefinitely. A mixed upstream 503/timeout failure is classified as temporary AI-service unavailability, not an invalid merchant question. No automatic retry loop is added. Routine questions still work during provider outages; arbitrary AI interpretation remains dependent on external service availability and needs live acceptance.
+**If a flow stops:** inspect its displayed policy checks and Activity first. Check app installation/scopes, funding-account mapping, PayPal reporting access/balance, AI quota, valid AG licences, worker flags and host sleep. New-supplier review, cumulative 24-hour spend, reserved budget, incoming stock and decline cooldowns are expected reasons a fresh automatic-payment test may not proceed. Record actual outcomes; do not bypass the policy or rewrite audit rows to obtain a pass.
