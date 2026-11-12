@@ -1,5 +1,12 @@
 {
   "name": "guardbuy",
+  "description": "AI restocking agent for Shopify with a signed-rule policy engine and PayPal payouts.",
+  "license": "MIT",
+  "author": "M00rish",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/M00rish/guardbuy.git"
+  },
   "private": true,
   "scripts": {
     "build": "react-router build",
