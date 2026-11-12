@@ -49,7 +49,8 @@ try {
   const aged = log.map(e => ({ ...e, at: new Date(0).toISOString() }));
   assert.equal(restockCooldown(product, aged)?.decisionSeq, d.seq, "a decline does not expire with age");
   assert.equal((await db.restockJob.findUniqueOrThrow({ where: { id: job.id } })).generation, 1, "a decline does not schedule a timed recheck");
-  await db.restockJob.update({ where: { id: job.id }, data: { availableAt: new Date() } });
+  // A later stock change wakes the job, and a worker claims it before the merchant resets.
+  await enqueueRestock(shop, "777");
   const claimed = await claimRestockJob();
   assert.equal(claimed?.id, job.id);
   await retryRestockJob(claimed!, 60_000);
