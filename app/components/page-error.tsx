@@ -1,13 +1,14 @@
 import { COPY } from "../lib/wording";
 import { isRouteErrorResponse, useRouteError } from "react-router";
+import { boundary } from "@shopify/shopify-app-react-router/server";
 
-// Error page for admin routes. Shopify's auth responses (thrown Responses) are re-thrown so the
-// app layout's boundary handles them; anything else, usually Shopify's API or PayPal briefly not
+// Error page for admin routes. Shopify's auth responses are handled by the SDK boundary
+// here so a render-time rethrow cannot escape into the generic status page. Anything else, usually Shopify's API or PayPal briefly not
 // answering, gets a plain page with a retry instead of a stack trace. The nav stays usable.
 
 export function PageError() {
   const error = useRouteError();
-  if (isRouteErrorResponse(error)) throw error;
+  if (isRouteErrorResponse(error)) return boundary.error(error);
   if (typeof console !== "undefined") console.error(error);
   return (
     <s-page heading="Something didn't load" inlineSize="large">
