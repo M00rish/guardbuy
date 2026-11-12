@@ -54,9 +54,11 @@ async function ensureSandbox(sandbox: string) {
   const log = await auditEntries(sandbox);
   if (currentRuleSet(log)) return;
   await seedDemoCatalog(sandbox, VARIANTS, process.env.SUPPLIER_EMAIL ?? "", []);
-  // The demo merchant linked these suppliers months ago. Without this, the "new supplier" rule would
-  // demand a person on every fresh sandbox, so the "Allow" scene could never pay on its own.
-  await db.supplier.updateMany({ where: { shop: sandbox }, data: { createdAt: new Date(Date.now() - 60 * DAY_MS) } });
+  // The demo merchant linked these suppliers months ago and has not changed their payment email.
+  // Without this, the "new supplier" and "payee change" rules demand a person on every fresh sandbox,
+  // so the "Allow" scene could never pay on its own.
+  const added = new Date(Date.now() - 60 * DAY_MS);
+  await db.supplier.updateMany({ where: { shop: sandbox }, data: { createdAt: added, emailChangedAt: added } });
   // Small purchases so judges don't drain the shared sandbox balance: 5 days of cover (~8 bags,
   // about $92) instead of 14, and the "Ask me" limit so the approval step shows first.
   const rules = RuleSetSchema.parse({ ...defaultRuleSet(sandbox), targetDaysOfCover: 5, ...JUDGE_PRESETS.ask });
