@@ -1,4 +1,59 @@
-# GuardBuy: judge deployment and testing
+# GuardBuy
+
+**An AI restocking agent for Shopify that can't overspend.** The AI proposes what to reorder. A deterministic policy engine, running rules the merchant signed, decides. PayPal pays the supplier. Every step is written to a hash-chained audit log that anyone can verify.
+
+GuardBuy was built for the PayPal AI Hackathon. This repository is public and [MIT licensed](#license).
+
+## What GuardBuy does
+
+Small Shopify merchants reorder stock by hand: watch inventory, guess quantities, email the supplier, pay. GuardBuy automates that loop without handing an LLM the merchant's PayPal account.
+
+- Shopify inventory webhooks and recorded sales tell GuardBuy when a product is running low.
+- The AI proposes a purchase (supplier, quantity and its reasoning) from suppliers the merchant linked.
+- A deterministic policy engine checks the proposal against signed limits: price cap, accepted price, order size versus history, new or lookalike suppliers, recent payee changes, split orders, spending caps, cash floor and approval limit. The strictest result wins: **allow**, **needs a person**, or **block**.
+- Only after the rules allow it does one executor move money through PayPal, and the rules are re-checked at payment time.
+- Every proposal, decision, approval and payment is appended to a hash-chained audit log. A public page verifies a PayPal payment against it.
+
+The AI never chooses the payee, never edits the rules and never moves money. Supplier text and model output are treated as untrusted, and the audit log is append-only in the database role GuardBuy runs as.
+
+## How GuardBuy uses PayPal
+
+| What | How GuardBuy uses it |
+| --- | --- |
+| **Payouts API** (`/v1/payments/payouts`) | Pays suppliers for purchases the rules allow, or that a staff member approved in GuardBuy |
+| **Orders API v2** (`/v2/checkout/orders`) | "Approve in PayPal": an order with the supplier as payee, approved by the merchant in PayPal, then captured |
+| **Balances** (`/v1/reporting/balances`) | Cash-floor rule, adjusted for PayPal's reporting lag |
+| **Agent Toolkit: `get_order`** | Checks order status on return from PayPal and in the background sweep |
+| **Agent Toolkit: `list_transactions`** | Confirms each payout in PayPal's own transaction records |
+| **Payout webhooks** (`/paypal/webhook`) | Verified payout updates; notifications are never used as payment proof |
+
+Only the read-only Agent Toolkit tools (`get_order`, `list_transactions`) are loaded. Payments use idempotency keys, a database lock and durable request snapshots, so a double click, a second tab or a retry cannot pay twice. Uncertain outcomes keep the product and budget reserved until PayPal reports a definitive result. All payment tests run against PayPal **sandbox** accounts, and the kill switch (`GUARDBUY_PAYMENTS_DISABLED=1`) refuses every payout and capture.
+
+## How GuardBuy uses AI
+
+- **Proposals.** The [Vercel AI SDK](https://ai-sdk.dev/) calls Google Gemini (`@ai-sdk/google`) with OpenRouter fallback models (`@openrouter/ai-sdk-provider`). The model receives stock, sales speed, coverage, the merchant's target quantity, and supplier ids, names, prices, lead times, preferences and notes — never Shopify or PayPal credentials, balances, payment emails or shopper records.
+- **Untrusted output.** The model returns a supplier, quantity and explanation. It cannot choose a payee, change a rule, approve a payment or call PayPal. Every field is validated, and the policy engine decides independently of the explanation. The explanation is shown to the merchant as "not verified".
+- **Adversarial tests.** The app ships prompt-injection scenarios where a supplier note tells the AI to ignore rules or pay a different address. The AI may be fooled; the signed rules still block or hold the purchase, and the scoreboard records what happened.
+- **Analytics assistant.** An optional assistant answers questions about products, purchases, budgets and rules. Routine intents are planned in the browser from the staff-authorized snapshot; unknown questions use a bounded planner that returns a strict query schema. It is read-only and refuses payment or write requests.
+- **Failures are labelled.** Provider errors are mapped to sanitized categories (missing configuration, rejected credentials, quota, unavailable model, timeout, invalid output) without exposing prompts or provider bodies.
+
+## Tools and technologies
+
+| Layer | Used |
+| --- | --- |
+| Runtime and app | TypeScript, Node.js 22.12+, React 18, React Router 7, Vite |
+| Shopify | Shopify app template and CLI, App Bridge, Polaris web components, Admin GraphQL API `2026-10`, app proxy, webhooks |
+| Data | Prisma 6 on PostgreSQL (Neon in the reference deployment), hand-written migrations, a restricted append-only app role |
+| AI | Vercel AI SDK, Google Gemini, OpenRouter fallback models |
+| Payments | PayPal Payouts, Orders v2, Reporting/Balances, the PayPal Agent Toolkit and verified sandbox webhooks |
+| UI data views | AG Grid Enterprise 36.3, AG Charts Enterprise 14.3 and AG Studio 3.1 (licensed, browser-only keys) |
+| Hosting and CI | Render (web service and [`render.yaml`](render.yaml)), GitHub Actions for CI and the independent audit-checkpoint workflow |
+| Optional services | Telegram Bot API for merchant alerts, Cloudflare R2 for external audit checkpoints |
+| Checks | Node assertion scripts run with `tsx`, disposable local Postgres in CI, ESLint and `tsc` |
+
+**Hackathon sponsor integrations:** PayPal (Payouts, Orders, Agent Toolkit, sandbox webhooks) and Render (hosting and deployment). The project does not use APIMatic or Postman.
+
+## Judge deployment and testing
 
 Use this guide to deploy your own GuardBuy instance and Shopify development store. Give it to your coding agent; the agent performs the setup and tests, while you supply credentials through a local `.env` file or your hosting service’s secret manager.
 
@@ -186,3 +241,9 @@ Run one flow at a time against your new development store. Keep payment tests on
 | Telegram, if enabled                | Trigger a genuine unresolved approval and wait for the background notification. Open its link. Resolve the approval before testing another notification.                                                                                     | The private bot sends the actual state notification and links to that purchase. Opening the link does not approve or submit payment.                                                                                                                                   |
 
 **If a flow stops:** inspect its displayed policy checks and Activity first. Check app installation/scopes, funding-account mapping, PayPal reporting access/balance, AI quota, valid AG licences, worker flags and host sleep. New-supplier review, cumulative 24-hour spend, reserved budget, incoming stock and decline cooldowns are expected reasons a fresh automatic-payment test may not proceed. Record actual outcomes; do not bypass the policy or rewrite audit rows to obtain a pass.
+
+## License
+
+MIT, an OSI-approved license. See [LICENSE.md](LICENSE.md) for the full text. Portions are from Shopify's app template, also released under the MIT license.
+
+You may use, copy, modify, merge, publish, distribute, sublicense and sell copies of this software, provided the copyright and permission notice are included in all copies or substantial portions. The software is provided "as is", without warranty of any kind, express or implied.

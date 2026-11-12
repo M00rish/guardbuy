@@ -1,3 +1,5 @@
+MIT License
+
 Copyright (c) 2026 M00rish (GuardBuy)
 Portions copyright 2025-present, Shopify Inc. (Shopify app template)
 
