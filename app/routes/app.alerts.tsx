@@ -55,12 +55,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
   if (!telegramConfig())
     return { message: "Telegram alerts are not configured yet." };
-  if (intent === "connect")
+  if (intent === "connect") {
+    const link = await beginPairing(session.shop);
     return {
-      link: await beginPairing(session.shop),
+      link,
+      webLink: `https://web.telegram.org/k/#@${telegramConfig()!.username}`,
+      startCommand: `/start ${new URL(link).searchParams.get("start")}`,
       message:
-        "Open Telegram, press Start, then enter the connection code here. This link expires in ten minutes.",
+        "Open Telegram Web and send the command below in the private bot chat, or open the Telegram app and press Start. Enter the returned six-digit code here. This connection expires in ten minutes.",
     };
+  }
   if (intent === "confirm")
     return {
       message: (await confirmPairing(
@@ -80,7 +84,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         ? "Alert queued again. Its current purchase state will be checked before sending."
         : "Confirm the duplicate-alert warning before retrying an eligible alert.",
     };
-  return { message: "This action is not available. Refresh the page and try again." };
+  return {
+    message: "This action is not available. Refresh the page and try again.",
+  };
 };
 const STATUS: Record<string, string> = {
   pending: "Queued",
@@ -142,9 +148,23 @@ export default function Alerts() {
                 {fetcher.data &&
                   "link" in fetcher.data &&
                   fetcher.data.link && (
-                    <s-link href={fetcher.data.link} target="_blank">
-                      Open Telegram to get your code
-                    </s-link>
+                    <s-stack gap="base">
+                      <s-link href={fetcher.data.webLink} target="_blank">
+                        Open Telegram Web (no desktop app needed)
+                      </s-link>
+                      <s-paragraph>
+                        In the private bot chat, send this entire command to get
+                        your connection code:
+                      </s-paragraph>
+                      <code
+                        style={{ overflowWrap: "anywhere", userSelect: "all" }}
+                      >
+                        {fetcher.data.startCommand}
+                      </code>
+                      <s-link href={fetcher.data.link} target="_blank">
+                        Open installed Telegram app instead
+                      </s-link>
+                    </s-stack>
                   )}
                 {data.pairing && (
                   <s-stack gap="base">
