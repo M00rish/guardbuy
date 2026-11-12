@@ -1,5 +1,5 @@
 import { DataGrid, cell, GridBadge } from "./data-grid";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useFetcher } from "react-router";
 import { useAppBridge } from "@shopify/app-bridge-react";
 import { PayoutRefresh } from "./payout-refresh";
@@ -41,35 +41,6 @@ function Status({ card }: { card: Card }) {
 
 export function ApprovalsPanel({ data }: { data: ApprovalPageData }) {
   const { cards, payoutRefresh, purchase } = data;
-  const [selected, setSelected] = useState<number | null>(purchase);
-  const [opened, setOpened] = useState(
-    () => new Set<number>(purchase === null ? [] : [purchase]),
-  );
-  useEffect(() => {
-    setSelected(purchase);
-    if (purchase !== null)
-      setOpened((previous) => new Set(previous).add(purchase));
-  }, [purchase]);
-  const toggle = (seq: number) => {
-    setOpened((previous) => new Set(previous).add(seq));
-    setSelected((previous) => (previous === seq ? null : seq));
-  };
-  useEffect(() => {
-    if (selected !== null) {
-      const frame = requestAnimationFrame(() =>
-        document
-          .getElementById(`purchase-details-${selected}`)
-          ?.scrollIntoView({
-            block: "nearest",
-            behavior: window.matchMedia("(prefers-reduced-motion: reduce)")
-              .matches
-              ? "auto"
-              : "smooth",
-          }),
-      );
-      return () => cancelAnimationFrame(frame);
-    }
-  }, [selected]);
   return (
     <s-stack gap="base">
       <PayoutRefresh
@@ -110,6 +81,8 @@ export function ApprovalsPanel({ data }: { data: ApprovalPageData }) {
                 rows={cards}
                 rowId={(card) => String(card.decisionSeq)}
                 height={640}
+                revealRowId={purchase === null ? undefined : String(purchase)}
+                renderDetail={ApprovalRowDetails}
                 columns={[
                   {
                     colId: "purchase",
@@ -122,19 +95,6 @@ export function ApprovalsPanel({ data }: { data: ApprovalPageData }) {
                       data
                         ? `#${data.decisionSeq} · ${data.quantity} × ${data.productTitle}`
                         : "",
-                    cellRenderer: cell<Card>((card) => (
-                      <button
-                        type="button"
-                        className={styles.purchase}
-                        aria-label={`${selected === card.decisionSeq ? "Hide" : "View"} purchase #${card.decisionSeq}`}
-                        aria-expanded={selected === card.decisionSeq}
-                        aria-controls={`purchase-details-${card.decisionSeq}`}
-                        onClick={() => toggle(card.decisionSeq)}
-                      >
-                        #{card.decisionSeq} · {card.quantity} ×{" "}
-                        {card.productTitle}
-                      </button>
-                    )),
                   },
                   {
                     field: "supplierName",
@@ -163,55 +123,8 @@ export function ApprovalsPanel({ data }: { data: ApprovalPageData }) {
                     width: 160,
                     valueFormatter: ({ value }) => ago(value, Date.now()),
                   },
-                  {
-                    colId: "details",
-                    headerName: "Details",
-                    width: 150,
-                    sortable: false,
-                    filter: false,
-                    cellRenderer: cell<Card>((card) => (
-                      <button
-                        type="button"
-                        className={styles.disclosure}
-                        aria-expanded={selected === card.decisionSeq}
-                        aria-controls={`purchase-details-${card.decisionSeq}`}
-                        aria-label={`${selected === card.decisionSeq ? "Hide" : "View"} details for purchase #${card.decisionSeq}`}
-                        onClick={() => toggle(card.decisionSeq)}
-                      >
-                        {selected === card.decisionSeq
-                          ? "Hide details"
-                          : "View details"}
-                      </button>
-                    )),
-                  },
                 ]}
               />
-              {cards
-                .filter((card) => opened.has(card.decisionSeq))
-                .map((card) => (
-                  <div
-                    hidden={selected !== card.decisionSeq}
-                    className={styles.detailsContent}
-                    id={`purchase-details-${card.decisionSeq}`}
-                    key={card.decisionSeq}
-                    role="region"
-                    aria-label={`Details for purchase #${card.decisionSeq}`}
-                  >
-                    <div className={styles.detailsHeading}>
-                      <strong>
-                        Purchase #{card.decisionSeq} · {card.productTitle}
-                      </strong>
-                      <button
-                        type="button"
-                        className={styles.disclosure}
-                        onClick={() => setSelected(null)}
-                      >
-                        Close details
-                      </button>
-                    </div>
-                    <ApprovalDetails card={card} />
-                  </div>
-                ))}
             </>
           )}
           <s-text>
@@ -221,6 +134,18 @@ export function ApprovalsPanel({ data }: { data: ApprovalPageData }) {
         </s-stack>
       </s-section>
     </s-stack>
+  );
+}
+
+function ApprovalRowDetails(card: Card) {
+  return (
+    <div
+      className={styles.detailsContent}
+      role="region"
+      aria-label={`Details for purchase #${card.decisionSeq}`}
+    >
+      <ApprovalDetails card={card} />
+    </div>
   );
 }
 

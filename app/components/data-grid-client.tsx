@@ -13,6 +13,7 @@ import type { DataGridProps } from "./data-grid";
 import styles from "./data-grid.module.css";
 export default function DataGridClient<T>({
   rows,
+  revealRowId,
   renderDetail,
   isExpandable,
   columns,
@@ -22,6 +23,7 @@ export default function DataGridClient<T>({
   search = true,
   emptyMessage = "No records match these filters.",
 }: DataGridProps<T>) {
+  const gridRef = useRef<AgGridReact<T>>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const element = wrapperRef.current;
@@ -36,6 +38,16 @@ export default function DataGridClient<T>({
     observer.observe(element);
     return () => observer.disconnect();
   }, []);
+  const revealRow = useCallback(() => {
+    const api = gridRef.current?.api;
+    if (!api || api.isDestroyed() || !revealRowId) return;
+    const row = api.getRowNode(revealRowId);
+    if (row) {
+      row.setExpanded(true);
+      api.ensureNodeVisible(row, "top");
+    }
+  }, [revealRowId]);
+  useEffect(revealRow, [revealRow]);
   const matches = useMatches();
   const license = matches
     .map((m) => m.data as { gridLicenseKey?: string } | undefined)
@@ -57,8 +69,11 @@ export default function DataGridClient<T>({
       ),
     [columns, renderDetail],
   );
-  const detail = ({ data }: IDetailCellRendererParams<T>) =>
-    data ? <div className={styles.detail}>{renderDetail?.(data)}</div> : null;
+  const detail = useCallback(
+    ({ data }: IDetailCellRendererParams<T>) =>
+      data ? <div className={styles.detail}>{renderDetail?.(data)}</div> : null,
+    [renderDetail],
+  );
   const idRef = useRef(rowId);
   idRef.current = rowId;
   const getRowId = useCallback(
@@ -92,6 +107,8 @@ export default function DataGridClient<T>({
       )}
       <div style={{ height, minWidth: 0 }}>
         <AgGridReact<T>
+          ref={gridRef}
+          onFirstDataRendered={revealRow}
           modules={[AllCommunityModule, MasterDetailModule]}
           theme={gridTheme}
           rowData={rows}
