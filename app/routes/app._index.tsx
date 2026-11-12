@@ -1,3 +1,5 @@
+import { resetRestockCooldown } from "../lib/merchant/reset-restock-cooldown.server";
+import { restockCooldown } from "../lib/agent/restock-cooldown";
 import { manageProduct } from "../lib/merchant/manage-product.server";
 import { LoadingState } from "../components/loading-state";
 import { homeWorkspace } from "../lib/insights/workspace";
@@ -87,7 +89,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     head: log.at(-1)?.hash ?? null,
     problems,
     firstPurchase,
-    products: products && products.map((p) => ({ ...p, incoming: incoming.filter((delivery) => delivery.variantId === p.variantId).reduce((sum, delivery) => sum + delivery.remaining, 0), cover: Number.isFinite(p.cover) ? Number(p.cover.toFixed(1)) : null, status: productStatus(log, p, rules, running) })),
+    products: products && products.map((p) => ({ ...p, cooldown: restockCooldown(p, log, checkedAt), incoming: incoming.filter((delivery) => delivery.variantId === p.variantId).reduce((sum, delivery) => sum + delivery.remaining, 0), cover: Number.isFinite(p.cover) ? Number(p.cover.toFixed(1)) : null, status: productStatus(log, p, rules, running) })),
     recent: toFeed(log, actor, names).filter((f) => f.kind !== "status").slice(0, 100),
   };
   return {...data, workspace: homeWorkspace(data)};
@@ -96,6 +98,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 export const action = async ({ request }: ActionFunctionArgs) => {
   const { admin, session, actor } = await adminWithStaff(request);
   const f = await request.formData();
+  if (f.get("intent") === "reset-restock-cooldown") {
+    const rejected = String(f.get("rejectedSeq") ?? "");
+    if (!/^\d+$/.test(rejected)) return { ok: false, message: "Invalid cooldown" };
+    return resetRestockCooldown(admin, session.shop, actor, String(f.get("variantId") ?? ""), Number(rejected));
+  }
   if (f.get("intent") === "agent") {
     await setAgentState(session.shop, f.get("on") === "true", actor);
     return { ok: true, message: f.get("on") === "true" ? "Agent resumed" : "Agent paused" };

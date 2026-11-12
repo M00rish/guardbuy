@@ -601,13 +601,6 @@ export function RulesEditor({ data }: { data: RulesPageData }) {
           </div>
         </details>
       )}
-      {data.demoAvailable && (
-        <s-section heading="Private demo">
-          <s-link href="/app/attack-tests">
-            Open private demo attack tests
-          </s-link>
-        </s-section>
-      )}
     </div>
   );
 }

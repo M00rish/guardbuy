@@ -1,8 +1,10 @@
+import type { RestockCooldown } from "../agent/restock-cooldown";
 import type { InsightRow, InsightsSnapshot } from "./types";
 import { usd } from "../format";
 
 export type WorkspaceProduct = {
   variantId: string;
+  cooldown?: RestockCooldown | null;
   automaticRestocks?: number;
   paidRestocks?: number;
   purchaseCount?: number;
@@ -17,6 +19,7 @@ export type WorkspaceProduct = {
   incoming: number;
   cover: number | null;
   perDay?:number;
+  dailySalesOverride?: number | null;
   managed: boolean;
   status: { label: string; tone: string; at?: string };
 };

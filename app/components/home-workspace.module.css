@@ -179,7 +179,7 @@
   color: #275b91;
 }
 .productDetail {
-  height: 100%;
+  height: auto;
   padding: 12px 20px;
   box-sizing: border-box;
   background: #f2f8f5;

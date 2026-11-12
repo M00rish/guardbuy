@@ -1,7 +1,13 @@
+import { enqueueRestockInTransaction } from "../jobs/restock-queue.server";
 import { appendAuditWhen, auditEntries } from "../audit/log.server";
 import type { RuleCheck } from "../policy/schema";
 import { offersForVariant, supplierNames } from "../suppliers/directory.server";
-import { createApprovalOrder, ExecutionRefused, executePurchase, openOrder } from "./execute.server";
+import {
+  createApprovalOrder,
+  ExecutionRefused,
+  executePurchase,
+  openOrder,
+} from "./execute.server";
 import { approvalStates, type ApprovalStatus } from "./approval-state";
 import { createApprovalActions } from "./approval-actions";
 import { withPaymentLock } from "./payment-lock.server";
@@ -46,13 +52,17 @@ export async function approvalQueue(shop: string): Promise<ApprovalCard[]> {
   for (const state of approvalStates(log)) {
     const d = log.find((e) => e.seq === state.decisionSeq)!;
     if (d.event.type !== "decision") continue;
-    const p = log.find((e) => e.seq === (d.event.type === "decision" ? d.event.proposalSeq : -1));
+    const p = log.find(
+      (e) => e.seq === (d.event.type === "decision" ? d.event.proposalSeq : -1),
+    );
     if (p?.event.type !== "proposal") continue;
     const { proposal } = p.event;
     const { decision } = d.event;
 
     const offer = proposal.variantId
-      ? (await offersForVariant(shop, proposal.variantId)).find((o) => o.supplierId === proposal.supplierId)
+      ? (await offersForVariant(shop, proposal.variantId)).find(
+          (o) => o.supplierId === proposal.supplierId,
+        )
       : undefined;
     const order = openOrder(log, d.seq);
 
@@ -61,7 +71,11 @@ export async function approvalQueue(shop: string): Promise<ApprovalCard[]> {
       proposedAt: p.at,
       expiresAt: new Date(Date.parse(d.at) + APPROVAL_TTL_MS).toISOString(),
       status: state.status,
-      canRetry: state.canRetry, canResume: state.canResume, canCancel: state.canCancel, expired: state.expired, paymentReason: state.reason,
+      canRetry: state.canRetry,
+      canResume: state.canResume,
+      canCancel: state.canCancel,
+      expired: state.expired,
+      paymentReason: state.reason,
       sku: proposal.sku,
       quantity: proposal.quantity,
       supplierId: proposal.supplierId,
@@ -69,12 +83,19 @@ export async function approvalQueue(shop: string): Promise<ApprovalCard[]> {
       payeeEmail: proposal.payeeEmail ?? null,
       unitPriceCents: proposal.unitPriceCents,
       totalCents: decision.totalCents,
-      acceptedUnitPriceCents: offer ? acceptedUnitPrice(proposal, log, offer, d.seq) : null,
+      acceptedUnitPriceCents: offer
+        ? acceptedUnitPrice(proposal, log, offer, d.seq)
+        : null,
       usualQuantity: offer?.usualQuantity ?? null,
-      needsApprovalBecause: decision.checks.filter((c) => c.outcome === "approval"),
+      needsApprovalBecause: decision.checks.filter(
+        (c) => c.outcome === "approval",
+      ),
       otherChecks: decision.checks.filter((c) => c.outcome !== "approval"),
       aiExplanation: proposal.reasoning,
-      paypalApproveUrl: order?.event.type === "order_created" ? order.event.approveUrl : undefined,
+      paypalApproveUrl:
+        order?.event.type === "order_created"
+          ? order.event.approveUrl
+          : undefined,
     });
   }
   return cards.reverse(); // newest first
@@ -84,21 +105,76 @@ export async function approvalQueue(shop: string): Promise<ApprovalCard[]> {
 // worker outlives its lease; the executor independently reserves the route under its funding lock.
 const oncePerDecision = <T>(shop: string, seq: number, fn: () => Promise<T>) =>
   withPaymentLock(`approval:${shop}:${seq}`, fn);
-const actions = createApprovalActions({ read: auditEntries, appendWhen: appendAuditWhen, lock: oncePerDecision, execute: executePurchase,
-  failureReason: (error) => error instanceof ExecutionRefused || error instanceof PaymentRejected ? error.message : undefined,
+const actions = createApprovalActions({
+  read: auditEntries,
+  appendWhen: (shop, event, when) => {
+    if (event.type !== "rejected") return appendAuditWhen(shop, event, when);
+    let jobId: string | undefined;
+    return appendAuditWhen(
+      shop,
+      event,
+      (log) => {
+        if (!when(log)) return false;
+        const decision = log.find((e) => e.seq === event.decisionSeq)?.event;
+        const proposal =
+          decision?.type === "decision"
+            ? log.find((e) => e.seq === decision.proposalSeq)?.event
+            : undefined;
+        jobId =
+          proposal?.type === "proposal" && !proposal.scenario
+            ? proposal.restockJobId?.split(":")[0]
+            : undefined;
+        return true;
+      },
+      undefined,
+      undefined,
+      async (tx) => {
+        if (!jobId) return;
+        const job = await tx.restockJob.findFirst({
+          where: { id: jobId, shop },
+        });
+        if (job)
+          await enqueueRestockInTransaction(tx, shop, job.inventoryItemId);
+      },
+    );
+  },
+  lock: oncePerDecision,
+  execute: executePurchase,
+  failureReason: (error) =>
+    error instanceof ExecutionRefused || error instanceof PaymentRejected
+      ? error.message
+      : undefined,
 });
 export const approvePurchase = actions.approve;
 export const retryPurchase = actions.retry;
-export const rejectPurchase = actions.reject;
+export const rejectPurchase = async (
+  ...args: Parameters<typeof actions.reject>
+) => {
+  const result = await actions.reject(...args);
+  return {
+    ...result,
+    message: `${result.message} Automatic restocking for this product is paused for 24 hours. Reset its cooldown from Home or product settings to recheck sooner.`,
+  };
+};
 export type { ApprovalResult } from "./approval-actions";
 
 /** Creates (or returns) the PayPal order, so the merchant approves and pays in PayPal itself. */
-export function approveInPayPal(shop: string, decisionSeq: number, returnUrl: string): Promise<{ approveUrl: string }> {
+export function approveInPayPal(
+  shop: string,
+  decisionSeq: number,
+  returnUrl: string,
+): Promise<{ approveUrl: string }> {
   return oncePerDecision(shop, decisionSeq, async () => {
-    const state = approvalStates(await auditEntries(shop)).find((s) => s.decisionSeq === decisionSeq);
-    if (state?.status !== "waiting" && state?.status !== "paypal_pending") throw new ExecutionRefused("This purchase is not waiting for approval. Refresh its status.");
+    const state = approvalStates(await auditEntries(shop)).find(
+      (s) => s.decisionSeq === decisionSeq,
+    );
+    if (state?.status !== "waiting" && state?.status !== "paypal_pending")
+      throw new ExecutionRefused(
+        "This purchase is not waiting for approval. Refresh its status.",
+      );
     const order = await createApprovalOrder(shop, decisionSeq, returnUrl);
-    if (order.event.type !== "order_created") throw new Error("Unexpected log entry");
+    if (order.event.type !== "order_created")
+      throw new Error("Unexpected log entry");
     return { approveUrl: order.event.approveUrl };
   });
 }

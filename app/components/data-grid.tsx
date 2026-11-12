@@ -18,6 +18,7 @@ export type DataGridProps<T> = {
   height?: number;
   search?: boolean;
   renderDetail?: (row: T) => ReactNode;
+  revealRowId?: string;
   isExpandable?: (row: T) => boolean;
   emptyMessage?: string;
 };

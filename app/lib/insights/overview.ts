@@ -102,6 +102,7 @@ export function overviewModel(
     stock: {
       risk,
       urgent,
+      cooldowns: managed.filter(p => p.cooldown),
       unknown,
       threshold,
       managedCount: managed.length,

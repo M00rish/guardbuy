@@ -1,0 +1,103 @@
+// Isolated PostgreSQL only. Shopify reads are stubbed; no payments, models or inventory writes.
+import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
+for (const key of ["DATABASE_URL", "DIRECT_URL"]) {
+  const url = new URL(process.env[key] ?? "invalid:");
+  assert.equal(url.hostname, "127.0.0.1");
+  assert.equal(url.pathname, "/guardbuy_ism141_test");
+}
+Object.assign(process.env, { NODE_ENV: "test", GUARDBUY_PAYMENTS_DISABLED: "1" });
+const { default: db } = await import("../app/db.server");
+const { appendAudit, appendAuditWhen, auditEntries, verifyChain } = await import("../app/lib/audit/log.server");
+const { restockCooldown, DECLINE_COOLDOWN_MS } = await import("../app/lib/agent/restock-cooldown");
+const { resetRestockCooldown } = await import("../app/lib/merchant/reset-restock-cooldown.server");
+const { skipReason, runRestock, defaultRuleSet, signRuleSet } = await import("../app/lib/agent/restock.server");
+const { rejectPurchase } = await import("../app/lib/agent/approvals.server");
+const { enqueueRestock, claimRestockJob, retryRestockJob } = await import("../app/lib/jobs/restock-queue.server");
+const { recoverRestockCooldowns } = await import("../app/lib/jobs/restock-cooldown-recovery.server");
+const { toFeed } = await import("../app/lib/audit/feed.server");
+const { deleteAuditEntries, disconnectOwner } = await import("./lib/audit-admin");
+const shop = `cooldown-${randomUUID()}.test`;
+const product = { variantId: "123", sku: "COFFEE", title: "Test coffee" };
+const admin = { graphql: async (_q: string, options: { variables: { id: string } }) => {
+  assert.equal(options.variables.id, "gid://shopify/ProductVariant/123");
+  return Response.json({ data: { productVariant: { id: options.variables.id, inventoryItem: { id: "gid://shopify/InventoryItem/777", tracked: true } } } });
+} } as unknown as AdminApiContext;
+const originalFetch = globalThis.fetch;
+globalThis.fetch = async () => { throw Error("Unexpected external call"); };
+try {
+  await db.managedProduct.create({ data: { shop, ...product, managed: true } });
+  await signRuleSet(shop, defaultRuleSet(shop), "staff");
+  await db.supplier.create({ data: { shop, id: "supplier", name: "Test supplier", paypalEmail: "supplier@example.test" } });
+  await db.productSupplier.create({ data: { shop, variantId: "123", supplierId: "supplier", unitPriceCents: 100, usualQuantity: 2, leadTimeDays: 3 } });
+  const job = (await enqueueRestock(shop, "777"))!;
+  const proposal = async () => {
+    const p = await appendAudit(shop, { type: "proposal", restockJobId: `${job.id}:1`, proposal: { variantId: "123", sku: "COFFEE", supplierId: "supplier", quantity: 2, unitPriceCents: 100, reasoning: "Test only" } });
+    return appendAudit(shop, { type: "decision", proposalSeq: p.seq, decision: { verdict: "approval", totalCents: 200, checks: [], ruleSetHash: "test" } });
+  };
+  const d = await proposal();
+  await db.restockJob.update({ where: { id: job.id }, data: { completedGeneration: 1 } });
+  await rejectPurchase(shop, d.seq, "shopify-staff:test");
+  let log = await auditEntries(shop);
+  const hold = restockCooldown(product, log)!;
+  assert.equal(hold.decisionSeq, d.seq);
+  const skipped = await runRestock(shop, { ...product, available: 1, perDay: 2, daysOfCover: .5, needsRestock: true });
+  assert.equal(skipped.outcome, "skipped");
+  assert.equal("retryAt" in skipped && skipped.retryAt, hold.until, "restock returns a durable retry deadline without calling a model or payment provider");
+  assert.match(skipReason(product, log)!, /paused until/);
+  assert.equal(restockCooldown({ ...product, variantId: "999" }, log), null, "shared SKU does not hold another variant");
+  assert.equal(restockCooldown(product, log, new Date(Date.parse(log.at(-1)!.at) + DECLINE_COOLDOWN_MS)), null, "expiry releases hold exactly at 24 hours");
+  assert.equal((await db.restockJob.findUniqueOrThrow({ where: { id: job.id } })).generation, 2, "decline durably requests an expiry recheck");
+  await db.restockJob.update({ where: { id: job.id }, data: { completedGeneration: 2 } });
+  await recoverRestockCooldowns();
+  const recovered = await db.restockJob.findUniqueOrThrow({ where: { id: job.id } });
+  assert.equal(recovered.generation, 3, "startup recovers old acknowledged cooldowns");
+  assert.equal(recovered.availableAt.toISOString(), hold.until);
+  await recoverRestockCooldowns();
+  assert.equal((await db.restockJob.findUniqueOrThrow({ where: { id: job.id } })).generation, 3, "recovery does not duplicate a pending check");
+  await db.restockJob.update({ where: { id: job.id }, data: { availableAt: new Date() } });
+  const claimed = await claimRestockJob();
+  assert.equal(claimed?.id, job.id);
+  await retryRestockJob(claimed!, DECLINE_COOLDOWN_MS);
+  const before = log.length;
+  assert.equal((await resetRestockCooldown(admin, shop, "staff", "123", hold.rejectedSeq + 99)).ok, false, "stale rejection refused");
+  assert.equal((await auditEntries(shop)).length, before);
+  const results = await Promise.all([resetRestockCooldown(admin, shop, "staff", "123", hold.rejectedSeq), resetRestockCooldown(admin, shop, "staff", "123", hold.rejectedSeq)]);
+  assert.equal(results.filter(r => r.ok).length, 1, "concurrent resets record only one release");
+  log = await auditEntries(shop);
+  assert.equal(restockCooldown(product, log), null);
+  assert.equal(skipReason(product, log), null, "reset permits a fresh proposal");
+  const queued = await db.restockJob.findUniqueOrThrow({ where: { id: job.id } });
+  assert.equal(queued.generation, 4);
+  assert.ok(queued.availableAt <= new Date(), "reset wakes delayed job immediately");
+  assert.equal(await retryRestockJob(claimed!, DECLINE_COOLDOWN_MS), false, "stale worker cannot overwrite reset with another 24h delay");
+  assert.equal((await verifyChain(shop)).valid, true);
+  assert.equal(log.filter(e => e.event.type === "restock_cooldown_reset").length, 1);
+  assert.equal(log.filter(e => ["approved", "payment_attempt", "payout"].includes(e.event.type)).length, 0, "reset does not approve or pay the old purchase");
+  const d2 = await proposal();
+  await rejectPurchase(shop, d2.seq, "staff");
+  const newer = restockCooldown(product, await auditEntries(shop))!;
+  assert.equal(newer.decisionSeq, d2.seq, "old reset cannot clear a later decline");
+  assert.equal((await resetRestockCooldown(admin, shop, "staff", "123", hold.rejectedSeq)).ok, false);
+  await db.managedProduct.update({ where: { shop_variantId: { shop, variantId: "123" } }, data: { managed: false } });
+  assert.equal((await resetRestockCooldown(admin, shop, "staff", "123", newer.rejectedSeq)).ok, false, "disabled product cannot reset");
+  const count = (await auditEntries(shop)).length;
+  await assert.rejects(appendAuditWhen(shop, { type: "agent_state", on: false, by: "test" }, undefined, undefined, undefined, async () => { throw Error("queue unavailable"); }), /queue unavailable/);
+  assert.equal((await auditEntries(shop)).length, count, "failed queue commit rolls back audit event too");
+  // Paid/in-flight reservations still block, even with an earlier reset in the history.
+  const paidLog = [...log, { ...log.at(-1)!, seq: 999, event: { type: "payout" as const, decisionSeq: d.seq, payoutBatchId: "test", status: "PENDING", amountCents: 200 } }];
+  assert.match(skipReason(product, paidLog)!, /PayPal confirmation|already open/);
+  assert.match(toFeed(log, "staff").find(e => e.title.includes("cooldown"))?.title ?? "", /reset by you/);
+  console.log("PASS cooldown: expiry, product isolation, atomic audited reset, concurrent/stale requests, delayed-job wake, stale-worker fencing, later declines and payment reservations.");
+} finally {
+  globalThis.fetch = originalFetch;
+  await db.restockJob.deleteMany({ where: { shop } });
+  await db.productSupplier.deleteMany({ where: { shop } });
+  await db.supplier.deleteMany({ where: { shop } });
+  await db.managedProduct.deleteMany({ where: { shop } });
+  await db.paymentLock.deleteMany({ where: { shop: { contains: shop } } });
+  await deleteAuditEntries({ shop });
+  await db.$disconnect();
+  await disconnectOwner();
+}

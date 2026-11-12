@@ -1,0 +1,32 @@
+.notice {
+  padding: 14px 16px;
+  margin: 12px 0;
+  border: 1px solid #ead5a9;
+  border-radius: 10px;
+  background: #fff8ea;
+  color: #644a19;
+  font:
+    12px/1.5 Arial,
+    sans-serif;
+}
+.notice p {
+  margin: 6px 0 10px;
+}
+.notice button {
+  border: 1px solid #b8cec4;
+  border-radius: 6px;
+  background: #fff;
+  color: #006d56;
+  padding: 8px 12px;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.notice button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.notice button:focus-visible {
+  outline: 2px solid #007f65;
+  outline-offset: 3px;
+}

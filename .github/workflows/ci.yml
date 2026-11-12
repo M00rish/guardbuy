@@ -117,6 +117,8 @@ jobs:
           DATABASE_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism141_test
           DIRECT_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism141_test
         run: |
+          npx tsx scripts/check-expected-sales-db.ts
+          npx tsx scripts/check-restock-cooldown-db.ts
           npx tsx scripts/check-restock-enable-db.ts
           npx tsx scripts/check-navigation.ts
           npx tsx scripts/check-app-entry.ts

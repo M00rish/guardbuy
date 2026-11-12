@@ -35,10 +35,7 @@ import PurchaseAnalysisGrid, {
   purchaseGridModules,
   type PurchaseGridData,
 } from "./purchase-analysis-grid";
-import {
-  createPurchaseGridStore,
-  parseSavedGridView,
-} from "../lib/insights/grid-view";
+import { createPurchaseGridStore } from "../lib/insights/grid-view";
 import {
   runGuardQuery,
   productAnalytics,
@@ -561,65 +558,6 @@ export default function InsightsStudio({
       })),
     [resetLinked],
   );
-  const viewKey = `guardbuy-workspace:v2:${shop}:${demo ? "demo" : "live"}:${dataView}:${dataView === "purchases" ? analysis : "default"}`;
-  const savedAction = (action: string) => {
-    const api = apiRef.current;
-    if (!api || api.isDestroyed()) return;
-    try {
-      if (action === "save") {
-        localStorage.setItem(
-          viewKey,
-          JSON.stringify({
-            version: 1,
-            columns: api.getColumnState(),
-            filters: api.getFilterModel(),
-            pivot: api.isPivotMode(),
-            search,
-          }),
-        );
-        setNotice("View saved for this store, data mode and grid view.");
-      } else if (action === "restore") {
-        const raw = localStorage.getItem(viewKey);
-        if (!raw) {
-          setNotice("No saved layout for this view yet.");
-          return;
-        }
-        const saved = parseSavedGridView(raw);
-        setOverviewSelection(undefined);
-        api.setGridOption("pivotMode", saved.pivot);
-        api.applyColumnState({ state: saved.columns, applyOrder: true });
-        api.setFilterModel(saved.filters);
-        setSearch(saved.search);
-        setNotice("Saved columns and filters restored.");
-      } else resetFilters();
-    } catch {
-      setNotice("The saved view is unavailable in this browser.");
-    }
-  };
-  const chartSelection = () => {
-    const api = apiRef.current;
-    const range = api?.getCellRanges()?.at(-1);
-    if (
-      !range?.startRow ||
-      !range.endRow ||
-      !range.columns.some(
-        (column) => column.getColDef().chartDataType === "series",
-      )
-    ) {
-      setNotice(
-        "Select numeric cells in the grid, then choose Chart selection.",
-      );
-      return;
-    }
-    api?.createRangeChart({
-      cellRange: {
-        rowStartIndex: range.startRow.rowIndex,
-        rowEndIndex: range.endRow.rowIndex,
-        columns: range.columns,
-      },
-      chartType: "groupedColumn",
-    });
-  };
   return (
     <AgStudioProvider
       licenseKey={licenseKey || undefined}
@@ -668,7 +606,16 @@ export default function InsightsStudio({
             onSelect={selectOverview}
           />
           <div className={styles.main}>
-            <ViewTabs label="Home data views" value={dataView} options={(Object.keys(viewLabels) as DataView[]).map(id=>({id,label:viewLabels[id]}))} onChange={changeView} panelId="home-grid-panel" />
+            <ViewTabs
+              label="Home data views"
+              value={dataView}
+              options={(Object.keys(viewLabels) as DataView[]).map((id) => ({
+                id,
+                label: viewLabels[id],
+              }))}
+              onChange={changeView}
+              panelId="home-grid-panel"
+            />
             <div className={styles.toolbar}>
               <input
                 aria-label={`Search ${viewLabels[dataView].toLowerCase()}`}
@@ -695,23 +642,6 @@ export default function InsightsStudio({
                 </select>
               )}
               <div className={styles.actions}>
-                <select
-                  aria-label="Saved view actions"
-                  value=""
-                  onChange={(e) => savedAction(e.target.value)}
-                >
-                  <option value="" disabled>
-                    Saved views
-                  </option>
-                  <option value="save">Save this view</option>
-                  <option value="restore">Restore saved view</option>
-                  <option value="clear">Clear all filters</option>
-                </select>
-                {(dataView === "products" || dataView === "purchases") && (
-                  <button type="button" onClick={chartSelection}>
-                    Chart selection
-                  </button>
-                )}
                 <button
                   type="button"
                   onClick={() =>
