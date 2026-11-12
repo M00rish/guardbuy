@@ -1,3 +1,4 @@
+import { RestockCooldownNotice } from "./restock-cooldown-notice";
 import { coverLabel, coverExplanation } from "../lib/inventory/cover-label";
 import { GridBadge } from "./data-grid";
 import { useMemo } from "react";
@@ -83,6 +84,8 @@ function ProductDetail({
           </Link>
         )}
       </div>
+      {data.cooldown && <RestockCooldownNotice variantId={data.variantId} cooldown={data.cooldown} disabled={context.demo || !data.managed} />}
+      <p>{data.perDay ?? "Unknown"} expected units/day · {data.dailySalesOverride == null ? "from sales history" : "merchant estimate"}. Days of cover = stock ÷ expected units/day.</p>
       <div className={styles.history}>
         <AgGridReact<InsightRow>
           theme={gridTheme}
@@ -274,7 +277,7 @@ export function ProductsGrid({
       getRowId={(p) => p.data.variantId}
       masterDetail
       detailCellRenderer={ProductDetail}
-      detailRowHeight={310}
+      detailRowAutoHeight
       keepDetailRows
       rowGroupPanelShow="onlyWhenGrouping"
       autoGroupColumnDef={{ headerName: "Supplier / product", minWidth: 220 }}

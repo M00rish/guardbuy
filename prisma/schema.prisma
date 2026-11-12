@@ -85,6 +85,7 @@ model ManagedProduct {
   sku       String?
   title     String
   managed   Boolean  @default(false)
+  dailySalesOverride Float?
   updatedAt DateTime @updatedAt
 
   @@id([shop, variantId])

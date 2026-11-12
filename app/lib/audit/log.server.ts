@@ -1,4 +1,5 @@
 import db from "../../db.server";
+import type { Prisma } from "@prisma/client";
 import { privacyShopHash } from "../privacy/state.server";
 import type { PaymentLease } from "../agent/payment-lock.server";
 import { canonicalJson, sha256Hex } from "../policy/hash";
@@ -20,7 +21,7 @@ export async function appendAudit(shop: string, event: AuditEvent): Promise<Audi
 }
 
 /** Conditional append checks current history under the same database lock as the write. */
-export async function appendAuditWhen(shop: string, event: AuditEvent, when?: (log: AuditEntry[]) => boolean, lease?: PaymentLease, payoutLease?: { payoutSeq: number; holder: string }): Promise<AuditEntry | null> {
+export async function appendAuditWhen(shop: string, event: AuditEvent, when?: (log: AuditEntry[]) => boolean, lease?: PaymentLease, payoutLease?: { payoutSeq: number; holder: string }, afterAppend?: (tx: Prisma.TransactionClient) => Promise<void>): Promise<AuditEntry | null> {
   const parsed = AuditEventSchema.parse(event);
 
   return db.$transaction(async (tx) => {
@@ -49,6 +50,7 @@ export async function appendAuditWhen(shop: string, event: AuditEvent, when?: (l
     await tx.auditEntry.create({
       data: { shop, seq, at: new Date(at), type: parsed.type, event: parsed as object, prevHash, hash },
     });
+    if (afterAppend) await afterAppend(tx);
     return { seq, shop, at, event: parsed, prevHash, hash };
   }, TX_OPTIONS);
 }

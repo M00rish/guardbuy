@@ -1,3 +1,4 @@
+import { restockCooldown } from "../agent/restock-cooldown";
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
 import { paymentStatus } from "../payments/status";
@@ -54,6 +55,8 @@ export function productStatus(
   const delivery = deliveries(log, now).find((d) => d.variantId === p.variantId && (d.remaining > 0 || d.pending) && (d.payment !== "failed" || d.pending));
   if (delivery) return { label: delivery.pending ? "Receipt needs confirmation" : delivery.payment === "pending" ? `Payment pending · ${delivery.remaining} on order` : `${delivery.remaining} incoming · ${delivery.overdue ? "overdue" : delivery.partialRefund ? "partial refund · review delivery" : "awaiting delivery"}`, tone: delivery.overdue || delivery.partialRefund ? "warning" : "info" };
   if (!p.managed) return { label: "Automatic restocking disabled", tone: "neutral" };
+  const cooldown = restockCooldown(p, log, now);
+  if (cooldown) return { label: "Restock paused · declined purchase", tone: "warning", at: cooldown.until };
   const last = log
     .filter((e) => e.event.type === "proposal" && !e.event.scenario && (e.event.proposal.variantId ? e.event.proposal.variantId === p.variantId : e.event.proposal.sku === p.sku))
     .at(-1);
@@ -64,7 +67,7 @@ export function productStatus(
     const paid = of("payout") ?? of("order_captured");
     const total = d?.event.type === "decision" ? `$${(d.event.decision.totalCents / 100).toFixed(2)}` : "";
     if (paid) { const state = paymentStatus(log, paid); return { label: `${state.label} · ${total}`, tone: state.tone, at: paid.at }; }
-    if (of("rejected")) return { label: "Purchase declined", tone: "neutral", at: of("rejected")!.at };
+    if (of("rejected")) return { label: "Ready for a fresh stock check", tone: "info" };
     if (of("payment_failed")) return { label: "Payment failed · check Activity", tone: "critical", at: of("payment_failed")!.at };
     const created = of("order_created");
     const closed = created?.event.type === "order_created" && log.some((e) => e.event.type === "order_closed" && created.event.type === "order_created" && e.event.orderId === created.event.orderId);
@@ -114,6 +117,7 @@ export async function productOverview(admin: AdminApiContext, shop: string) {
           sku: v.sku || null,
           stock,
           perDay,
+          dailySalesOverride: managed.find(m => m.variantId === variantId)?.dailySalesOverride ?? null,
           cover: daysOfCover(stock, perDay),
           managed: isOn.get(variantId) ?? false,
           supplier: supplier?.supplier.name ?? null,

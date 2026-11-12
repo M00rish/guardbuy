@@ -367,6 +367,7 @@ function OverviewWidget({
                 { label: "On hand", value: String(datum.stock) },
                 { label: "Incoming", value: `${datum.incoming} units` },
                 { label: "Product", value: datum.sku ?? datum.variantId },
+                { label: "Restock status", value: datum.cooldown ? `Declined purchase #${datum.cooldown.decisionSeq}; paused until ${readableTime(datum.cooldown.until)}` : datum.status.label },
               ],
             }),
           },
@@ -580,7 +581,11 @@ function OverviewWidget({
           >
             View {stock.urgent.length} at risk
           </button>
-          {stock.unknown.length > 0 ? (
+          {stock.cooldowns.length > 0 ? (
+            <button type="button" onClick={() => choose({ view: "products", variantIds: stock.cooldowns.map(p => p.variantId), label: "Restocking paused after a decline · expand a product to reset its cooldown" })}>
+              {stock.cooldowns.length} restock{stock.cooldowns.length === 1 ? "" : "s"} paused · review cooldown
+            </button>
+          ) : stock.unknown.length > 0 ? (
             <button
               type="button"
               onClick={() =>

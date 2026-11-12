@@ -129,6 +129,12 @@ export async function pruneOldSales(shop: string) {
  * divided by 30. Days with no sales inside the window count as zero.
  */
 export async function salesPerDay(shop: string, variantId: string, createdAt?: Date, now = new Date()) {
+  const product = await db.managedProduct.findUnique({ where: { shop_variantId: { shop, variantId: variantKey(variantId) } }, select: { dailySalesOverride: true } });
+  if (product?.dailySalesOverride != null) return product.dailySalesOverride;
+  return historicalSalesPerDay(shop, variantId, createdAt, now);
+}
+
+export async function historicalSalesPerDay(shop: string, variantId: string, createdAt?: Date, now = new Date()) {
   const windowStart = utcDay(new Date(now.getTime() - SALES_WINDOW_DAYS * DAY_MS));
   const rows = await db.dailySales.findMany({ where: { shop, variantId, day: { gte: windowStart } }, orderBy: { day: "asc" } });
   const units = rows.reduce((sum, r) => sum + r.units, 0);

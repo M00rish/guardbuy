@@ -14,6 +14,7 @@ import { attemptStates, purchaseReservations, PaymentPending } from "../payments
 import { withPaymentLock, type PaymentLease } from "./payment-lock.server";
 import { executePurchase, ExecutionRefused } from "./execute.server";
 import { proposePurchase } from "./proposer.server";
+import { restockCooldown } from "./restock-cooldown";
 
 // The restock loop: low stock -> LLM proposal -> policy decision -> payout (only if "auto").
 // Each step is written to the audit log before the next one runs, so the log always shows
@@ -23,7 +24,6 @@ const DAY_MS = 86_400_000;
 const OPEN_RESTOCK_MS = 3 * DAY_MS; // legacy SKU-only cooldown; variant incoming stock remains held until receipt or explicit closure
 const RETRY_AFTER_BLOCK_MS = 60 * 60_000; // after a blocked proposal or failed payment, wait before trying again
 const RETRY_AFTER_LLM_FAILURE_MS = 15 * 60_000; // after the LLM failed or timed out
-const RETRY_AFTER_REJECT_MS = DAY_MS; // the merchant said no: don't ask again the same day
 const IN_FLIGHT_MS = 10 * 60_000; // an "auto" decision with no payment result yet is still being paid
 
 /** A purchase waiting for approval expires after this long: it can't be paid, and the product is re-proposed with fresh numbers. */
@@ -344,7 +344,10 @@ export function skipReason(item: { variantId: string; sku: string }, log: AuditE
   }
   if (ofDecision("order_captured").length) return last.event.type === "proposal" && last.event.proposal.variantId ? null : open();
   const rejected = ofDecision("rejected").at(-1);
-  if (rejected) return wait(rejected.at, RETRY_AFTER_REJECT_MS, `restock #${last.seq} was declined`);
+  if (rejected) {
+    const cooldown = restockCooldown(item, log, now);
+    return cooldown ? `Purchase #${cooldown.decisionSeq} was declined. Automatic restocking is paused until ${cooldown.until}; reset the cooldown to recheck sooner.` : null;
+  }
   const failed = ofDecision("payment_failed").at(-1);
   if (failed) return wait(failed.at, RETRY_AFTER_BLOCK_MS, `payment for #${last.seq} failed`);
   if (verdict === "approval") return approvalExpired(decision.at, now) ? null : open(); // waiting for a person (until it expires)
@@ -353,7 +356,7 @@ export function skipReason(item: { variantId: string; sku: string }, log: AuditE
 }
 
 export type RestockResult =
-  | { outcome: "skipped" | "failed"; reason: string }
+  | { outcome: "skipped" | "failed"; reason: string; retryAt?: string }
   | { outcome: "auto" | "approval" | "block"; proposalSeq: number; decisionSeq: number; payoutSeq?: number; error?: string };
 
 // Every caller uses the database product lease; no in-memory guard is required for correctness.
@@ -377,8 +380,12 @@ async function restock(shop: string, check: StockCheck, lease: PaymentLease, job
 
   let p = jobId ? log.find((e) => e.event.type === "proposal" && e.event.restockJobId === jobId) : undefined;
   if (!p) {
-    const skip = skipReason(check, log);
-    if (skip) return { outcome: "skipped", reason: skip };
+    const checkedAt = new Date();
+    const skip = skipReason(check, log, checkedAt);
+    if (skip) {
+      const cooldown = restockCooldown(check, log, checkedAt);
+      return { outcome: "skipped", reason: skip, ...(cooldown ? { retryAt: cooldown.until } : {}) };
+    }
   }
   if (!Number.isFinite(check.perDay) || check.perDay <= 0 || !Number.isFinite(check.daysOfCover)) {
     return { outcome: "skipped", reason: "No usable recent sales rate; stock cover cannot be estimated." };

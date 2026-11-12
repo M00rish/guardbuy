@@ -1,3 +1,6 @@
+import { saveExpectedSales } from "../lib/merchant/expected-sales.server";
+import { RestockCooldownNotice } from "../components/restock-cooldown-notice";
+import { restockCooldown } from "../lib/agent/restock-cooldown";
 import { manageProduct } from "../lib/merchant/manage-product.server";
 import { FormCheck, FormField, FormSelect, FormSection, FormButton, FormGrid, formStyles } from "../components/form-design";
 import {
@@ -17,7 +20,7 @@ import { useAppBridge } from "@shopify/app-bridge-react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 
 import db from "../db.server";
-import { privateAdmin } from "../lib/merchant/staff.server";
+import { privateAdmin, adminWithStaff } from "../lib/merchant/staff.server";
 import {
   linkSupplier,
   setPreferred,
@@ -26,7 +29,7 @@ import {
 import { usd } from "../lib/format";
 import { auditEntries } from "../lib/audit/log.server";
 import { currentRuleSet } from "../lib/agent/restock.server";
-import { daysOfCover, salesPerDay } from "../lib/inventory/sales.server";
+import { daysOfCover, salesPerDay, historicalSalesPerDay } from "../lib/inventory/sales.server";
 import { Empty } from "../components/ui";
 
 // One product: whether GuardBuy restocks it, which suppliers it may buy it from, on what terms,
@@ -51,12 +54,13 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const v = data.productVariant;
   if (!v) throw new Response("Product not found", { status: 404 });
 
-  const [managed, links, suppliers, log, perDay] = await Promise.all([
+  const [managed, links, suppliers, log, perDay, historicalPerDay] = await Promise.all([
     db.managedProduct.findUnique({ where: { shop_variantId: { shop, variantId } } }),
     db.productSupplier.findMany({ where: { shop, variantId }, include: { supplier: true }, orderBy: [{ preferred: "desc" }, { unitPriceCents: "asc" }] }),
     db.supplier.findMany({ where: { shop }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
     auditEntries(shop),
     salesPerDay(shop, variantId, new Date(v.createdAt)),
+    historicalSalesPerDay(shop, variantId, new Date(v.createdAt)),
   ]);
   const allow = currentRuleSet(log)?.supplierAllowlist ?? null;
   const cover = daysOfCover(v.inventoryQuantity ?? 0, perDay);
@@ -66,8 +70,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     sku: v.sku || null,
     stock: v.inventoryQuantity,
     perDay: Number(perDay.toFixed(2)),
+    historicalPerDay: Number(historicalPerDay.toFixed(2)),
+    dailySalesOverride: managed?.dailySalesOverride ?? null,
     cover: Number.isFinite(cover) ? Number(cover.toFixed(1)) : null,
     managed: managed?.managed ?? false,
+    cooldown: restockCooldown({ variantId, sku: v.sku || null }, log),
     links: links.map((l) => ({
       supplierId: l.supplierId, name: l.supplier.name, paypalEmail: l.supplier.paypalEmail,
       price: usd(l.unitPriceCents), usualQuantity: l.usualQuantity, leadTimeDays: l.leadTimeDays, preferred: l.preferred,
@@ -78,7 +85,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
 };
 
 export const action = async ({ request, params }: ActionFunctionArgs) => {
-  const { admin, session } = await privateAdmin(request);
+  const { admin, session, actor } = await adminWithStaff(request);
   const shop = session.shop;
   const variantId = String(params.variantId ?? "");
   if (!/^\d+$/.test(variantId)) return { ok: false, message: "Unknown product" };
@@ -86,6 +93,8 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   const supplierId = String(f.get("supplierId") ?? "");
 
   switch (f.get("intent")) {
+    case "expected-sales":
+      return saveExpectedSales(admin, shop, actor, variantId, String(f.get("unitsPerDay") ?? ""));
     case "toggle": {
       const on = f.get("managed") === "true";
       return manageProduct(admin,shop,{variantId,sku:String(f.get("sku")||"")||null,title:String(f.get("title")??"")},on);
@@ -150,7 +159,7 @@ export default function ProductSuppliers() {
           />
           <s-text tone="neutral">
             {p.sku ? `SKU ${p.sku} · ` : ""}
-            {p.stock ?? "?"} in stock · {p.perDay} sold/day ·{" "}
+            {p.stock ?? "?"} in stock · {p.perDay} units/day ({p.dailySalesOverride === null ? "sales history" : "your estimate"}) ·{" "}
             {p.cover === null ? "no recent sales" : `${p.cover} days left`}
           </s-text>
         </s-stack>
@@ -164,6 +173,15 @@ export default function ProductSuppliers() {
         )}
       </s-section>
 
+      <FormSection title="Expected sales per day" description="Days of cover = available stock ÷ expected units sold per day. Automatic restocking also accounts for incoming stock.">
+        <fetcher.Form method="post">
+          <input type="hidden" name="intent" value="expected-sales" />
+          <FormField key={p.dailySalesOverride ?? "automatic"} label="Expected units sold per day" name="unitsPerDay" type="number" min="0" max="1000000" step="any" defaultValue={p.dailySalesOverride ?? ""} placeholder={`Automatic: ${p.historicalPerDay}`} details={`Sales history estimates ${p.historicalPerDay} units/day over up to 30 days. Leave blank to use that estimate. Your value changes stock cover and purchase quantities.`} />
+          <p className={formStyles.hint}>Saving queues a stock check for enabled products. A purchase may be paid automatically if your current rules allow it; a decline cooldown still applies.</p>
+          <FormButton type="submit" disabled={busy}>{busy ? "Saving…" : "Save sales estimate and recheck"}</FormButton>
+        </fetcher.Form>
+      </FormSection>
+      {p.cooldown && <RestockCooldownNotice variantId={p.variantId} cooldown={p.cooldown} disabled={!p.managed} />}
       <s-section heading="Suppliers for this product">
         {p.links.some((l) => !l.approved) && (
           <s-box paddingBlockEnd="base">

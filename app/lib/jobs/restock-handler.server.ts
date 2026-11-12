@@ -15,6 +15,8 @@ export async function handleRestockJob(job: ClaimedRestockJob) {
   if (!item?.sku) return {};
   const check = await checkStock(job.shop, { ...item, sku: item.sku });
   const result = await runRestock(job.shop, check, { jobId: restockJobKey(job) });
+  if (result.outcome === "skipped" && result.retryAt)
+    return { retryAfterMs: Math.max(1000, Date.parse(result.retryAt) - Date.now()) };
   // A model failure is transient. Keep the same generation and respect the existing 15-minute cooldown.
   return result.outcome === "failed" ? { retryAfterMs: 15 * 60_000 } : {};
 }

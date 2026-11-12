@@ -125,6 +125,12 @@ export function toFeed(log: AuditEntry[], you?: string, names: FeedNames = {}): 
       case "rejected":
         items.push({ ...base, kind: "declined", byYou: ev.rejectedBy === you, title: `Purchase #${ev.decisionSeq} declined by ${actor(ev.rejectedBy, you)}.`, detail: ev.reason });
         break;
+      case "daily_sales_estimate_changed":
+        items.push({ ...base, kind: "rules", byYou: ev.by === you, title: `Expected sales for ${product(ev.variantId, ev.variantId)} updated by ${actor(ev.by, you)}.`, detail: ev.unitsPerDay === null ? "Uses the recent sales-history estimate." : `Merchant estimate: ${ev.unitsPerDay} units per day. Current purchasing rules still apply.` });
+        break;
+      case "restock_cooldown_reset":
+        items.push({ ...base, kind: "rules", byYou: ev.by === you, title: `Restock cooldown for purchase #${ev.decisionSeq} reset by ${actor(ev.by, you)}.`, detail: "A fresh stock check was queued. Current rules and payment safeguards still apply." });
+        break;
       case "agent_state":
         items.push({ ...base, kind: ev.on ? "rules" : "failed", byYou: ev.by === you, title: ev.on ? `Agent resumed by ${actor(ev.by, you)}.` : `Agent paused by ${actor(ev.by, you)}.` });
         break;
