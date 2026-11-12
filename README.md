@@ -61,9 +61,9 @@ Use this guide to deploy your own GuardBuy instance and Shopify development stor
 
 ## Before handing the repository to your agent
 
-**Trying the existing app needs none of the accounts below:** open [the public judge demo](https://guardbuy.onrender.com/demo). No Shopify login, installation or credentials are needed for that console.
+**Trying the existing app needs none of the accounts below:** open [the public judge demo](https://guardbuy.onrender.com/demo). No Shopify login, installation or credentials are needed but this is a very limited basic experience.
 
-**Deploying your own copy is agent-assisted, not a one-click installer.** The repository does not create provider accounts or obtain their permissions from environment keys. Have the following ready:
+**Recommended: Deploying your own copy is agent-assisted, not a one-click installer.** The repository does not create provider accounts or obtain their permissions from environment keys. Have the following ready:
 
 | Judge supplies or authorizes                                                                                                                                | What the agent can do afterwards                                                                                                                                                                                                                                                                                                          |
 | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
