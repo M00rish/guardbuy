@@ -6,6 +6,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
+import { useRevalidator } from "react-router";
 import {
   AgCharts,
   ModuleRegistry,
@@ -718,6 +719,8 @@ const theme = studioTheme.withParams({
 export default function CurrentStateOverview(
   props: Omit<OverviewContext, "model">,
 ) {
+  const revalidator = useRevalidator();
+  const refreshing = revalidator.state !== "idle";
   const model = useMemo(
     () => overviewModel(props.snapshot, props.workspace),
     [props.snapshot, props.workspace],
@@ -773,8 +776,8 @@ export default function CurrentStateOverview(
           {readableTime(props.snapshot.checkedAt)} · store-wide totals
         </span>
         {!props.demo && (
-          <button type="button" onClick={() => window.location.reload()}>
-            Refresh snapshot
+          <button type="button" disabled={refreshing} aria-busy={refreshing} onClick={() => revalidator.revalidate()}>
+            {refreshing ? "Refreshing…" : "Refresh snapshot"}
           </button>
         )}
       </div>

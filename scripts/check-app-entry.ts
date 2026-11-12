@@ -61,6 +61,16 @@ try {
     assert.equal(r.status, 302, path);
     assert.equal(r.headers.get("location"), "/auth/login");
   }
+  // An embedded document reload can need a fresh App Bridge token. This is a
+  // successful bootstrap response, not a page displaying its HTTP status code.
+  const context = new URLSearchParams({ shop: "guardbuy-demo.myshopify.com", embedded: "1", host: Buffer.from("admin.shopify.com/store/guardbuy-demo").toString("base64") });
+  const reload = await fetch(`${base}/app?${context}`, { headers: { "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36" } });
+  assert.equal(reload.status, 200);
+  const bootstrap = await reload.text();
+  assert.match(bootstrap, /src="https:\/\/cdn\.shopify\.com\/shopifycloud\/app-bridge\.js"/, "document reload must render Shopify token recovery instead of a bare 200 page");
+  assert.match(bootstrap, /data-api-key="offline-api-key"/);
+  assert.ok(!bootstrap.includes("Unexpected Application Error"));
+  assert.ok(!bootstrap.includes("Unhandled Thrown Response"));
   const entry = await fetch(base + "/auth/login");
   const html = await entry.text();
   assert.match(html, /Open GuardBuy in Shopify/);
