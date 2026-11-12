@@ -106,7 +106,9 @@ export async function judgeState(shop: string, judgeId: string) {
     },
     feed: toFeed(log, `judge:${judgeId}`),
     verifyBase: process.env.SHOPIFY_APP_URL ? `${process.env.SHOPIFY_APP_URL}/verify?id=` : null,
-    approvals: queue.map((c) => ({
+    // Only purchases a judge can act on. A reserved payment is already submitted; its progress is
+    // in the feed, and showing Approve again would offer an action that must fail.
+    approvals: queue.filter((c) => c.status === "waiting").map((c) => ({
       decisionSeq: c.decisionSeq,
       title: `${c.quantity} × ${c.sku} from ${c.supplierName}`,
       total: usd(c.totalCents),

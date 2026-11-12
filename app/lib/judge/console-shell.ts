@@ -82,7 +82,6 @@ export const CONSOLE_SHELL = `
   <div class="foot">
     <button class="plain" id="gb-again" type="button">Start over</button>
     <span class="muted">Sandbox <code id="gb-id">…</code> · stays in this browser</span>
-    <a class="muted" id="gb-store" href="/collections/all" target="_blank" rel="noopener">See the demo store ↗</a>
   </div>
   <p class="muted">This page is public and shared with other judges, but each browser gets its own sandbox: its own rules,
   audit log and approvals. Supplier emails, staff identities and raw provider errors are never returned.</p>
@@ -225,7 +224,6 @@ export const CONSOLE_SHELL = `
   document.querySelectorAll(".gb [data-action]").forEach(function (b) {
     b.onclick = function () { act(b.getAttribute("data-action"), {}); };
   });
-  document.getElementById("gb-store").href = "https://" + "guardbuy-demo.myshopify.com" + "/collections/all";
 
   var fastUntil = 0, lastPoll = 0;
   markScene();
