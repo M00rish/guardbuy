@@ -57,7 +57,7 @@ Only the read-only Agent Toolkit tools (`get_order`, `list_transactions`) are lo
 
 Use this guide to deploy your own GuardBuy instance and Shopify development store. Give it to your coding agent; the agent performs the setup and tests, while you supply credentials through a local `.env` file or your hosting service’s secret manager.
 
-**Fresh accounts still require their owner to sign in and approve Shopify installation/permissions. PayPal account creation, service entitlements and Telegram pairing may also require owner interaction. This repository does not automate those provider requirements.** An agent can handle the remaining commands and browser setup once accounts are accessible. Never paste secrets into chat, commits or deployment logs.
+**Fresh accounts still require their owner to sign in and approve Shopify installation/permissions. PayPal account creation, service entitlements and Telegram pairing may also require owner interaction. This repository does not automate those provider requirements.** An agent can handle the remaining commands and browser setup once accounts are accessible.
 
 ## Before handing the repository to your agent
 
