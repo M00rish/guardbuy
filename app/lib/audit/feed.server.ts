@@ -131,6 +131,9 @@ export function toFeed(log: AuditEntry[], you?: string, names: FeedNames = {}): 
       case "restock_cooldown_reset":
         items.push({ ...base, kind: "rules", byYou: ev.by === you, title: `Restock cooldown for purchase #${ev.decisionSeq} reset by ${actor(ev.by, you)}.`, detail: "A fresh stock check was queued. Current rules and payment safeguards still apply." });
         break;
+      case "restock_block_reset":
+        items.push({ ...base, kind: "rules", byYou: ev.by === you, title: `Restock block for purchase #${ev.decisionSeq} lifted by ${actor(ev.by, you)}.`, detail: "A fresh stock check was queued. Current rules and payment safeguards still apply." });
+        break;
       case "agent_state":
         items.push({ ...base, kind: ev.on ? "rules" : "failed", byYou: ev.by === you, title: ev.on ? `Agent resumed by ${actor(ev.by, you)}.` : `Agent paused by ${actor(ev.by, you)}.` });
         break;

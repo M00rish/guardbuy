@@ -1,5 +1,4 @@
 import { claimRestockJob, finishRestockJob, renewRestockJob, retryRestockJob, type ClaimedRestockJob } from "./restock-queue.server";
-import { recoverRestockCooldowns } from "./restock-cooldown-recovery.server";
 
 type JobResult = { retryAfterMs?: number };
 type Handler = (job: ClaimedRestockJob) => Promise<JobResult>;
@@ -31,11 +30,9 @@ export function startRestockWorker() {
   if (globalThis.guardbuyRestockWorkerStarted || !process.env.DATABASE_URL || process.env.GUARDBUY_RESTOCK_WORKER === "off") return;
   if (process.env.NODE_ENV !== "production" && process.env.GUARDBUY_RESTOCK_WORKER !== "on") return;
   globalThis.guardbuyRestockWorkerStarted = true;
-  let recovered = false;
   const tick = async () => {
     let delay = 5000;
     try {
-      if (!recovered) { await recoverRestockCooldowns(); recovered = true; }
       if (await processNextRestockJob()) delay = 250;
     }
     catch { console.warn("[restock-worker] Queue unavailable; retrying after backoff"); }

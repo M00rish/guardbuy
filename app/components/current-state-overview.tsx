@@ -368,7 +368,7 @@ function OverviewWidget({
                 { label: "On hand", value: String(datum.stock) },
                 { label: "Incoming", value: `${datum.incoming} units` },
                 { label: "Product", value: datum.sku ?? datum.variantId },
-                { label: "Restock status", value: datum.cooldown ? `Declined purchase #${datum.cooldown.decisionSeq}; paused until ${readableTime(datum.cooldown.until)}` : datum.status.label },
+                { label: "Restock status", value: datum.cooldown ? `Declined purchase #${datum.cooldown.decisionSeq}; paused until you reset it` : datum.status.label },
               ],
             }),
           },

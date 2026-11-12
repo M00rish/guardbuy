@@ -1,6 +1,7 @@
 import { saveExpectedSales } from "../lib/merchant/expected-sales.server";
+import { RestockBlockNotice } from "../components/restock-block-notice";
 import { RestockCooldownNotice } from "../components/restock-cooldown-notice";
-import { restockCooldown } from "../lib/agent/restock-cooldown";
+import { restockBlock, restockCooldown } from "../lib/agent/restock-cooldown";
 import { manageProduct } from "../lib/merchant/manage-product.server";
 import { FormCheck, FormField, FormSelect, FormSection, FormButton, FormGrid, formStyles } from "../components/form-design";
 import {
@@ -75,6 +76,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     cover: Number.isFinite(cover) ? Number(cover.toFixed(1)) : null,
     managed: managed?.managed ?? false,
     cooldown: restockCooldown({ variantId, sku: v.sku || null }, log),
+    block: restockBlock({ variantId, sku: v.sku || null }, log),
     links: links.map((l) => ({
       supplierId: l.supplierId, name: l.supplier.name, paypalEmail: l.supplier.paypalEmail,
       price: usd(l.unitPriceCents), usualQuantity: l.usualQuantity, leadTimeDays: l.leadTimeDays, preferred: l.preferred,
@@ -182,6 +184,7 @@ export default function ProductSuppliers() {
         </fetcher.Form>
       </FormSection>
       {p.cooldown && <RestockCooldownNotice variantId={p.variantId} cooldown={p.cooldown} disabled={!p.managed} />}
+      {p.block && <RestockBlockNotice variantId={p.variantId} block={p.block} disabled={!p.managed} />}
       <s-section heading="Suppliers for this product">
         {p.links.some((l) => !l.approved) && (
           <s-box paddingBlockEnd="base">

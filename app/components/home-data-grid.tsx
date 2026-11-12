@@ -1,3 +1,4 @@
+import { RestockBlockNotice } from "./restock-block-notice";
 import { RestockCooldownNotice } from "./restock-cooldown-notice";
 import { coverLabel, coverExplanation } from "../lib/inventory/cover-label";
 import { GridBadge } from "./data-grid";
@@ -85,6 +86,7 @@ function ProductDetail({
         )}
       </div>
       {data.cooldown && <RestockCooldownNotice variantId={data.variantId} cooldown={data.cooldown} disabled={context.demo || !data.managed} />}
+      {data.block && <RestockBlockNotice variantId={data.variantId} block={data.block} disabled={context.demo || !data.managed} />}
       <p>{data.perDay ?? "Unknown"} expected units/day · {data.dailySalesOverride == null ? "from sales history" : "merchant estimate"}. Days of cover = stock ÷ expected units/day.</p>
       <div className={styles.history}>
         <AgGridReact<InsightRow>

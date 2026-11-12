@@ -1,6 +1,5 @@
 import { useFetcher } from "react-router";
 import type { RestockCooldown } from "../lib/agent/restock-cooldown";
-import { readableTime } from "../lib/format";
 import styles from "./restock-cooldown-notice.module.css";
 
 export function RestockCooldownNotice({
@@ -18,10 +17,9 @@ export function RestockCooldownNotice({
     <aside className={styles.notice} aria-label="Automatic restock cooldown">
       <strong>Automatic restocking paused after a decline</strong>
       <p>
-        Purchase #{cooldown.decisionSeq} was declined. GuardBuy waits 24 hours
-        before proposing another purchase for this product, until{" "}
-        <time dateTime={cooldown.until}>{readableTime(cooldown.until)}</time>. A
-        fresh check will run when the cooldown ends.
+        Purchase #{cooldown.decisionSeq} was declined. GuardBuy keeps automatic
+        restocking paused for this product until you reset the cooldown; there
+        is no time limit.
       </p>
       <p>
         Resetting requests a new stock check now. It may pay automatically if
