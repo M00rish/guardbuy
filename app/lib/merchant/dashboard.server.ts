@@ -1,4 +1,4 @@
-import { restockCooldown } from "../agent/restock-cooldown";
+import { restockBlock, restockCooldown } from "../agent/restock-cooldown";
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
 import { paymentStatus } from "../payments/status";
@@ -55,8 +55,8 @@ export function productStatus(
   const delivery = deliveries(log, now).find((d) => d.variantId === p.variantId && (d.remaining > 0 || d.pending) && (d.payment !== "failed" || d.pending));
   if (delivery) return { label: delivery.pending ? "Receipt needs confirmation" : delivery.payment === "pending" ? `Payment pending · ${delivery.remaining} on order` : `${delivery.remaining} incoming · ${delivery.overdue ? "overdue" : delivery.partialRefund ? "partial refund · review delivery" : "awaiting delivery"}`, tone: delivery.overdue || delivery.partialRefund ? "warning" : "info" };
   if (!p.managed) return { label: "Automatic restocking disabled", tone: "neutral" };
-  const cooldown = restockCooldown(p, log, now);
-  if (cooldown) return { label: "Restock paused · declined purchase", tone: "warning", at: cooldown.until };
+  const cooldown = restockCooldown(p, log);
+  if (cooldown) return { label: "Restock paused · declined purchase", tone: "warning" };
   const last = log
     .filter((e) => e.event.type === "proposal" && !e.event.scenario && (e.event.proposal.variantId ? e.event.proposal.variantId === p.variantId : e.event.proposal.sku === p.sku))
     .at(-1);
@@ -73,7 +73,7 @@ export function productStatus(
     const closed = created?.event.type === "order_created" && log.some((e) => e.event.type === "order_closed" && created.event.type === "order_created" && e.event.orderId === created.event.orderId);
     if (created && !closed) return { label: APPROVAL_LABEL.paypal_pending, tone: "warning", at: last.at };
     if (d?.event.type === "decision" && d.event.decision.verdict === "approval") return { label: `${APPROVAL_LABEL.waiting} · ${total}`, tone: "warning", at: last.at };
-    if (d?.event.type === "decision" && d.event.decision.verdict === "block") return { label: "Blocked by your rules", tone: "critical", at: last.at };
+    if (d?.event.type === "decision" && d.event.decision.verdict === "block") return { label: restockBlock(p, log) ? "Blocked by your rules · expand to lift" : "Blocked by your rules", tone: "critical", at: last.at };
   }
   if(p.cover===Number.POSITIVE_INFINITY)return {label:"No recent sales · cover unknown",tone:"neutral"};
   if(!Number.isFinite(p.cover))return {label:"Stock cover unavailable",tone:"warning"};

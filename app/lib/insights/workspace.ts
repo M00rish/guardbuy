@@ -1,10 +1,11 @@
-import type { RestockCooldown } from "../agent/restock-cooldown";
+import type { RestockBlock, RestockCooldown } from "../agent/restock-cooldown";
 import type { InsightRow, InsightsSnapshot } from "./types";
 import { usd } from "../format";
 
 export type WorkspaceProduct = {
   variantId: string;
   cooldown?: RestockCooldown | null;
+  block?: RestockBlock | null;
   automaticRestocks?: number;
   paidRestocks?: number;
   purchaseCount?: number;

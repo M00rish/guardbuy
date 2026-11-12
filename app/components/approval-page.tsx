@@ -317,7 +317,7 @@ function ApprovalDetails({ card }: { card: Card }) {
         </s-stack>
       ) : (
         <s-stack gap="base">
-          <s-text>{`Approve and pay submits a PayPal Payout from the configured merchant funding account to ${card.payeeEmail ?? "the recorded supplier"} for exactly ${usd(card.totalCents)}. Approve in PayPal opens an Order: the approving merchant pays that supplier from their PayPal account. The demo uses sandbox accounts. Submission is not confirmation of payment. Declining pauses automatic restocking for this product for 24 hours; you can reset its cooldown from Home or product settings.`}</s-text>
+          <s-text>{`Approve and pay submits a PayPal Payout from the configured merchant funding account to ${card.payeeEmail ?? "the recorded supplier"} for exactly ${usd(card.totalCents)}. Approve in PayPal opens an Order: the approving merchant pays that supplier from their PayPal account. The demo uses sandbox accounts. Submission is not confirmation of payment. Declining pauses automatic restocking for this product until you reset its cooldown from Home or product settings.`}</s-text>
           <s-stack direction="inline" gap="base">
             <s-button
               variant="primary"

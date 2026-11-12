@@ -1,4 +1,3 @@
-import { enqueueRestockInTransaction } from "../jobs/restock-queue.server";
 import { appendAuditWhen, auditEntries } from "../audit/log.server";
 import type { RuleCheck } from "../policy/schema";
 import { offersForVariant, supplierNames } from "../suppliers/directory.server";
@@ -107,37 +106,7 @@ const oncePerDecision = <T>(shop: string, seq: number, fn: () => Promise<T>) =>
   withPaymentLock(`approval:${shop}:${seq}`, fn);
 const actions = createApprovalActions({
   read: auditEntries,
-  appendWhen: (shop, event, when) => {
-    if (event.type !== "rejected") return appendAuditWhen(shop, event, when);
-    let jobId: string | undefined;
-    return appendAuditWhen(
-      shop,
-      event,
-      (log) => {
-        if (!when(log)) return false;
-        const decision = log.find((e) => e.seq === event.decisionSeq)?.event;
-        const proposal =
-          decision?.type === "decision"
-            ? log.find((e) => e.seq === decision.proposalSeq)?.event
-            : undefined;
-        jobId =
-          proposal?.type === "proposal" && !proposal.scenario
-            ? proposal.restockJobId?.split(":")[0]
-            : undefined;
-        return true;
-      },
-      undefined,
-      undefined,
-      async (tx) => {
-        if (!jobId) return;
-        const job = await tx.restockJob.findFirst({
-          where: { id: jobId, shop },
-        });
-        if (job)
-          await enqueueRestockInTransaction(tx, shop, job.inventoryItemId);
-      },
-    );
-  },
+  appendWhen: (shop, event, when) => appendAuditWhen(shop, event, when),
   lock: oncePerDecision,
   execute: executePurchase,
   failureReason: (error) =>
@@ -153,7 +122,7 @@ export const rejectPurchase = async (
   const result = await actions.reject(...args);
   return {
     ...result,
-    message: `${result.message} Automatic restocking for this product is paused for 24 hours. Reset its cooldown from Home or product settings to recheck sooner.`,
+    message: `${result.message} Automatic restocking for this product is paused until you reset its cooldown from Home or product settings.`,
   };
 };
 export type { ApprovalResult } from "./approval-actions";
