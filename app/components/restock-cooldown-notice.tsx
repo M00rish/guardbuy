@@ -28,7 +28,7 @@ export function RestockCooldownNotice({
         your current rules allow it; spending limits, existing payments and
         incoming stock are still checked.
       </p>
-      <fetcher.Form method="post" action="/app">
+    <fetcher.Form method="post" action="/app?index">
         <input type="hidden" name="intent" value="reset-restock-cooldown" />
         <input type="hidden" name="variantId" value={variantId} />
         <input type="hidden" name="rejectedSeq" value={cooldown.rejectedSeq} />
