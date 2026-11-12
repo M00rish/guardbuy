@@ -40,10 +40,14 @@ function storeBindings(env: Environment): Record<string, StoreBinding> {
   return raw as Record<string, StoreBinding>;
 }
 
+/** A judge sandbox is an isolated record set on the demo shop: `demo.myshopify.com#judge-<id>`. */
+const bindingShop = (shop: string) => shop.includes("#judge-") ? shop.slice(0, shop.indexOf("#judge-")) : shop;
+
 export function paypalStoreBinding(shop: string, env: Environment = process.env): StoreBinding {
   paypalApiBase(env);
   const entries = storeBindings(env);
-  const binding = Object.hasOwn(entries, shop) ? entries[shop] : undefined;
+  const owner = bindingShop(shop);
+  const binding = Object.hasOwn(entries, owner) ? entries[owner] : undefined;
   if (!binding || !env.PAYPAL_CLIENT_ID || binding.clientId !== env.PAYPAL_CLIENT_ID) {
     return refuse("This store is not bound to the configured PayPal funding account. Review the server mapping.");
   }

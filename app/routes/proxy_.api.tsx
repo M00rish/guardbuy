@@ -1,17 +1,24 @@
-import type { LoaderFunctionArgs } from "react-router";
+import type { ActionFunctionArgs, LoaderFunctionArgs } from "react-router";
+
 import { authenticate } from "../shopify.server";
-import { publicDashboard, requirePublicDemo } from "../lib/demo/dashboard.server";
+import { requirePublicDemo } from "../lib/demo/dashboard.server";
+import { judgeApiGet, judgeApiPost } from "../lib/judge/console-api.server";
+
+// JSON for the storefront judge console at https://<shop>/apps/guardbuy/api. Shopify signs every
+// proxied request. Actions stay inside the caller's own `#judge-<id>` sandbox.
+async function shopFor(request: Request) {
+  const { session } = await authenticate.public.appProxy(request);
+  if (!session) throw new Response("Not found", { status: 404 });
+  requirePublicDemo(session.shop);
+  return session.shop;
+}
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { session, admin } = await authenticate.public.appProxy(request);
-  if (!session || !admin) throw new Response("Not found", { status: 404 });
-  requirePublicDemo(session.shop);
-  try {
-    return Response.json({ ok: true, ...await publicDashboard(admin, session.shop) }, { headers: { "Cache-Control": "no-store" } });
-  } catch {
-    return Response.json({ ok: false, message: "Live demo data is temporarily unavailable. Please retry." }, { status: 503, headers: { "Cache-Control": "no-store" } });
-  }
+  const shop = await shopFor(request);
+  return judgeApiGet(shop, new URL(request.url).searchParams.get("j") ?? "");
 };
 
-// The retired judge action API must never remain usable via old tabs or direct POSTs.
-export const action = () => new Response("Read-only dashboard", { status: 405, headers: { Allow: "GET", "Cache-Control": "no-store" } });
+export const action = async ({ request }: ActionFunctionArgs) => {
+  const shop = await shopFor(request);
+  return judgeApiPost(shop, await request.formData());
+};

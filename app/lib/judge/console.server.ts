@@ -25,6 +25,17 @@ const DAY_MS = 86_400_000;
 const PER_JUDGE_DAILY = 12;
 const ALL_JUDGES_DAILY = 300;
 
+// Three signed rule sets a judge can switch between. The amounts bracket one sandbox restock
+// (about 8 bags, $92): allow pays it, ask waits for the judge, block stops it before PayPal.
+// cashFloor is 0 because every shop shares the one sandbox PayPal balance.
+export const JUDGE_PRESETS = {
+  allow: { label: "Allow", approvalAboveCents: 20_000, weeklySpendCapCents: 100_000, cashFloorCents: 0 },
+  ask: { label: "Ask me", approvalAboveCents: 5_000, weeklySpendCapCents: 100_000, cashFloorCents: 0 },
+  block: { label: "Block", approvalAboveCents: 5_000, weeklySpendCapCents: 3_000, cashFloorCents: 0 },
+} as const;
+export type JudgePreset = keyof typeof JUDGE_PRESETS;
+const isPreset = (v: string): v is JudgePreset => Object.hasOwn(JUDGE_PRESETS, v);
+
 // Sandbox products: fixed ids, and the stock a judge's "sale" starts from.
 const COFFEE = { variantId: "judge-coffee", sku: "COFFEE-HOUSE-1KG", available: 9, perDay: 3.3 };
 const VARIANTS = { "COFFEE-HOUSE-1KG": COFFEE.variantId, "MUG-STONE": "judge-mug", "FILTER-100": "judge-filter" };
@@ -38,14 +49,17 @@ export function judgeShop(shop: string, judgeId: string) {
   return `${shop}#judge-${judgeId}`;
 }
 
-/** Seeds a judge's sandbox on first use: demo suppliers + rules with a $300 approval limit. */
+/** Seeds a judge's sandbox on first use: demo suppliers linked long ago + the "Ask me" rules. */
 async function ensureSandbox(sandbox: string) {
   const log = await auditEntries(sandbox);
   if (currentRuleSet(log)) return;
   await seedDemoCatalog(sandbox, VARIANTS, process.env.SUPPLIER_EMAIL ?? "", []);
+  // The demo merchant linked these suppliers months ago. Without this, the "new supplier" rule would
+  // demand a person on every fresh sandbox, so the "Allow" scene could never pay on its own.
+  await db.supplier.updateMany({ where: { shop: sandbox }, data: { createdAt: new Date(Date.now() - 60 * DAY_MS) } });
   // Small purchases so judges don't drain the shared sandbox balance: 5 days of cover (~8 bags,
-  // about $90) instead of 14, and a $50 approval limit so the "needs your approval" step still shows.
-  const rules = RuleSetSchema.parse({ ...defaultRuleSet(sandbox), targetDaysOfCover: 5, approvalAboveCents: 5_000 });
+  // about $92) instead of 14, and the "Ask me" limit so the approval step shows first.
+  const rules = RuleSetSchema.parse({ ...defaultRuleSet(sandbox), targetDaysOfCover: 5, ...JUDGE_PRESETS.ask });
   await signRuleSet(sandbox, rules, "judge-demo");
 }
 
@@ -64,7 +78,14 @@ export async function judgeState(shop: string, judgeId: string) {
   const score = await scoreboard(sandbox, log);
   const a = score.attacks;
   const answered = a.tried - a.failed;
+  const activeRules = currentRuleSet(log);
   return {
+    rules: activeRules
+      ? { approvalAbove: usd(activeRules.approvalAboveCents), weeklyCap: usd(activeRules.weeklySpendCapCents) }
+      : null,
+    presets: Object.entries(JUDGE_PRESETS).map(([id, p]) => ({
+      id, label: p.label, approvalAbove: usd(p.approvalAboveCents), weeklyCap: usd(p.weeklySpendCapCents),
+    })),
     scoreboard: {
       tried: a.tried,
       aiFooled: a.blocked + a.flagged + a.slipped,
@@ -101,6 +122,24 @@ export async function judgeState(shop: string, judgeId: string) {
 }
 
 // ---------- Actions ----------
+
+/** Signs one of the three demo rule sets in this judge's sandbox. */
+export async function judgeRules(shop: string, judgeId: string, preset: string) {
+  if (!isPreset(preset)) throw new JudgeRefused("Unknown rule preset");
+  const sandbox = judgeShop(shop, judgeId);
+  await ensureSandbox(sandbox);
+  const p = JUDGE_PRESETS[preset];
+  const base = currentRuleSet(await auditEntries(sandbox)) ?? defaultRuleSet(sandbox);
+  const rules = RuleSetSchema.parse({ ...base, ...p });
+  await signRuleSet(sandbox, rules, "judge-demo");
+  return `${p.label}: purchases above ${usd(p.approvalAboveCents)} need your approval; weekly cap ${usd(p.weeklySpendCapCents)}.`;
+}
+
+/** One click: sign the scene's rules, then run the real restock loop on a simulated sale. */
+export async function judgeScene(shop: string, judgeId: string, preset: string) {
+  const signed = await judgeRules(shop, judgeId, preset);
+  return `${signed} ${await judgeRestock(shop, judgeId)}`;
+}
 
 /** A sale drops coffee stock; the real restock loop runs (in the background: Gemini can take a while). */
 export async function judgeRestock(shop: string, judgeId: string) {
