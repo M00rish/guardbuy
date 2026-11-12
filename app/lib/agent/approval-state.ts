@@ -45,3 +45,8 @@ export function approvalStates(log: AuditEntry[], now = new Date()) {
 export function waitingForApproval(log: AuditEntry[], decisionSeq: number) {
   return approvalStates(log).some((s) => s.decisionSeq === decisionSeq && s.status === "waiting");
 }
+
+/** Only a human decision (including an unfinished PayPal approval) belongs in the approval banner. */
+export function approvalCount(log: AuditEntry[], now = new Date()) {
+  return approvalStates(log, now).filter((s) => s.status === "waiting" || s.status === "paypal_pending").length;
+}

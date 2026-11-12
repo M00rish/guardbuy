@@ -341,9 +341,10 @@ export default function InsightsStudio({
     },
     [resetLinked],
   );
+  // Live snapshots update the data without discarding the merchant's chart filter.
   useEffect(() => {
     setOverviewSelection(undefined);
-  }, [snapshot.checkedAt, demo]);
+  }, [demo]);
   const resetFilters = () => {
     if (guardQuery && apiRef.current) {
       apiRef.current.applyColumnState({

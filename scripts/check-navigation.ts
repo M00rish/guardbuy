@@ -37,7 +37,7 @@ const pass = (name: string) => {
 };
 await build({
   stdin: {
-    contents: `export {approvePurchase as realApprove} from './app/lib/agent/approvals.server.ts';export {loader as products,action as productsAction} from './app/routes/app.products._index';export {loader as rules,action as rulesAction} from './app/routes/app.rules';export {loader as activity,action as activityAction} from './app/routes/app.activity';export {loader as oldSuppliers,action as oldSupplierAction} from './app/routes/app.suppliers._index';export {loader as oldApprovals,action as oldApprovalAction} from './app/routes/app.approvals';export {loader as oldProtection,action as oldProtectionAction} from './app/routes/app.protection';export {action as productAction} from './app/routes/app.products.$variantId';export {action as supplierAction} from './app/routes/app.suppliers.$supplierId';`,
+    contents: `export {loader as liveState} from './app/routes/app.live-state';export {approvePurchase as realApprove} from './app/lib/agent/approvals.server.ts';export {loader as products,action as productsAction} from './app/routes/app.products._index';export {loader as rules,action as rulesAction} from './app/routes/app.rules';export {loader as activity,action as activityAction} from './app/routes/app.activity';export {loader as oldSuppliers,action as oldSupplierAction} from './app/routes/app.suppliers._index';export {loader as oldApprovals,action as oldApprovalAction} from './app/routes/app.approvals';export {loader as oldProtection,action as oldProtectionAction} from './app/routes/app.protection';export {action as productAction} from './app/routes/app.products.$variantId';export {action as supplierAction} from './app/routes/app.suppliers.$supplierId';`,
     resolveDir: root,
     loader: "ts",
   },
@@ -120,6 +120,7 @@ const counters = globalThis as typeof globalThis & {
 try {
   for (const route of [
     "products",
+    "liveState",
     "rules",
     "activity",
     "oldSuppliers",
@@ -160,6 +161,10 @@ try {
     );
   }
   pass("Canonical and historical loaders/actions still enforce authentication");
+  const live = await routes.liveState(args("/app/live-state"));
+  assert.equal(live.headers.get("Cache-Control"), "private, no-store");
+  assert.equal(typeof (await live.json()).revision, "string");
+  pass("Authenticated live resource returns uncached JSON without provider calls");
   for (const [route, path] of [
     ["oldSuppliers", "/app/products?tab=suppliers"],
     ["oldApprovals", "/app/rules?tab=approvals"],

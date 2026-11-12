@@ -184,7 +184,7 @@ export function DeliveriesPage({ data }: { data: Data }) {
     `/app/deliveries?${new URLSearchParams({ ...(view === "all" ? {} : { view }), page: String(number) })}`;
 
   return (
-    <s-page heading="Deliveries" inlineSize="large">
+    <s-page heading="Deliveries" inlineSize="large" data-live-editing={selected !== null || manageSelected !== null}>
       <s-button
         slot="primary-action"
         variant="primary"
@@ -427,6 +427,7 @@ export function DeliveriesPage({ data }: { data: Data }) {
       <s-modal
         ref={managementModal}
         id="manage-delivery"
+        onAfterHide={() => setManageSelected(null)}
         heading="Manage outstanding delivery"
       >
         {managed && (
@@ -524,6 +525,7 @@ export function DeliveriesPage({ data }: { data: Data }) {
       <s-modal
         ref={modal}
         id="receive-delivery"
+        onAfterHide={() => setSelected(null)}
         heading={
           card?.pending ? "Confirm delivery receipt" : "Receive delivery"
         }

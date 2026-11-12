@@ -1,3 +1,4 @@
+import { useLiveUpdates } from "../components/live-updates";
 import { LoadingProgress } from "../components/loading-state";
 import { useEffect } from "react";
 import type { HeadersFunction, LoaderFunctionArgs } from "react-router";
@@ -23,14 +24,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 /** Shows Shopify's loading bar at the top of the admin while a page or action is loading. */
-function LoadingBar() {
+function LoadingBar({ background }: { background: boolean }) {
   const navigation = useNavigation();
   const shopify = useAppBridge();
   const fetchers = useFetchers();
   const revalidator = useRevalidator();
   const loading =
     navigation.state !== "idle" ||
-    revalidator.state !== "idle" ||
+    (!background && revalidator.state !== "idle") ||
     fetchers.some((f) => f.state !== "idle");
   useEffect(() => {
     shopify.loading(loading);
@@ -40,6 +41,7 @@ function LoadingBar() {
 
 export default function App() {
   const { apiKey } = useLoaderData<typeof loader>();
+  const background = useLiveUpdates();
 
   return (
     <AppProvider apiKey={apiKey}>
@@ -51,7 +53,7 @@ export default function App() {
         <s-link href="/app/activity">Activity</s-link>
         <s-link href="/app/alerts">Alerts</s-link>
       </s-app-nav>
-      <LoadingBar />
+      <LoadingBar background={background} />
       <Outlet />
     </AppProvider>
   );
