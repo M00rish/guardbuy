@@ -18,7 +18,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { auditEntries, verifyChain } from "../lib/audit/log.server";
 import { toFeed } from "../lib/audit/feed.server";
 import { usd } from "../lib/format";
-import { approvalQueue } from "../lib/agent/approvals.server";
+import { approvalCount } from "../lib/agent/approval-state";
 import { agentOn, currentRuleSet, setAgentState, spending } from "../lib/agent/restock.server";
 import { scoreboard } from "../lib/agent/scoreboard.server";
 import { cachedBalanceCents, feedNames, productOverview, productStatus } from "../lib/merchant/dashboard.server";
@@ -34,8 +34,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const shop = session.shop;
   const log = await auditEntries(shop);
   const rules = currentRuleSet(log);
-  const [setup, queue, chain, score, balanceCents, products, names, suppliers] = await Promise.all([
-    setupStatus(shop), approvalQueue(shop), verifyChain(shop), scoreboard(shop, log), cachedBalanceCents(),
+  const [setup, chain, score, balanceCents, products, names, suppliers] = await Promise.all([
+    setupStatus(shop), verifyChain(shop), scoreboard(shop, log), cachedBalanceCents(),
     // Shopify's API can be briefly unreachable: show the rest of Home and a retry for the product list.
     productOverview(admin, shop).catch((e) => { console.warn(`[home] products unavailable: ${(e as Error).message}`); return null; }),
     feedNames(shop),
@@ -82,7 +82,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     spentCents: totals.spentLast7dCents,
     budget: budgetSummary(totals.spentLast7dCents, totals.pendingCents, rules?.weeklySpendCapCents ?? 0),
     balanceCents,
-    waiting: queue.length,
+    waiting: approvalCount(log, checkedAt),
     blocked: { count: score.real.blocked, cents: score.real.blockedCents },
     attacksBlocked: score.attacks.blocked + score.attacks.flagged,
     chain,

@@ -51,6 +51,7 @@ jobs:
       - run: npx tsx scripts/check-insights.ts
       - run: npx tsx scripts/check-insights-queries.ts
       - run: npx tsx scripts/check-insights-overview.ts
+      - run: npx tsx scripts/check-live-updates.ts
       - run: npx tsx scripts/check-insights-common.ts
       - run: npx tsx scripts/check-insights-routes.ts
       - run: npx tsx scripts/check-insights-planner.ts
@@ -117,6 +118,7 @@ jobs:
           DATABASE_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism141_test
           DIRECT_URL: postgresql://postgres:offline-only@127.0.0.1:5432/guardbuy_ism141_test
         run: |
+          npx tsx scripts/check-live-updates-db.ts
           npx tsx scripts/check-expected-sales-db.ts
           npx tsx scripts/check-restock-cooldown-db.ts
           npx tsx scripts/check-restock-enable-db.ts

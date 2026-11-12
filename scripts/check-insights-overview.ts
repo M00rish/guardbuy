@@ -1,5 +1,6 @@
 // Current-state chart projection; no provider, Shopify, database or payment calls.
 import assert from "node:assert/strict";
+import { approvalCount } from "../app/lib/agent/approval-state";
 import { currentAttention } from "../app/lib/insights/attention";
 import { overviewModel } from "../app/lib/insights/overview";
 import { demoSnapshot } from "../app/lib/insights/demo";
@@ -82,6 +83,7 @@ const expired = decision("expired", "approval", "2026-11-01T12:00:00Z");
 assert.equal(currentAttention(log, now).has(expired), false);
 const waiting = decision("waiting", "approval");
 assert.equal(currentAttention(log, now).get(waiting), "approval");
+assert.equal(approvalCount(log, now), 1, "only the live human approval needs a review banner");
 add({
   type: "rejected",
   decisionSeq: waiting,
@@ -108,6 +110,7 @@ const payout = add({
   status: "PENDING",
 });
 assert.equal(currentAttention(log, now).get(pending), "pending");
+assert.equal(approvalCount(log, now), 0, "within-policy pending payment is not a request for approval");
 add({
   type: "payout_status",
   payoutSeq: payout,
@@ -119,6 +122,7 @@ assert.equal(
   false,
   "confirmed settlement leaves the outstanding matrix",
 );
+assert.equal(approvalCount(log, now), 0, "settled payments never need approval");
 const failed = decision("failed", "approval");
 add({
   type: "approved",
